@@ -1,0 +1,17 @@
+.record-history{border:1px solid var(--border);border-radius:12px;background:var(--surface,#fff);padding:14px 16px;margin:18px 0;color:var(--text)}
+.record-history summary{font-weight:650;cursor:pointer;list-style-position:inside;line-height:1.5}
+.record-history [data-history-content]{font-size:13px;line-height:1.6;padding-top:10px;overflow-wrap:anywhere}
+.record-history [data-history-content]>p{margin:0 0 10px;color:var(--muted)}
+.record-history-list{list-style:none;margin:0;padding:0;display:grid;gap:14px}
+.record-history-list li{border-bottom:1px solid var(--border);padding-bottom:12px;display:grid;gap:3px}
+.record-history-list li:last-child{border-bottom:0}.record-history-list small,.record-history-list span{color:var(--muted)}
+.record-history [data-history-refresh]{margin-top:12px}
+.edit-conflict{border:1px solid #c39443;border-radius:12px;padding:18px 20px;margin:0 0 24px;background:#fff8e9;color:#4b3920}
+.modal>.edit-conflict{margin:0 0 22px}.edit-conflict h3{margin:0 0 8px;font-size:17px}.edit-conflict p{margin:7px 0;font-size:13px;line-height:1.6}
+.edit-conflict-actions{display:flex;align-items:center;flex-wrap:wrap;gap:10px;margin-top:13px}.edit-conflict .button{padding:10px 13px;min-height:42px;font-size:13px}
+.edit-conflict-confirm{border-top:1px solid #dfcba7;margin-top:16px;padding-top:12px}.edit-conflict-detail{margin-top:16px}
+.edit-conflict-record h4{margin:16px 0 4px;font-size:14px;overflow-wrap:anywhere}.edit-conflict-overlap{font-weight:650}.edit-conflict-table{overflow-x:auto;max-width:100%}
+.edit-conflict-table table{width:100%;table-layout:fixed;font-size:12px;background:#fff;border-collapse:collapse}.edit-conflict-table th,.edit-conflict-table td{padding:9px;border:1px solid #e5dac6;vertical-align:top;white-space:pre-wrap;overflow-wrap:anywhere}
+.edit-conflict-table th{width:22%}.edit-conflict-table .is-overlap{background:#fff0d5}
+.edit-conflict-status{font-size:13px;line-height:1.6;margin-top:12px;overflow-wrap:anywhere}
+@media(max-width:700px){.edit-conflict{padding:15px}.edit-conflict-actions .button{flex:1 1 190px}.edit-conflict-table table{min-width:560px}}

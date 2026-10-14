@@ -478,3 +478,182 @@ test('private receipt transport rechecks membership, uses immutable organization
     globalThis.fetch = originalFetch;
   }
 });
+
+test('record history binds its member identity and a read-only comparison never re-enables stale writes', async () => {
+  const originalFetch = globalThis.fetch;
+  const member = { id: 'b1000000-0000-4000-8000-000000000006', aud: 'authenticated', email: 'third@example.test' };
+  const other = { id: 'b1000000-0000-4000-8000-000000000007', aud: 'authenticated', email: 'other@example.test' };
+  const org = 'a2000000-0000-4000-8000-000000000001';
+  const access = { organization_id: org, organization_name: 'Orquívia', role: 'editor', require_mfa: true };
+  const json = (body, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
+  const rows = [{ id: 11, actorId: member.id, actorEmail: member.email, event: 'save', action: 'updated',
+    entityType: 'expense', entityId: 'receipt-1', workspaceVersion: 2, changedFields: ['reviewNeeded'], createdAt: '2026-10-14T10:00:00Z' }];
+  let signedIn = member, saves = 0, historyRequests = 0, denied = null, delayedHistory = null, releaseHistory;
+  const currentState = empty();
+  globalThis.fetch = async (input, init = {}) => {
+    const url = String(input);
+    if (url.includes('/auth/v1/token')) {
+      signedIn = JSON.parse(init.body).email === other.email ? other : member;
+      return json({ access_token: token('authenticated', { sub: signedIn.id, aal: 'aal2' }), refresh_token: 'test-refresh', token_type: 'bearer', expires_in: 3600, user: signedIn });
+    }
+    if (url.includes('/auth/v1/user')) return json(signedIn);
+    if (url.includes('/rest/v1/rpc/refresh_orquivia_access')) {
+      return denied ? json({ code: '42501', message: denied }, 403) : json(access);
+    }
+    if (url.includes('/rest/v1/rpc/load_orquivia_workspace')) return json({ ...access, state: currentState, version: saves ? 2 : 1 });
+    if (url.includes('/rest/v1/rpc/save_orquivia_team_state')) {
+      saves++;
+      return json({ code: '40001', message: 'VERSION_CONFLICT' }, 409);
+    }
+    if (url.includes('/rest/v1/rpc/load_orquivia_record_history')) {
+      historyRequests++;
+      assert.deepEqual(JSON.parse(init.body), { p_organization_id: org, p_entity_type: 'expense', p_entity_id: 'receipt-1', p_limit: 100, p_expected_user_id: member.id });
+      if (delayedHistory) { delayedHistory(); await new Promise((resolve) => { releaseHistory = resolve; }); }
+      return json(rows);
+    }
+    throw new Error(`Unexpected record history request ${url}`);
+  };
+  let backend;
+  try {
+    backend = createBackend({ url: 'https://example.supabase.co', anonKey: 'sb_publishable_test' });
+    await backend.signIn(member.email, 'fictional-password');
+    await backend.loadState();
+    await assert.rejects(backend.recordHistory('avatar', 'receipt-1'), { code: 'INVALID_HISTORY_RECORD' });
+    await assert.rejects(backend.recordHistory('company', 'someone-else'), { code: 'INVALID_HISTORY_RECORD' });
+    await assert.rejects(backend.recordHistory('expense', 'receipt\u0000'), { code: 'INVALID_HISTORY_RECORD' });
+    assert.equal(historyRequests, 0, 'Invalid identifiers must not reach transport');
+    assert.deepEqual(await backend.recordHistory('expense', 'receipt-1', 999), rows);
+    await assert.rejects(backend.saveState(empty()), { code: 'VERSION_CONFLICT' });
+    const comparison = await backend.peekState();
+    assert.equal(comparison.version, 2);
+    assert.deepEqual(comparison.state, empty());
+    await assert.rejects(backend.saveState(empty()), { code: 'STATE_NOT_LOADED' });
+    assert.equal(saves, 1, 'Comparison must not advance the local CAS version');
+    assert.deepEqual(await backend.recordHistory('expense', 'receipt-1', 999), rows, 'History still works while conflict saving is blocked');
+    denied = 'MFA_REQUIRED';
+    await assert.rejects(backend.recordHistory('expense', 'receipt-1'), { code: 'MFA_REQUIRED' });
+    assert.equal(historyRequests, 2, 'MFA loss must block history before its transport');
+    denied = null;
+    await backend.loadState();
+    const started = new Promise((resolve) => { delayedHistory = resolve; });
+    const pending = backend.recordHistory('expense', 'receipt-1', 999);
+    await started;
+    await backend.signIn(other.email, 'fictional-password');
+    releaseHistory();
+    await assert.rejects(pending, { code: 'AUTH_CHANGED' }, 'A previous member history response must not reach a changed session');
+  } finally { backend?.dispose(); globalThis.fetch = originalFetch; }
+});
+
+test('late errors from a prior login cannot clear the new login workspace or invalidate its CAS version', async () => {
+  const originalFetch = globalThis.fetch;
+  const first = { id: 'b1000000-0000-4000-8000-000000000008', aud: 'authenticated', email: 'first@example.test' };
+  const second = { id: 'b1000000-0000-4000-8000-000000000009', aud: 'authenticated', email: 'second@example.test' };
+  const access = { organization_id: 'a2000000-0000-4000-8000-000000000001', organization_name: 'Orquívia', role: 'editor', require_mfa: true };
+  const json = (body, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
+  let backend;
+  try {
+    for (const sameAccount of [false, true]) for (const method of ['history', 'refresh', 'save', 'issue']) {
+      let signedIn = first, waitingFor = method, started, release, cloudVersion = 1;
+      const pendingStart = new Promise((resolve) => { started = resolve; });
+      const events = [];
+      globalThis.fetch = async (input, init = {}) => {
+        const url = String(input);
+        if (url.includes('/auth/v1/token')) {
+          signedIn = JSON.parse(init.body).email === second.email ? second : first;
+          return json({ access_token: token('authenticated', { sub: signedIn.id, aal: 'aal2' }), refresh_token: 'test-refresh', token_type: 'bearer', expires_in: 3600, user: signedIn });
+        }
+        if (url.includes('/auth/v1/user')) return json(signedIn);
+        if (url.includes('/rest/v1/rpc/load_orquivia_workspace')) return json({ ...access, state: empty(), version: cloudVersion });
+        const rpc = url.split('/').at(-1);
+        const selected = method === 'history' ? 'load_orquivia_record_history' : method === 'refresh' ? 'refresh_orquivia_access' : method === 'save' ? 'save_orquivia_team_state' : 'issue_orquivia_document';
+        if (rpc === selected && waitingFor) {
+          waitingFor = null;
+          started();
+          await new Promise((resolve) => { release = resolve; });
+          return json({ code: method === 'save' || method === 'issue' ? '40001' : '42501', message: method === 'save' || method === 'issue' ? 'VERSION_CONFLICT' : 'MFA_REQUIRED' }, 409);
+        }
+        if (rpc === 'refresh_orquivia_access') return json(access);
+        if (rpc === 'save_orquivia_team_state') {
+          const request = JSON.parse(init.body);
+          assert.equal(request.p_expected_version, cloudVersion, 'The current login CAS version must survive old errors');
+          cloudVersion++;
+          return json({ version: cloudVersion });
+        }
+        throw new Error(`Unexpected late error request ${url}`);
+      };
+      backend = createBackend({ url: 'https://example.supabase.co', anonKey: 'sb_publishable_test' });
+      backend.onAuthStateChange((event) => events.push(event));
+      await backend.signIn(first.email, 'fictional-password');
+      await backend.loadState();
+      const pending = method === 'history' ? backend.recordHistory('expense', 'receipt-1') : method === 'refresh' ? backend.refreshAccess() : method === 'save' ? backend.saveState(empty()) : backend.issueDocument('document-1');
+      const rejected = assert.rejects(pending, { code: 'AUTH_CHANGED' });
+      await pendingStart;
+      await backend.signIn(sameAccount ? first.email : second.email, 'new-fictional-login');
+      // Nonqueued history/refresh allow a fresh load before the old request
+      // finishes; queued save/issue require the old operation to end first.
+      if (method === 'history' || method === 'refresh') await backend.loadState();
+      release();
+      await rejected;
+      if (method === 'save' || method === 'issue') await backend.loadState();
+      assert.equal(backend.workspaceInfo().organizationId, access.organization_id);
+      assert.equal((await backend.saveState(empty())).version, 2);
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      assert.ok(!events.includes('MFA_REQUIRED') && !events.includes('ACCESS_REVOKED'), 'Prior login errors must not lock the current login');
+      backend.dispose(); backend = null;
+    }
+  } finally { backend?.dispose(); globalThis.fetch = originalFetch; }
+});
+
+test('cold restored sessions can load directly and a late account verification cannot reset a newer login', async () => {
+  const originalFetch = globalThis.fetch;
+  const originalStorage = globalThis.sessionStorage;
+  const first = { id: 'b1000000-0000-4000-8000-000000000010', aud: 'authenticated', email: 'restored@example.test' };
+  const second = { id: 'b1000000-0000-4000-8000-000000000011', aud: 'authenticated', email: 'new@example.test' };
+  const access = { organization_id: 'a2000000-0000-4000-8000-000000000001', organization_name: 'Orquívia', role: 'editor', require_mfa: true };
+  const json = (body) => new Response(JSON.stringify(body), { headers: { 'Content-Type': 'application/json' } });
+  const session = (user) => ({ access_token: token('authenticated', { sub: user.id, aal: 'aal2' }), refresh_token: 'test-refresh', token_type: 'bearer', expires_at: Math.floor(Date.now() / 1000) + 3600, expires_in: 3600, user });
+  let backend;
+  try {
+    for (const sameAccount of [false, true]) {
+      const storage = new Map([['sb-example-auth-token', JSON.stringify(session(first))]]);
+      globalThis.sessionStorage = { getItem: (key) => storage.get(key) ?? null, setItem: (key, value) => storage.set(key, value), removeItem: (key) => storage.delete(key) };
+      let signedIn = first, delayUser = false, started, release;
+      const pendingStart = new Promise((resolve) => { started = resolve; });
+      globalThis.fetch = async (input, init = {}) => {
+        const url = String(input);
+        if (url.includes('/auth/v1/token')) {
+          signedIn = JSON.parse(init.body).email === second.email ? second : first;
+          return json(session(signedIn));
+        }
+        if (url.includes('/auth/v1/user')) {
+          const requestedUser = signedIn;
+          if (delayUser) { delayUser = false; started(); await new Promise((resolve) => { release = resolve; }); }
+          return json(requestedUser);
+        }
+        if (url.includes('/rest/v1/rpc/load_orquivia_workspace')) return json({ ...access, state: empty(), version: 7 });
+        if (url.includes('/rest/v1/rpc/refresh_orquivia_access')) return json(access);
+        if (url.includes('/rest/v1/rpc/save_orquivia_team_state')) {
+          assert.equal(JSON.parse(init.body).p_expected_version, 7);
+          return json({ version: 8 });
+        }
+        throw new Error(`Unexpected restored session request ${url}`);
+      };
+      backend = createBackend({ url: 'https://example.supabase.co', anonKey: 'sb_publishable_test' });
+      assert.deepEqual(await backend.loadState(), empty(), 'The first restored owner must not invalidate a legitimate cold load');
+      delayUser = true;
+      const pending = backend.currentUser();
+      const rejected = assert.rejects(pending, { code: 'AUTH_CHANGED' });
+      await pendingStart;
+      await backend.signIn(sameAccount ? first.email : second.email, 'new-fictional-login');
+      release();
+      await rejected;
+      assert.equal((await backend.currentUser()).id, sameAccount ? first.id : second.id, 'Old getUser responses must not restore the prior owner');
+      await backend.loadState();
+      assert.equal((await backend.saveState(empty())).version, 8);
+      backend.dispose(); backend = null;
+    }
+  } finally {
+    backend?.dispose(); globalThis.fetch = originalFetch;
+    if (originalStorage === undefined) delete globalThis.sessionStorage; else globalThis.sessionStorage = originalStorage;
+  }
+});

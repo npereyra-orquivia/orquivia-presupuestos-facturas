@@ -14,6 +14,7 @@ export const RECEIPT_FILE_TYPES = Object.freeze({
   rtf: 'application/rtf',
 });
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+const HISTORY_ENTITY_TYPES = new Set(['document', 'expense', 'client', 'payment', 'company']);
 
 /** Files are private originals; active web formats and extension disguises are rejected. */
 export async function validateReceiptFile(file) {
@@ -176,10 +177,14 @@ export function createBackend({ url, anonKey }) {
   let version = null;
   let queue = Promise.resolve();
   let disposed = false;
+  let authGeneration = 0;
   const listeners = new Set();
 
   function resetForUser(user) {
     if (ownerId !== (user?.id || null)) {
+      // The first restored owner establishes the initial context. Every later
+      // identity change (and explicit login/logout) invalidates earlier work.
+      if (ownerId !== null || authGeneration !== 0) ++authGeneration;
       ownerId = user?.id || null;
       version = null;
       workspace = null;
@@ -195,11 +200,20 @@ export function createBackend({ url, anonKey }) {
   });
 
   async function currentUser() {
+    const generation = authGeneration;
     const { data: sessionData, error: sessionError } = await client.auth.getSession();
+    if (authGeneration !== generation) throw backendError('La sesión cambió durante la comprobación de la cuenta.', 'AUTH_CHANGED');
     if (sessionError) throw backendError('No se pudo recuperar la sesión.', 'AUTH_ERROR', sessionError);
     if (!sessionData.session) { resetForUser(null); return null; }
+    if (ownerId === null) {
+      resetForUser(sessionData.session.user);
+    }
     const { data, error } = await client.auth.getUser();
+    if (authGeneration !== generation || ownerId !== sessionData.session.user?.id) {
+      throw backendError('La sesión cambió durante la comprobación de la cuenta.', 'AUTH_CHANGED');
+    }
     if (error) throw backendError('No se pudo verificar la sesión. Vuelve a iniciar sesión.', 'AUTH_ERROR', error);
+    if (data.user?.id !== sessionData.session.user?.id) throw backendError('La identidad de la sesión cambió.', 'AUTH_CHANGED');
     resetForUser(data.user);
     return data.user;
   }
@@ -213,8 +227,16 @@ export function createBackend({ url, anonKey }) {
     }, 0);
   }
 
-  async function checkWorkspaceAccess(user) {
+  function assertSession(user, generation, organizationId) {
+    if (disposed || authGeneration !== generation || ownerId !== user.id
+      || (organizationId !== undefined && workspace?.organizationId !== organizationId)) {
+      throw backendError('La sesión cambió durante la operación. Vuelve a abrir la empresa.', 'AUTH_CHANGED');
+    }
+  }
+
+  async function checkWorkspaceAccess(user, generation = authGeneration) {
     const { data, error } = await client.rpc('refresh_orquivia_access', {});
+    assertSession(user, generation);
     if (error) {
       const failure = rpcError(error, 'No se pudo comprobar el acceso de tu cuenta.');
       if (failure.code === 'MEMBERSHIP_REQUIRED') {
@@ -222,7 +244,6 @@ export function createBackend({ url, anonKey }) {
       }
       throw failure;
     }
-    if (ownerId !== user.id) throw backendError('La sesión cambió durante la comprobación de acceso.', 'AUTH_CHANGED');
     if (!data?.organization_id || (workspace && data.organization_id !== workspace.organizationId)) {
       denyWorkspaceAccess('ACCESS_REVOKED');
       throw backendError('Tu cuenta ya no tiene acceso a esta empresa.', 'ACCESS_REVOKED');
@@ -231,10 +252,12 @@ export function createBackend({ url, anonKey }) {
     return { organizationId: data.organization_id, name: data.organization_name, role: data.role, requireMfa: data.require_mfa };
   }
 
-  async function requireUser() {
+  async function requireUser(generation = authGeneration) {
     const user = await currentUser();
+    if (authGeneration !== generation) throw backendError('La sesión cambió durante la operación.', 'AUTH_CHANGED');
     if (!user) throw backendError('Inicia sesión para guardar los datos en Supabase.', 'AUTH_REQUIRED');
-    if (workspace) await checkWorkspaceAccess(user);
+    if (workspace) await checkWorkspaceAccess(user, generation);
+    assertSession(user, generation);
     return user;
   }
 
@@ -243,16 +266,18 @@ export function createBackend({ url, anonKey }) {
       version = null;
       return backendError('Otra sesión ha actualizado los datos. Exporta tus cambios y recarga antes de continuar.', 'VERSION_CONFLICT', error);
     }
-    const known = ['MEMBERSHIP_REQUIRED', 'MFA_REQUIRED', 'ADMIN_REQUIRED', 'ISSUE_REQUIRED', 'ISSUED_DOCUMENT_IMMUTABLE', 'ISSUED_DOCUMENT_DELETE_DENIED', 'INVALID_RECEIPT_REFERENCE', 'INVALID_STATE'];
+    const known = ['MEMBERSHIP_REQUIRED', 'MFA_REQUIRED', 'AUTH_CHANGED', 'ADMIN_REQUIRED', 'ISSUE_REQUIRED', 'ISSUED_DOCUMENT_IMMUTABLE', 'ISSUED_DOCUMENT_DELETE_DENIED', 'INVALID_RECEIPT_REFERENCE', 'INVALID_HISTORY_RECORD', 'INVALID_STATE'];
     const code = known.find((name) => error?.message?.includes(name));
     if (code === 'MFA_REQUIRED' || code === 'MEMBERSHIP_REQUIRED') denyWorkspaceAccess(code);
     const messages = {
       MEMBERSHIP_REQUIRED: 'Esta cuenta no está autorizada en la empresa.', MFA_REQUIRED: 'Completa la verificación en dos pasos.',
+      AUTH_CHANGED: 'La sesión cambió. Vuelve a abrir la empresa antes de continuar.',
       ADMIN_REQUIRED: 'Solo la administradora puede modificar los datos de empresa.',
       ISSUE_REQUIRED: 'Emite el borrador para que el servidor asigne su número.',
       ISSUED_DOCUMENT_IMMUTABLE: 'Los datos fiscales de un documento emitido no se pueden modificar.',
       ISSUED_DOCUMENT_DELETE_DENIED: 'Conserva el documento emitido para mantener su historial.',
       INVALID_RECEIPT_REFERENCE: 'Un justificante no está guardado en la empresa o no coincide con el archivo subido.',
+      INVALID_HISTORY_RECORD: 'El registro del historial no es válido.',
       INVALID_STATE: 'Los datos no superan la validación de la base de datos.',
     };
     return backendError(messages[code] || fallback, code || 'SAVE_ERROR', error);
@@ -268,12 +293,16 @@ export function createBackend({ url, anonKey }) {
   return {
     personal: createPersonalBackend({ client, requireUser, getWorkspace: () => workspace, url }),
     async signIn(email, password) {
+      ++authGeneration;
+      version = null;
+      workspace = null;
       const { data, error } = await client.auth.signInWithPassword({ email: email.trim(), password });
       if (error) throw backendError('No se pudo iniciar sesión. Revisa el correo y la contraseña.', 'AUTH_ERROR', error);
       resetForUser(data.user);
       return data.user;
     },
     async signOut() {
+      ++authGeneration;
       await queue;
       const { error } = await client.auth.signOut({ scope: 'local' });
       if (error) throw backendError('No se pudo cerrar la sesión.', 'AUTH_ERROR', error);
@@ -308,9 +337,11 @@ export function createBackend({ url, anonKey }) {
     },
     currentUser,
     async refreshAccess() {
+      const generation = authGeneration;
       const user = await currentUser();
+      if (authGeneration !== generation) throw backendError('La sesión cambió durante la operación.', 'AUTH_CHANGED');
       if (!user) throw backendError('Inicia sesión para comprobar el acceso.', 'AUTH_REQUIRED');
-      return checkWorkspaceAccess(user);
+      return checkWorkspaceAccess(user, generation);
     },
     workspaceInfo() { return workspace ? { ...workspace } : null; },
     mfa: {
@@ -340,11 +371,12 @@ export function createBackend({ url, anonKey }) {
       return () => listeners.delete(callback);
     },
     loadState() {
+      const generation = authGeneration;
       return enqueue(async () => {
-        const user = await requireUser();
+        const user = await requireUser(generation);
         const { data, error } = await client.rpc('load_orquivia_workspace', {});
+        assertSession(user, generation);
         if (error) throw rpcError(error, 'No se pudieron cargar los datos de la empresa.');
-        if (ownerId !== user.id) throw backendError('La sesión cambió durante la carga.', 'AUTH_CHANGED');
         if (!data?.organization_id) throw backendError('Esta cuenta no tiene una empresa asignada.', 'MEMBERSHIP_REQUIRED');
         const loaded = validateCloudState(data.state);
         version = Number(data.version);
@@ -352,46 +384,90 @@ export function createBackend({ url, anonKey }) {
         return loaded;
       });
     },
+    peekState() {
+      const generation = authGeneration;
+      // Conflict comparison must not advance the CAS version or enable saving
+      // the stale workspace again. Only an explicit loadState resets that gate.
+      return enqueue(async () => {
+        const user = await requireUser(generation);
+        if (!workspace) throw backendError('Carga primero la empresa.', 'STATE_NOT_LOADED');
+        const organizationId = workspace.organizationId;
+        const { data, error } = await client.rpc('load_orquivia_workspace', {});
+        assertSession(user, generation, organizationId);
+        if (error) throw rpcError(error, 'No se pudieron consultar los datos actuales de la empresa.');
+        if (data?.organization_id !== organizationId) {
+          throw backendError('La sesión cambió durante la consulta.', 'AUTH_CHANGED');
+        }
+        return { state: validateCloudState(data.state), version: Number(data.version), updatedAt: data.updated_at };
+      });
+    },
     saveState(state) {
       const snapshot = validateCloudState(state);
       const requestedOwner = ownerId;
+      const generation = authGeneration;
       return enqueue(async () => {
-        const user = await requireUser();
+        const user = await requireUser(generation);
         if (requestedOwner && requestedOwner !== user.id) throw backendError('La sesión cambió. Recarga los datos antes de guardar.', 'AUTH_CHANGED');
         if (version === null) throw backendError('Carga primero los datos de la cuenta para evitar sobrescribirlos.', 'STATE_NOT_LOADED');
+        const organizationId = workspace.organizationId;
         const { data, error } = await client.rpc('save_orquivia_team_state', {
-          p_organization_id: workspace.organizationId, p_state: snapshot, p_expected_version: version,
+          p_organization_id: organizationId, p_state: snapshot, p_expected_version: version,
         });
+        assertSession(user, generation, organizationId);
         if (error) {
           throw rpcError(error, 'No se pudo guardar en Supabase. Tus cambios siguen en esta sesión.');
         }
-        if (ownerId !== user.id) throw backendError('La sesión cambió durante el guardado.', 'AUTH_CHANGED');
         version = Number(data.version);
         return { version, updatedAt: data.updated_at };
       });
     },
     issueDocument(documentId) {
       const requestedOwner = ownerId;
+      const generation = authGeneration;
       return enqueue(async () => {
-        const user = await requireUser();
+        const user = await requireUser(generation);
         if (requestedOwner !== user.id) throw backendError('La sesión cambió.', 'AUTH_CHANGED');
         if (version === null || !workspace) throw backendError('Carga primero los datos de la empresa.', 'STATE_NOT_LOADED');
+        const organizationId = workspace.organizationId;
         const { data, error } = await client.rpc('issue_orquivia_document', {
-          p_organization_id: workspace.organizationId, p_document_id: documentId, p_expected_version: version,
+          p_organization_id: organizationId, p_document_id: documentId, p_expected_version: version,
         });
+        assertSession(user, generation, organizationId);
         if (error) throw rpcError(error, 'No se pudo emitir el documento.');
-        if (ownerId !== user.id) throw backendError('La sesión cambió durante la emisión.', 'AUTH_CHANGED');
         const state = validateCloudState(data.state);
         version = Number(data.version);
         return { state, version, updatedAt: data.updated_at, documentNumber: data.document_number };
       });
     },
     async auditLog(limit = 100) {
-      await requireUser();
+      const generation = authGeneration;
+      const user = await requireUser(generation);
       if (!workspace) throw backendError('Carga primero la empresa.', 'STATE_NOT_LOADED');
+      const organizationId = workspace.organizationId;
       const { data, error } = await client.from('orquivia_audit_log').select('id,actor_email,event,workspace_version,changes,created_at')
-        .eq('organization_id', workspace.organizationId).order('id', { ascending: false }).limit(Math.max(1, Math.min(500, limit)));
+        .eq('organization_id', organizationId).order('id', { ascending: false }).limit(Math.max(1, Math.min(500, limit)));
+      assertSession(user, generation, organizationId);
       if (error) throw backendError('No se pudo cargar el historial.', 'LOAD_ERROR', error);
+      return data;
+    },
+    async recordHistory(entityType, entityId, limit = 50) {
+      const generation = authGeneration;
+      if (!HISTORY_ENTITY_TYPES.has(entityType) || typeof entityId !== 'string'
+        || !entityId.trim() || entityId.length > 160 || /[\u0000-\u001f\u007f]/.test(entityId)
+        || (entityType === 'company' && entityId !== 'company')) {
+        throw backendError('El registro del historial no es válido.', 'INVALID_HISTORY_RECORD');
+      }
+      const user = await requireUser(generation);
+      if (!workspace) throw backendError('Carga primero la empresa.', 'STATE_NOT_LOADED');
+      const organizationId = workspace.organizationId;
+      const pageSize = Number.isFinite(limit) ? Math.max(1, Math.min(100, Math.trunc(limit))) : 50;
+      const { data, error } = await client.rpc('load_orquivia_record_history', {
+        p_organization_id: organizationId, p_entity_type: entityType, p_entity_id: entityId,
+        p_limit: pageSize, p_expected_user_id: user.id,
+      });
+      assertSession(user, generation, organizationId);
+      if (error) throw rpcError(error, 'No se pudo cargar el historial de este registro.');
+      if (!Array.isArray(data)) throw backendError('El historial recibido no es válido.', 'LOAD_ERROR');
       return data;
     },
     async uploadReceipt(expenseId, file) {

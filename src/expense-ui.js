@@ -3,6 +3,7 @@ import { money, todayISO, escapeHTML as esc } from './domain.js';
 import { expenseTotals, splitExpenseTotal, splitExpenseTotalManual, cashSummary, expenseNeedsReview, expenseVATLabel } from './expenses.js';
 import { validateReceiptFile, RECEIPT_FILE_TYPES } from './backend.js';
 import { icon } from './icons.js';
+import { recordHistoryMarkup, bindRecordHistory } from './history-ui.js';
 
 const LOCAL_ORG = '00000000-0000-4000-8000-000000000001';
 const field = (label, name, value = '', type = 'text', extra = '') => `<label class="field"><span>${label}</span><input name="${name}" type="${type}" value="${esc(String(value ?? ''))}" ${extra}></label>`;
@@ -137,7 +138,8 @@ export function expenseModal(ctx, expense) {
   <label class="checkbox-label expense-paid-toggle"><input name="alreadyPaid" type="checkbox" ${draft.paymentStatus === 'paid' ? 'checked' : ''}>${isCredit ? 'Reembolso recibido' : 'Ya está pagado'}</label><p class="field-hint expense-payment-warning" id="expense-cash-change-warning" hidden>Al guardar como pendiente se retirarán del saldo sus pagos registrados.</p><div class="expense-review-choice" id="expense-review-choice" hidden><p>Si ya has comprobado el documento y sus notas, puedes completar su revisión. El desglose de IVA seguirá identificado para el gestor.</p><button type="button" class="text-button" id="complete-expense-review">He revisado el justificante</button><span id="expense-review-feedback" role="status"></span></div></div>
   <section class="expense-receipts"><div class="expense-section-heading"><h3>Justificante</h3><span>${expense ? 'Fotos y archivos' : 'Necesario para guardar'}</span></div><div class="receipt-actions"><label class="button primary">Tomar una foto<input class="visually-hidden" type="file" id="receipt-camera" accept="image/jpeg,image/png,image/webp,image/heic,image/heif" capture="environment"></label><label class="button secondary">Adjuntar archivos<input class="visually-hidden" type="file" id="receipt-files" multiple accept="${Object.keys(RECEIPT_FILE_TYPES).map(e => '.' + e).join(',')}"></label></div><div class="receipt-list" id="receipt-list"></div><p class="field-hint">PDF, fotos o documentos. Hasta 10 MB por archivo; se guardan privados.</p></section>
   <details class="expense-details"><summary><span>Más detalles</span><small>Fecha, proveedor y datos para el gestor</small></summary><div class="expense-details-body"><div class="form-grid">${field('Fecha del justificante', 'date', draft.date, 'date', `required max="${todayISO()}"`)}${field(isCredit ? 'Fecha del reembolso' : 'Fecha del pago', 'paidDate', draft.paidDate || (expense ? draft.date : todayISO()), 'date', `max="${todayISO()}"`)}${field('Proveedor / comercio (opcional)', 'supplier', draft.supplier, 'text', 'maxlength="240"')}${field('NIF del proveedor (opcional)', 'supplierTaxId', draft.supplierTaxId, 'text', 'maxlength="80"')}${field('Número de factura o ticket (opcional)', 'reference', draft.reference, 'text', 'maxlength="240"')}${select('Categoría', 'category', expenseCategories, draft.category || 'Otros')}</div>${cashDetails}<div class="expense-section"><h3>Desglose para el gestor</h3>${field('Suplidos / importe adicional sin IVA (€)', 'additionalAmount', draft.additionalAmount || 0, 'number', `${isCredit ? 'max="0"' : 'min="0"'} step="0.01" inputmode="decimal"`)}${field('Base imponible (€)', 'base', draft.vatReviewNeeded ? '' : draft.base, 'number', 'readonly step="0.01"')}<p class="field-hint">Si hay varios tipos de IVA, selecciona «Indicar importe de IVA» y copia el total de IVA del documento.</p><label class="checkbox-label"><input name="deductible" type="checkbox" ${draft.vatDeductibleAmount !== 0 && draft.vatDeductibleAmount !== undefined ? 'checked' : ''}>IVA confirmado para revisión del gestor</label>${field('Importe de IVA confirmado (€)', 'vatDeductibleAmount', draft.vatDeductibleAmount || 0, 'number', 'min="0" step="0.01"')}<p class="field-hint">El gestor revisará si el gasto y su IVA son deducibles.</p></div><div class="expense-section"><label class="field"><span>Notas (opcional)</span><textarea name="notes" rows="2" maxlength="10000">${esc(draft.notes || '')}</textarea></label><label class="checkbox-label"><input name="reviewNeeded" type="checkbox" ${draft.reviewNeeded ? 'checked' : ''}>Revisar este justificante con el gestor</label></div></div></details>
-  </form><aside class="expense-preview-panel" aria-label="Justificante junto al formulario"><div class="expense-preview-heading"><span class="preview-label">${icon('eye')}VISTA PREVIA DEL JUSTIFICANTE</span><button type="button" class="text-button" id="expand-expense-preview" hidden>Ampliar visor</button></div><div id="expense-inline-preview"></div></aside></div><div class="modal-actions expense-editor-actions">${expense ? '<button type="button" class="text-button danger" id="remove-expense">Eliminar gasto</button>' : ''}<button class="button secondary" type="button" data-close>Cancelar</button><button type="submit" form="expense-form" class="button primary" id="save-expense">Guardar gasto</button></div>`, true);
+  ${expense ? recordHistoryMarkup('expense', expense.id) : ''}</form><aside class="expense-preview-panel" aria-label="Justificante junto al formulario"><div class="expense-preview-heading"><span class="preview-label">${icon('eye')}VISTA PREVIA DEL JUSTIFICANTE</span><button type="button" class="text-button" id="expand-expense-preview" hidden>Ampliar visor</button></div><div id="expense-inline-preview"></div></aside></div><div class="modal-actions expense-editor-actions">${expense ? '<button type="button" class="text-button danger" id="remove-expense">Eliminar gasto</button>' : ''}<button class="button secondary" type="button" data-close>Cancelar</button><button type="submit" form="expense-form" class="button primary" id="save-expense">Guardar gasto</button></div>`, true);
+  bindRecordHistory(ctx.modalRoot, ctx);
   const form = ctx.modalRoot.querySelector('#expense-form'), list = form.querySelector('#receipt-list'), save = ctx.modalRoot.querySelector('#save-expense');
   const previewHost = ctx.modalRoot.querySelector('#expense-inline-preview'), expandPreview = ctx.modalRoot.querySelector('#expand-expense-preview');
   const previewMode = ctx.getMode(), previewBackend = ctx.getBackend(), previewIdentity = ctx.getIdentity();
@@ -259,6 +261,8 @@ export function expenseModal(ctx, expense) {
   form.onsubmit = async e => {
     e.preventDefault();
     if (ctx.isBusy()) return;
+    if (ctx.isSaveBlocked?.()) { ctx.showEditConflict?.(); ctx.toast('Tu borrador sigue abierto. Revisa los cambios guardados antes de continuar.', true); return; }
+    const operationActive = ctx.operationScope?.() || isPreviewActive;
     if (verifyingFiles) { ctx.toast('Espera a que termine la comprobación del justificante.', true); return; }
     if (!expense && !draft.attachments.length && !pending.length) { ctx.toast('Añade una foto o un archivo como justificante del gasto.', true); form.querySelector('#receipt-camera').closest('label').scrollIntoView({ block: 'center', behavior: 'smooth' }); return; }
     const f = new FormData(form), paid = f.has('alreadyPaid'), choice = String(f.get('vatRate'));
@@ -293,7 +297,7 @@ export function expenseModal(ctx, expense) {
         }
         uploaded.push(meta);
       }
-      if (!form.isConnected || ctx.getMode() === 'locked') throw new Error('La sesión cambió. Vuelve a entrar antes de guardar.');
+      if (!form.isConnected || !operationActive()) throw new Error('La sesión cambió. Vuelve a entrar antes de guardar.');
       next.attachments = [...kept, ...uploaded];
       ctx.setBusy(false);
       const saved = await ctx.commit(s => {
@@ -301,16 +305,16 @@ export function expenseModal(ctx, expense) {
         const i = s.expenses.findIndex(v => v.id === next.id);
         if (i >= 0) s.expenses[i] = next; else s.expenses.push(next);
       }, 'Gasto y justificantes guardados.');
-      if (!saved) throw new Error('El gasto no se guardó. Puedes volver a intentarlo.');
+      if (!saved || !operationActive()) throw new Error('El gasto no se guardó. Puedes volver a intentarlo.');
       for (const a of removedAtSave) try { if (cloud) await activeBackend.deleteReceipt(a); else await localFile('delete', a.path); } catch { ctx.toast('El gasto se guardó; un archivo retirado quedó pendiente de limpiar.', true); }
       ctx.closeModal();
     } catch (error) {
       let cleanupPending = false;
       for (const a of uploaded) try { if (cloud) await activeBackend.deleteReceipt(a); else await localFile('delete', a.path); } catch { cleanupPending = true; }
-      ctx.toast(error.message + (cleanupPending ? ' Un archivo permanece privado y pendiente de limpiar.' : ''), true);
+      if (operationActive()) ctx.toast(error.message + (cleanupPending ? ' Un archivo permanece privado y pendiente de limpiar.' : ''), true);
     } finally {
-      ctx.setBusy(false);
-      if (form.isConnected) { disabledBefore.forEach(([input, wasDisabled]) => input.disabled = wasDisabled); save.disabled = false; }
+      if (operationActive()) ctx.setBusy(false);
+      if (operationActive() && form.isConnected) { disabledBefore.forEach(([input, wasDisabled]) => input.disabled = wasDisabled); save.disabled = false; }
     }
   };
   ctx.modalRoot.querySelector('#remove-expense')?.addEventListener('click', () => ctx.confirmModal('Eliminar este gasto', 'Se quitará el registro y se recalculará el saldo. Descarga sus justificantes antes de continuar.', async () => {
