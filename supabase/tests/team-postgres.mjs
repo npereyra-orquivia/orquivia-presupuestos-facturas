@@ -115,6 +115,10 @@ try {
   await as('authenticated',editor);
   await deny('select public.load_orquivia_workspace()',[],'42501');
   await deny('select public.refresh_orquivia_access()',[],'42501');
+  // Apply the expense extension after the workspace and save routines have
+  // already been used, exercising a real upgrade rather than only fresh setup.
+  await db.exec('reset role');
+  await db.exec(await readFile(new URL('../migrations/202610140007_expense_quick_entry.sql',import.meta.url),'utf8')); checks++;
   await as('authenticated',admin);
   const expenseId='a4000000-0000-4000-8000-000000000001', attachmentId='a5000000-0000-4000-8000-000000000001';
   const path=`${org}/${expenseId}/${attachmentId}.pdf`;
@@ -130,6 +134,33 @@ try {
   withExpense.expenses=[{id:expenseId,date:'2025-01-10',supplier:'Proveedor',description:'Material',category:'Material',base:100,vatAmount:21,vatDeductibleAmount:0,total:121,paymentStatus:'paid',paidDate:'2025-01-05',attachments:[attachment]}];
   let expenseVersion=workspaceWithExpense.version;
   expenseVersion=(await query('select public.save_orquivia_team_state($1,$2,$3) result',[org,withExpense,expenseVersion]))[0].result.version; checks++;
+  for(const fields of [
+    {supplier:'',base:121,vatAmount:0,total:121,vatReviewNeeded:true},
+    {kind:'credit',base:-40,vatAmount:-8.4,total:-48.4,vatDeductibleAmount:-4.2},
+    {base:725,vatAmount:152.25,additionalAmount:636.02,total:1513.27},
+    {base:61.95,vatAmount:0,total:61.95,cashAmount:61.8},
+    {base:110.96,vatAmount:23.3,total:134.26,cashMovements:[
+      {id:'a9000000-0000-4000-8000-000000000001',date:'2025-01-02',amount:144.16,reference:'Cargo'},
+      {id:'a9000000-0000-4000-8000-000000000002',date:'2025-01-05',amount:-9.9,reference:'Devolución'}]},
+  ]) {
+    const supported=structuredClone(withExpense); Object.assign(supported.expenses[0],fields);
+    expenseVersion=(await query('select public.save_orquivia_team_state($1,$2,$3) result',[org,supported,expenseVersion]))[0].result.version;
+    assert.deepEqual((await query('select public.load_orquivia_workspace() result'))[0].result.state.expenses[0],supported.expenses[0]); checks++;
+  }
+  expenseVersion=(await query('select public.save_orquivia_team_state($1,$2,$3) result',[org,withExpense,expenseVersion]))[0].result.version; checks++;
+  for(const fields of [
+    {supplier:null},{supplier:' '.repeat(241)},{kind:'credit',base:40,vatAmount:-8.4,total:31.6},
+    {kind:'credit',base:-40,vatAmount:-8.4,total:-48.4,vatDeductibleAmount:-8.41},
+    {base:725,vatAmount:152.25,additionalAmount:636.02,total:1513.26},
+    {vatReviewNeeded:'true'},{vatReviewNeeded:true},{cashAmount:-1},
+    {cashMovements:[]},{cashMovements:[{id:'a9000000-0000-4000-8000-000000000001',date:'2025-01-05',amount:120}]},
+    {paymentStatus:'pending',paidDate:null,cashMovements:[{id:'a9000000-0000-4000-8000-000000000001',date:'2025-01-05',amount:121}]},
+    {cashMovements:[{id:'a9000000-0000-4000-8000-000000000001',date:'2025-01-05',amount:100},
+      {id:'a9000000-0000-4000-8000-000000000001',date:'2025-01-05',amount:21}]},
+  ]) {
+    const unsupported=structuredClone(withExpense); Object.assign(unsupported.expenses[0],fields);
+    await deny('select public.save_orquivia_team_state($1,$2,$3)',[org,unsupported,expenseVersion],'22023');
+  }
   assert.equal((await query('delete from storage.objects where name=$1 returning id',[path])).length,0); checks++;
   const invalidExpense=structuredClone(withExpense); invalidExpense.expenses[0].total=122;
   await deny('select public.save_orquivia_team_state($1,$2,$3)',[org,invalidExpense,expenseVersion],'22023');

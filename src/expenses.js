@@ -42,10 +42,30 @@ function requireDecimal(value) {
 
 /** The document's real VAT amount is explicit; an effective rate is not tax deductibility. */
 export function expenseTotals(expense = {}) {
-  const base = positiveCents(expense.base), vatAmount = positiveCents(expense.vatAmount);
-  const deductible = positiveCents(expense.vatDeductibleAmount ?? 0);
-  return { base: euros(base), vatAmount: euros(vatAmount), total: euros(base + vatAmount),
-    vatDeductibleAmount: euros(deductible > vatAmount ? vatAmount : deductible) };
+  const credit = expense.kind === 'credit';
+  const amount = (value) => { const parsed = cents(value); return credit ? (parsed < 0n ? parsed : 0n) : (parsed > 0n ? parsed : 0n); };
+  const base = amount(expense.base), vatAmount = amount(expense.vatAmount), additional = amount(expense.additionalAmount ?? 0);
+  const deductible = amount(expense.vatDeductibleAmount ?? 0);
+  const additionalField = expense.additionalAmount === undefined ? {} : { additionalAmount: euros(additional) };
+  // The stored base is only a placeholder until the receipt's VAT is checked.
+  // Its gross amount can affect cash, but it must not appear as a confirmed tax base.
+  if (expense.vatReviewNeeded === true) return { base: null, vatAmount: null,
+    total: euros(base + vatAmount + additional), vatDeductibleAmount: null, vatReviewNeeded: true, ...additionalField };
+  return { base: euros(base), vatAmount: euros(vatAmount), total: euros(base + vatAmount + additional),
+    vatDeductibleAmount: euros(credit ? (deductible < vatAmount ? vatAmount : deductible) : (deductible > vatAmount ? vatAmount : deductible)),
+    ...additionalField };
+}
+
+/** Document totals stay intact when credits/promotions change the bank amount. */
+export function expenseCashAmount(expense) {
+  return expense.cashAmount === undefined ? expenseTotals(expense).total : euros(cents(expense.cashAmount));
+}
+
+/** A receipt may have an advance and a later refund on separate real bank dates. */
+export function expenseCashMovements(expense) {
+  if (expense.paymentStatus !== 'paid') return [];
+  const movements = expense.cashMovements ?? [{ date: expense.paidDate, amount: expenseCashAmount(expense) }];
+  return movements.filter((entry) => validDate(entry.date)).map((entry) => ({ ...entry, expenseId: expense.id }));
 }
 
 /** A convenience for manual entry; callers may replace this with the VAT printed on a receipt. */
@@ -59,9 +79,10 @@ export function suggestedExpenseVAT(base, rate = 21) {
 export function splitExpenseTotal(total, vatRate = 21) {
   requireDecimal(total); requireDecimal(vatRate);
   const totalCents = cents(total), rateHundredths = cents(vatRate);
-  if (totalCents < 0n || rateHundredths < 0n || rateHundredths > 10000n) throw new Error('Revisa el total y el porcentaje de IVA.');
+  if (rateHundredths < 0n || rateHundredths > 10000n) throw new Error('Revisa el total y el porcentaje de IVA.');
   const denominator = 10000n + rateHundredths;
-  const base = (totalCents * 10000n + denominator / 2n) / denominator;
+  const sign = totalCents < 0n ? -1n : 1n;
+  const base = ((totalCents * sign * 10000n + denominator / 2n) / denominator) * sign;
   return { base: euros(base), vatAmount: euros(totalCents - base), total: euros(totalCents) };
 }
 
@@ -69,7 +90,9 @@ export function splitExpenseTotal(total, vatRate = 21) {
 export function splitExpenseTotalManual(total, vatAmount) {
   requireDecimal(total); requireDecimal(vatAmount);
   const totalCents = cents(total), vatCents = cents(vatAmount);
-  if (totalCents < 0n || vatCents < 0n || vatCents > totalCents) throw new Error('El IVA debe estar entre cero y el total del justificante.');
+  if (totalCents >= 0n ? vatCents < 0n || vatCents > totalCents : vatCents > 0n || vatCents < totalCents) {
+    throw new Error('El IVA debe tener el signo del total y no superar su importe.');
+  }
   return { base: euros(totalCents - vatCents), vatAmount: euros(vatCents), total: euros(totalCents) };
 }
 
@@ -92,9 +115,29 @@ function issuedInvoices(state) {
     && ['issued', 'partial', 'paid', 'overdue'].includes(doc.status));
 }
 
+/** All-history boundaries include payment dates as well as document dates. */
+export function periodRange(state, period = {}) {
+  if (period.type === 'quarter') {
+    const range = quarterRange(period.year, period.quarter);
+    return { type: 'quarter', ...range, label: `${range.quarter}.º trimestre de ${range.year}` };
+  }
+  if (period.type === 'year') {
+    const year = Number(period.year);
+    if (!Number.isInteger(year) || year < 1000 || year > 9999) throw new Error('Selecciona un año válido.');
+    return { type: 'year', year, from: `${year}-01-01`, to: `${year}-12-31`, label: `Año ${year}` };
+  }
+  if (period.type !== 'all') throw new Error('Selecciona trimestre, año o todo el histórico.');
+  const invoices = issuedInvoices(state), invoiceIds = new Set(invoices.map((entry) => entry.id));
+  const dates = [...invoices.map((entry) => entry.date), ...(state?.expenses ?? []).map((entry) => entry.date),
+    ...(state?.payments ?? []).filter((entry) => invoiceIds.has(entry.documentId)).map((entry) => entry.date),
+    ...(state?.expenses ?? []).flatMap(expenseCashMovements).map((entry) => entry.date)]
+    .filter(validDate).sort();
+  return { type: 'all', from: dates[0] ?? null, to: dates.at(-1) ?? null, label: 'Todo el histórico' };
+}
+
 /** Invoice/expense registers use issue dates; cash movements use payment dates separately. */
-export function quarterlyReport(state, year, quarter) {
-  const range = quarterRange(year, quarter), clientMap = new Map((state?.clients ?? []).map((client) => [client.id, client]));
+export function periodReport(state, period) {
+  const range = periodRange(state, period), clientMap = new Map((state?.clients ?? []).map((client) => [client.id, client]));
   const allInvoices = issuedInvoices(state), invoiceIds = new Set(allInvoices.map((doc) => doc.id));
   const invoices = allInvoices.filter((doc) => inRange(doc.date, range)).map((doc) => ({
     ...doc, client: doc.clientSnapshot ?? clientMap.get(doc.clientId) ?? { name: '' }, amounts: totals(doc),
@@ -102,20 +145,35 @@ export function quarterlyReport(state, year, quarter) {
   const expenses = (state?.expenses ?? []).filter((expense) => inRange(expense.date, range))
     .map((expense) => ({ ...expense, amounts: expenseTotals(expense) }));
   const payments = (state?.payments ?? []).filter((payment) => invoiceIds.has(payment.documentId) && inRange(payment.date, range));
-  const paidExpenses = (state?.expenses ?? []).filter((expense) => expense.paymentStatus === 'paid' && inRange(expense.paidDate, range));
+  const expensePayments = (state?.expenses ?? []).flatMap(expenseCashMovements).filter((entry) => inRange(entry.date, range));
+  const paidExpenseIds = new Set(expensePayments.map((entry) => entry.expenseId));
+  const paidExpenses = (state?.expenses ?? []).filter((expense) => paidExpenseIds.has(expense.id));
   const sum = (records, value) => euros(records.reduce((total, record) => total + cents(value(record)), 0n));
+  const knownVATExpenses = expenses.filter((entry) => entry.vatReviewNeeded !== true);
+  const vatReviewExpenses = expenses.filter((entry) => entry.vatReviewNeeded === true);
   const summary = {
     invoiceCount: invoices.length, expenseCount: expenses.length,
     salesBase: sum(invoices, (entry) => entry.amounts.base), outputVAT: sum(invoices, (entry) => entry.amounts.vatAmount),
     salesWithholding: sum(invoices, (entry) => entry.amounts.withholdingAmount), salesTotal: sum(invoices, (entry) => entry.amounts.total),
-    expenseBase: sum(expenses, (entry) => entry.amounts.base), inputVATRecorded: sum(expenses, (entry) => entry.amounts.vatAmount),
-    inputVATConfirmed: sum(expenses, (entry) => entry.amounts.vatDeductibleAmount), expenseTotal: sum(expenses, (entry) => entry.amounts.total),
-    cashReceived: sum(payments, (entry) => entry.amount), cashPaid: sum(paidExpenses, (entry) => expenseTotals(entry).total),
+    expenseBase: sum(knownVATExpenses, (entry) => entry.amounts.base), inputVATRecorded: sum(knownVATExpenses, (entry) => entry.amounts.vatAmount),
+    inputVATConfirmed: sum(knownVATExpenses, (entry) => entry.amounts.vatDeductibleAmount), expenseTotal: sum(expenses, (entry) => entry.amounts.total),
+    additionalTotal: sum(expenses, (entry) => entry.amounts.additionalAmount ?? 0),
+    cashReceived: sum(payments, (entry) => entry.amount), cashPaid: sum(expensePayments, (entry) => entry.amount),
     reviewCount: invoices.filter((entry) => entry.reviewRequired || entry.paymentReviewNeeded).length
-      + expenses.filter((entry) => entry.reviewNeeded).length,
+      + expenses.filter((entry) => entry.reviewNeeded || entry.vatReviewNeeded).length,
+    vatReviewCount: vatReviewExpenses.length,
+    vatReviewTotal: sum(vatReviewExpenses, (entry) => entry.amounts.total),
     attachmentsCount: expenses.reduce((total, entry) => total + (entry.attachments?.length ?? 0), 0),
+    creditCount: expenses.filter((entry) => entry.kind === 'credit').length,
   };
-  return { ...range, invoices, expenses, payments, paidExpenses, summary };
+  // A registered operating comparison, before invoice withholding. Unknown VAT
+  // would overstate costs if its provisional gross amount were treated as a base.
+  summary.activityDifference = vatReviewExpenses.length ? null : euros(cents(summary.salesBase) - cents(summary.expenseBase));
+  return { ...range, invoices, expenses, payments, paidExpenses, expensePayments, summary };
+}
+
+export function quarterlyReport(state, year, quarter) {
+  return periodReport(state, { type: 'quarter', year, quarter });
 }
 
 /** An opening balance is the balance at the beginning of that day, before its movements. */
@@ -129,13 +187,13 @@ export function cashSummary(state, asOf = todayISO()) {
   const invoices = issuedInvoices(state), invoiceIds = new Set(invoices.map((entry) => entry.id));
   const allPayments = (state?.payments ?? []).filter((payment) => invoiceIds.has(payment.documentId) && validDate(payment.date) && payment.date <= asOf);
   const receivedCents = allPayments.filter((payment) => inCashWindow(payment.date)).reduce((sum, payment) => sum + positiveCents(payment.amount), 0n);
-  const paidCents = (state?.expenses ?? []).filter((expense) => expense.paymentStatus === 'paid' && inCashWindow(expense.paidDate))
-    .reduce((sum, expense) => sum + cents(expenseTotals(expense).total), 0n);
+  const paidCents = (state?.expenses ?? []).flatMap(expenseCashMovements).filter((entry) => inCashWindow(entry.date))
+    .reduce((sum, entry) => sum + cents(entry.amount), 0n);
   const pendingInvoices = invoices.filter((invoice) => invoice.date <= asOf && invoice.paymentReviewNeeded !== true);
   const pendingReceivablesCents = pendingInvoices.reduce((sum, invoice) => sum + cents(outstanding(invoice, allPayments)), 0n);
-  const pendingExpensesCents = (state?.expenses ?? []).filter((expense) => expense.date <= asOf
-    && (expense.paymentStatus === 'pending' || (expense.paymentStatus === 'paid' && expense.paidDate > asOf)))
-    .reduce((sum, expense) => sum + cents(expenseTotals(expense).total), 0n);
+  const pendingExpensesCents = (state?.expenses ?? []).filter((expense) => expense.date <= asOf)
+    .reduce((sum, expense) => sum + (expense.paymentStatus === 'pending' ? cents(expenseCashAmount(expense))
+      : expenseCashMovements(expense).filter((entry) => entry.date > asOf).reduce((remaining, entry) => remaining + cents(entry.amount), 0n)), 0n);
   const openingCents = configured ? cents(company.openingBalance) : 0n;
   const balanceCents = openingCents + receivedCents - paidCents;
   return { asOf, configured, openingBalance: configured ? euros(openingCents) : null,
@@ -157,21 +215,31 @@ function safeCSV(value) {
 function decimalCSV(value) { return Number(value ?? 0).toFixed(2).replace('.', ','); }
 
 /** One CSV for the gestor, with receipts and issued invoices; totals do not constitute a tax return. */
-export function quarterCSV(state, year, quarter) {
-  const report = quarterlyReport(state, year, quarter);
+export function reportCSV(state, period) {
+  const report = periodReport(state, period);
   const headers = ['Tipo', 'Fecha documento', 'Número / referencia', 'Cliente / proveedor', 'NIF', 'Concepto',
     'Base (€)', 'IVA (€)', 'Retención (€)', 'Total (€)', 'IVA soportado confirmado (€)', 'Estado pago actual',
-    'Fecha pago gasto', 'Notas', 'Justificantes', 'Revisión pendiente'];
+    'Fecha pago gasto', 'Notas', 'Justificantes', 'Revisión pendiente', 'Estado IVA', 'Suplidos / otros importes sin IVA (€)',
+    'Importe de caja del gasto (€)', 'Movimientos de caja del gasto'];
   const rows = report.invoices.map((invoice) => ['Factura emitida', invoice.date, invoice.number,
     invoice.client.name, invoice.client.taxId ?? '', invoice.title || invoice.items.map((entry) => entry.description).join(' | '),
     decimalCSV(invoice.amounts.base), decimalCSV(invoice.amounts.vatAmount), decimalCSV(invoice.amounts.withholdingAmount),
     decimalCSV(invoice.amounts.total), '', ({ review: 'Por confirmar', paid: 'Cobrado', partial: 'Cobro parcial',
       overdue: 'Vencido', issued: 'Pendiente' })[status(invoice, state.payments)] ?? invoice.status, '',
-    invoice.notes ?? '', '', invoice.reviewRequired || invoice.paymentReviewNeeded ? 'Sí' : 'No']);
-  rows.push(...report.expenses.map((expense) => ['Gasto recibido', expense.date, expense.reference ?? '', expense.supplier,
-    expense.supplierTaxId ?? '', expense.description, decimalCSV(expense.amounts.base), decimalCSV(expense.amounts.vatAmount), '0,00',
-    decimalCSV(expense.amounts.total), decimalCSV(expense.amounts.vatDeductibleAmount),
-    expense.paymentStatus === 'paid' ? 'Pagado' : 'Pendiente', expense.paidDate ?? '', expense.notes ?? '',
-    (expense.attachments ?? []).map((attachment) => attachment.name).join(' | '), expense.reviewNeeded ? 'Sí' : 'No']));
+    invoice.notes ?? '', '', invoice.reviewRequired || invoice.paymentReviewNeeded ? 'Sí' : 'No', 'Registrado', '', '', '']);
+  rows.push(...report.expenses.map((expense) => [expense.kind === 'credit' ? 'Abono de proveedor' : 'Gasto recibido', expense.date, expense.reference ?? '', expense.supplier ?? '',
+    expense.supplierTaxId ?? '', expense.description,
+    expense.vatReviewNeeded ? '' : decimalCSV(expense.amounts.base), expense.vatReviewNeeded ? '' : decimalCSV(expense.amounts.vatAmount), '0,00',
+    decimalCSV(expense.amounts.total), expense.vatReviewNeeded ? '' : decimalCSV(expense.amounts.vatDeductibleAmount),
+    expense.kind === 'credit' ? (expense.paymentStatus === 'paid' ? 'Reembolsado' : 'Reembolso pendiente')
+      : (expense.paymentStatus === 'paid' ? 'Pagado' : 'Pendiente'), expense.paidDate ?? '', expense.notes ?? '',
+    (expense.attachments ?? []).map((attachment) => attachment.name).join(' | '), expense.reviewNeeded || expense.vatReviewNeeded ? 'Sí' : 'No',
+    expense.vatReviewNeeded ? 'Por revisar: base e IVA sin confirmar' : 'Registrado', decimalCSV(expense.amounts.additionalAmount ?? 0),
+    decimalCSV(expenseCashAmount(expense)), expenseCashMovements(expense).map((entry) =>
+      `${entry.date}: ${decimalCSV(entry.amount)}${entry.reference ? ` (${entry.reference})` : ''}`).join(' | ')]));
   return '\uFEFF' + [headers, ...rows].map((row) => row.map(safeCSV).join(';')).join('\r\n') + '\r\n';
+}
+
+export function quarterCSV(state, year, quarter) {
+  return reportCSV(state, { type: 'quarter', year, quarter });
 }

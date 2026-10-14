@@ -48,6 +48,11 @@ function roundFraction(numerator, denominator) {
   return sign * ((absolute + denominator / 2n) / denominator);
 }
 
+function signedMoneyCents(value) {
+  const parsed = fraction(value);
+  return parsed ? roundFraction(parsed.numerator * 100n, parsed.denominator) : 0n;
+}
+
 function positiveFraction(value) {
   const parsed = fraction(value);
   return parsed && parsed.numerator >= 0n ? parsed : { numerator: 0n, denominator: 1n };
@@ -436,7 +441,7 @@ export function validateWorkspace(workspace, today = todayISO()) {
   if (workspace.expenses !== undefined && !Array.isArray(workspace.expenses)) error('expenses', 'debe ser una lista.');
   if (Array.isArray(workspace.expenses)) {
     if (workspace.expenses.length > 10000) error('expenses', 'la lista supera el límite de 10000 registros.');
-    const expenseIds = new Set(), attachmentIds = new Set(), attachmentPaths = new Set();
+    const expenseIds = new Set(), attachmentIds = new Set(), attachmentPaths = new Set(), movementIds = new Set();
     const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
     const mimeByExtension = {
       pdf: 'application/pdf', jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', webp: 'image/webp',
@@ -457,28 +462,64 @@ export function validateWorkspace(workspace, today = todayISO()) {
       if (expenseIds.has(expense.id)) error(`${path}.id`, 'el identificador está duplicado.');
       expenseIds.add(expense.id);
       if (!validDate(expense.date) || (validDate(today) && expense.date > today)) error(`${path}.date`, 'indica la fecha real del gasto, sin fechas futuras.');
-      expenseText(expense.supplier, `${path}.supplier`, 240, true);
+      if (expense.kind !== undefined && !['expense', 'credit'].includes(expense.kind)) error(`${path}.kind`, 'el registro debe ser un gasto o un abono.');
+      const credit = expense.kind === 'credit';
+      const moneyLimits = credit ? { minimum: -Number.MAX_SAFE_INTEGER / 100, maximum: 0 } : { maximum: Number.MAX_SAFE_INTEGER / 100 };
+      expenseText(expense.supplier, `${path}.supplier`, 240);
       expenseText(expense.supplierTaxId, `${path}.supplierTaxId`, 80);
       expenseText(expense.description, `${path}.description`, 2000, true);
       for (const [key, maximum] of [['category', 100], ['reference', 240], ['notes', 10000]]) expenseText(expense[key], `${path}.${key}`, maximum);
-      for (const key of ['base', 'vatAmount']) requireNumber(expense[key], `${path}.${key}`, { maximum: Number.MAX_SAFE_INTEGER / 100 });
-      requireNumber(expense.total, `${path}.total`, { minimum: 0.01, maximum: Number.MAX_SAFE_INTEGER / 100 });
+      for (const key of ['base', 'vatAmount']) requireNumber(expense[key], `${path}.${key}`, moneyLimits);
+      if (expense.additionalAmount !== undefined) requireNumber(expense.additionalAmount, `${path}.additionalAmount`, moneyLimits);
+      if (expense.cashAmount !== undefined) requireNumber(expense.cashAmount, `${path}.cashAmount`, moneyLimits);
+      requireNumber(expense.total, `${path}.total`, credit
+        ? { minimum: -Number.MAX_SAFE_INTEGER / 100, maximum: -0.01 }
+        : { minimum: 0.01, maximum: Number.MAX_SAFE_INTEGER / 100 });
       if (expense.vatRate !== undefined) requireNumber(expense.vatRate, `${path}.vatRate`, { maximum: 100 });
       if (expense.vatDeductibleAmount !== undefined) {
-        requireNumber(expense.vatDeductibleAmount, `${path}.vatDeductibleAmount`, { maximum: Number.MAX_SAFE_INTEGER / 100 });
-        if (typeof expense.vatDeductibleAmount === 'number' && expense.vatDeductibleAmount > expense.vatAmount) error(`${path}.vatDeductibleAmount`, 'el IVA confirmado no puede superar el IVA del documento.');
+        requireNumber(expense.vatDeductibleAmount, `${path}.vatDeductibleAmount`, moneyLimits);
+        if (typeof expense.vatDeductibleAmount === 'number' && (credit
+          ? expense.vatDeductibleAmount < expense.vatAmount : expense.vatDeductibleAmount > expense.vatAmount)) {
+          error(`${path}.vatDeductibleAmount`, 'el IVA confirmado no puede superar el IVA del documento.');
+        }
       }
-      const amounts = [expense.base, expense.vatAmount, expense.total].map((amount) => fraction(amount));
+      const amounts = [expense.base, expense.vatAmount, expense.additionalAmount ?? 0, expense.total].map((amount) => fraction(amount));
       if (amounts.every(Boolean)) {
-        const [base, vat, total] = amounts;
-        const expectedNumerator = base.numerator * vat.denominator + vat.numerator * base.denominator;
-        if (expectedNumerator * total.denominator !== total.numerator * base.denominator * vat.denominator) error(`${path}.total`, 'no coincide con la base más el IVA registrado.');
+        const [base, vat, additional, total] = amounts;
+        const denominator = base.denominator * vat.denominator * additional.denominator;
+        const expectedNumerator = base.numerator * vat.denominator * additional.denominator
+          + vat.numerator * base.denominator * additional.denominator + additional.numerator * base.denominator * vat.denominator;
+        if (expectedNumerator * total.denominator !== total.numerator * denominator) error(`${path}.total`, 'no coincide con la base, el IVA y los otros importes registrados.');
       }
       if (!['paid', 'pending'].includes(expense.paymentStatus)) error(`${path}.paymentStatus`, 'el estado debe ser paid o pending.');
       if (expense.paymentStatus === 'paid') {
         if (!validDate(expense.paidDate) || (validDate(today) && expense.paidDate > today)) error(`${path}.paidDate`, 'un gasto pagado exige una fecha de pago válida, sin fechas futuras.');
       } else if (expense.paidDate !== undefined && expense.paidDate !== null && expense.paidDate !== '') error(`${path}.paidDate`, 'un gasto pendiente no debe tener fecha de pago.');
+      if (expense.cashMovements !== undefined) {
+        if (!Array.isArray(expense.cashMovements) || expense.cashMovements.length < 1 || expense.cashMovements.length > 100) {
+          error(`${path}.cashMovements`, 'se admite una lista de 1 a 100 movimientos.');
+        } else {
+          if (expense.paymentStatus !== 'paid') error(`${path}.cashMovements`, 'los movimientos exigen un gasto pagado o un abono reembolsado.');
+          let sum = 0n;
+          expense.cashMovements.forEach((movement, movementIndex) => {
+            const movementPath = `${path}.cashMovements[${movementIndex}]`;
+            if (!isRecord(movement)) { error(movementPath, 'el movimiento debe ser un objeto.'); return; }
+            if (typeof movement.id !== 'string' || !uuid.test(movement.id) || movementIds.has(movement.id)) error(`${movementPath}.id`, 'indica un UUID válido y único para este movimiento.');
+            movementIds.add(movement.id);
+            if (!validDate(movement.date) || (validDate(today) && movement.date > today)) error(`${movementPath}.date`, 'indica la fecha real del movimiento, sin fechas futuras.');
+            requireNumber(movement.amount, `${movementPath}.amount`, { minimum: -Number.MAX_SAFE_INTEGER / 100, maximum: Number.MAX_SAFE_INTEGER / 100 });
+            if (movement.amount === 0) error(`${movementPath}.amount`, 'el movimiento no puede ser cero.');
+            expenseText(movement.reference, `${movementPath}.reference`, 240);
+            sum += signedMoneyCents(movement.amount);
+          });
+          if (sum !== signedMoneyCents(expense.cashAmount ?? expense.total)) error(`${path}.cashMovements`, 'la suma de movimientos no coincide con el importe de caja del gasto.');
+        }
+      }
       if (expense.reviewNeeded !== undefined && typeof expense.reviewNeeded !== 'boolean') error(`${path}.reviewNeeded`, 'debe ser verdadero o falso.');
+      if (expense.vatReviewNeeded !== undefined && typeof expense.vatReviewNeeded !== 'boolean') error(`${path}.vatReviewNeeded`, 'debe ser verdadero o falso.');
+      if (expense.vatReviewNeeded === true && (expense.vatAmount !== 0 || (expense.vatDeductibleAmount ?? 0) !== 0 || expense.vatRate !== undefined)) {
+        error(`${path}.vatReviewNeeded`, 'un IVA por revisar no puede tener un IVA, porcentaje o deducibilidad confirmados.');
+      }
       if (expense.attachments !== undefined && !Array.isArray(expense.attachments)) error(`${path}.attachments`, 'debe ser una lista.');
       if (!Array.isArray(expense.attachments)) return;
       if (expense.attachments.length > 10) error(`${path}.attachments`, 'se admiten como máximo 10 justificantes por gasto.');

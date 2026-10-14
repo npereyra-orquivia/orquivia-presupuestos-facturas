@@ -1,40 +1,243 @@
 import './expenses.css';
 import { money, todayISO, escapeHTML as esc } from './domain.js';
-import { expenseTotals, splitExpenseTotal, splitExpenseTotalManual, quarterlyReport, cashSummary, quarterCSV } from './expenses.js';
+import { expenseTotals, splitExpenseTotal, splitExpenseTotalManual, cashSummary } from './expenses.js';
 import { validateReceiptFile, RECEIPT_FILE_TYPES } from './backend.js';
 
-const LOCAL_ORG='00000000-0000-4000-8000-000000000001';
-const field=(label,name,value='',type='text',extra='')=>`<label class="field"><span>${label}</span><input name="${name}" type="${type}" value="${esc(String(value??''))}" ${extra}></label>`;
-const select=(label,name,options,value)=>`<label class="field"><span>${label}</span><select name="${name}">${options.map(([v,l])=>`<option value="${v}" ${String(value)===v?'selected':''}>${l}</option>`).join('')}</select></label>`;
-const dateLabel=date=>new Intl.DateTimeFormat('es-ES',{dateStyle:'medium',timeZone:'UTC'}).format(new Date(date+'T12:00:00Z'));
-const categories=[['Servicios','Servicios profesionales'],['Material','Material y equipos'],['Transporte','Transporte'],['Suministros','Suministros'],['Comidas','Comidas y dietas'],['Otros','Otros gastos']];
-const countLabel=(value,singular,plural)=>`${value} ${value===1?singular:plural}`;
-let year=Number(todayISO().slice(0,4)), quarter=Math.ceil(Number(todayISO().slice(5,7))/3);
-const saveBlob=(blob,name)=>{const url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(url),30000)};
-async function localDB(){return new Promise((resolve,reject)=>{const request=indexedDB.open('orquivia-local-receipts',1);request.onupgradeneeded=()=>request.result.createObjectStore('files');request.onsuccess=()=>resolve(request.result);request.onerror=()=>reject(request.error)})}
-async function localFile(operation,path,file){const db=await localDB();try{return await new Promise((resolve,reject)=>{const transaction=db.transaction('files',operation==='get'?'readonly':'readwrite'),store=transaction.objectStore('files');let request;if(operation==='get')request=store.get(path);else if(operation==='put')request=store.put(file,path);else request=store.delete(path);let value;request.onsuccess=()=>value=request.result;transaction.oncomplete=()=>resolve(value);transaction.onerror=()=>reject(transaction.error);transaction.onabort=()=>reject(transaction.error||new Error('No se pudo guardar el archivo local.'))})}finally{db.close()}}
-export async function localReceipt(attachment){const blob=await localFile('get',attachment.path);if(!blob)throw new Error('No se encuentra el justificante local '+attachment.name);return blob}
+const LOCAL_ORG = '00000000-0000-4000-8000-000000000001';
+const field = (label, name, value = '', type = 'text', extra = '') => `<label class="field"><span>${label}</span><input name="${name}" type="${type}" value="${esc(String(value ?? ''))}" ${extra}></label>`;
+const select = (label, name, options, value) => `<label class="field"><span>${label}</span><select name="${name}">${options.map(([v, l]) => `<option value="${esc(v)}" ${String(value) === v ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select></label>`;
+const dateLabel = date => new Intl.DateTimeFormat('es-ES', { dateStyle: 'medium', timeZone: 'UTC' }).format(new Date(date + 'T12:00:00Z'));
+const categories = [['Servicios', 'Servicios profesionales'], ['Material', 'Material y equipos'], ['Transporte', 'Transporte'], ['Suministros', 'Suministros'], ['Comidas', 'Comidas y dietas'], ['Otros', 'Otros gastos']];
+const fold = value => String(value ?? '').normalize('NFD').replace(/\p{Diacritic}/gu, '').toLocaleLowerCase('es');
+const needsReview = expense => expense.reviewNeeded || expense.vatReviewNeeded || !(expense.attachments || []).length;
+let expenseQuery = '', expenseFilter = 'all';
+const saveBlob = (blob, name) => {
+  const url = URL.createObjectURL(blob), a = document.createElement('a');
+  a.href = url; a.download = name; a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 30000);
+};
 
-export function cashCard(state){const c=cashSummary(state);return `<section class="card cash-card"><div class="cash-main"><span class="eyebrow">TU SALDO SEGÚN EL REGISTRO</span><h2>${c.configured?money(c.balance):'Configura tu saldo inicial'}</h2><p>${c.configured?'Saldo inicial + cobros − gastos pagados desde '+dateLabel(c.openingBalanceDate)+'.':'Indica el saldo al comienzo de un día para calcular lo que queda en caja o en cuenta.'}</p><button class="text-button" data-action="opening-balance">${c.configured?'Ajustar saldo inicial':'Añadir saldo inicial'}</button></div><div class="cash-metrics"><div><small>Cobros registrados${c.configured?' desde el inicio':''}</small><strong>${money(c.received)}</strong></div><div><small>Gastos pagados${c.configured?' desde el inicio':''}</small><strong>${money(c.paidExpenses)}</strong></div><div><small>Previsión tras cobrar y pagar pendientes</small><strong>${c.configured?money(c.forecastBalance):'—'}</strong></div></div><p class="cash-footnote">Saldo registrado para contrastar con el banco. Los cobros sin confirmar se excluyen de la previsión.</p></section>`}
+async function localDB() {
+  return new Promise((resolve, reject) => {
+    const request = indexedDB.open('orquivia-local-receipts', 1);
+    request.onupgradeneeded = () => request.result.createObjectStore('files');
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error);
+  });
+}
+async function localFile(operation, path, file) {
+  const db = await localDB();
+  try {
+    return await new Promise((resolve, reject) => {
+      const transaction = db.transaction('files', operation === 'get' ? 'readonly' : 'readwrite'), store = transaction.objectStore('files');
+      const request = operation === 'get' ? store.get(path) : operation === 'put' ? store.put(file, path) : store.delete(path);
+      let value;
+      request.onsuccess = () => value = request.result;
+      transaction.oncomplete = () => resolve(value);
+      transaction.onerror = () => reject(transaction.error);
+      transaction.onabort = () => reject(transaction.error || new Error('No se pudo guardar el archivo local.'));
+    });
+  } finally { db.close(); }
+}
+export async function localReceipt(attachment) {
+  const blob = await localFile('get', attachment.path);
+  if (!blob) throw new Error('No se encuentra el justificante local ' + attachment.name);
+  return blob;
+}
 
-export function expensesPage(state){const report=quarterlyReport(state,year,quarter),s=report.summary;const years=[...new Set([Number(todayISO().slice(0,4)),year,...state.documents.map(d=>Number(d.date.slice(0,4))),...(state.expenses||[]).map(d=>Number(d.date.slice(0,4)))])].sort((a,b)=>b-a);
-return `<div class="page-heading"><div><div class="eyebrow">GASTOS Y JUSTIFICANTES</div><h1>Todo lo que entra. Todo lo que sale.</h1><p>Guarda facturas y tickets, controla tus pagos y prepara cada trimestre.</p></div><button class="button primary" data-action="new-expense">+ Registrar gasto</button></div>${cashCard(state)}<section class="card quarter-card"><div class="card-header"><div><h2>Tu trimestre, preparado</h2><p>Facturas emitidas y gastos según la fecha de sus documentos.</p></div><div class="quarter-selects">${select('Año','expenseYear',years.map(y=>[String(y),String(y)]),year)}${select('Trimestre','expenseQuarter',[['1','T1 · enero–marzo'],['2','T2 · abril–junio'],['3','T3 · julio–septiembre'],['4','T4 · octubre–diciembre']],quarter)}</div></div><div class="quarter-metrics"><div><span>Facturado</span><strong>${money(s.salesTotal)}</strong><small>${countLabel(s.invoiceCount,'factura','facturas')}</small></div><div><span>Gastos registrados</span><strong>${money(s.expenseTotal)}</strong><small>${countLabel(s.expenseCount,'gasto','gastos')} · ${countLabel(s.attachmentsCount,'archivo','archivos')}</small></div><div><span>IVA repercutido</span><strong>${money(s.outputVAT)}</strong><small>De las facturas emitidas</small></div><div><span>IVA soportado registrado</span><strong>${money(s.inputVATRecorded)}</strong><small>${money(s.inputVATConfirmed)} confirmado para revisión</small></div></div><div class="quarter-actions"><p>El gestor revisará el IVA y los justificantes antes de presentar la declaración.${s.reviewCount?` Hay ${s.reviewCount} registros por revisar.`:''}</p><button class="button secondary" id="quarter-csv">Descargar listado CSV</button><button class="button primary" id="quarter-bundle">Descargar expediente del trimestre</button></div></section><section class="card expense-list"><div class="card-header"><div><h2>Gastos de T${quarter} · ${year}</h2><p>Importe total, estado del pago y justificantes.</p></div><button class="text-button" data-action="new-expense">+ Nuevo gasto</button></div><div class="table-scroll"><table><thead><tr><th>Proveedor / concepto</th><th>Fecha</th><th>Total</th><th>Pago</th><th>Archivos</th><th></th></tr></thead><tbody>${report.expenses.slice().sort((a,b)=>b.date.localeCompare(a.date)).map(e=>`<tr><td><button class="doc-link" data-expense="${esc(e.id)}"><span><strong>${esc(e.supplier)}</strong><small>${esc(e.description)}</small></span></button></td><td class="date-cell">${dateLabel(e.date)}</td><td class="amount">${money(expenseTotals(e).total)}</td><td><span class="badge ${e.paymentStatus==='paid'?'paid':'issued'}"><i></i>${e.paymentStatus==='paid'?'Pagado':'Pendiente'}</span></td><td>${(e.attachments||[]).length} ${(e.attachments||[]).length===1?'archivo':'archivos'}</td><td><button class="icon-btn" data-expense="${esc(e.id)}" aria-label="Editar gasto de ${esc(e.supplier)}">›</button></td></tr>`).join('')||'<tr><td colspan="6"><div class="expense-empty"><strong>Un lugar para cada justificante.</strong><p>Registra tu primer gasto y adjunta una foto, un PDF o el archivo que hayas recibido.</p><button class="button secondary" data-action="new-expense">Registrar gasto</button></div></td></tr>'}</tbody></table></div></section>`}
+export function cashCard(state) {
+  const c = cashSummary(state);
+  return `<section class="card cash-card"><div class="cash-main"><span class="eyebrow">TU SALDO SEGÚN EL REGISTRO</span><h2>${c.configured ? money(c.balance) : 'Configura tu saldo inicial'}</h2><p>${c.configured ? 'Saldo inicial + cobros − gastos pagados desde ' + dateLabel(c.openingBalanceDate) + '.' : 'Indica el saldo al comienzo de un día para calcular lo que queda en caja o en cuenta.'}</p><button class="text-button" data-action="opening-balance">${c.configured ? 'Ajustar saldo inicial' : 'Añadir saldo inicial'}</button></div><div class="cash-metrics"><div><small>Cobros registrados${c.configured ? ' desde el inicio' : ''}</small><strong>${money(c.received)}</strong></div><div><small>Gastos pagados${c.configured ? ' desde el inicio' : ''}</small><strong>${money(c.paidExpenses)}</strong></div><div><small>Previsión tras cobrar y pagar pendientes</small><strong>${c.configured ? money(c.forecastBalance) : '—'}</strong></div></div><p class="cash-footnote">Saldo registrado para contrastar con el banco. Los cobros sin confirmar se excluyen de la previsión.</p></section>`;
+}
 
-export function bindExpenses(root,ctx){for(const [name,set]of [['expenseYear',v=>year=Number(v)],['expenseQuarter',v=>quarter=Number(v)]]){const input=root.querySelector(`[name="${name}"]`);if(input)input.onchange=()=>{set(input.value);ctx.render();root.querySelector(`[name="${name}"]`)?.closest('.oc-control')?.querySelector('button')?.focus()}}root.querySelectorAll('[data-expense]').forEach(b=>b.onclick=()=>expenseModal(ctx,ctx.getState().expenses.find(e=>e.id===b.dataset.expense)));
-const csv=root.querySelector('#quarter-csv');if(csv)csv.onclick=()=>saveBlob(new Blob([quarterCSV(ctx.getState(),year,quarter)],{type:'text/csv;charset=utf-8'}),`Orquivia-${year}-T${quarter}.csv`);
-const bundle=root.querySelector('#quarter-bundle');if(bundle)bundle.onclick=async()=>{bundle.disabled=true;try{const {buildQuarterBundle}=await import('./quarter-export.js');const result=await buildQuarterBundle(ctx.getState(),year,quarter,{backend:ctx.getMode()==='cloud'?ctx.getBackend():null,downloadLocalReceipt:localReceipt,logoUrl:ctx.logo,demo:ctx.getMode()==='demo',onProgress:({label})=>bundle.textContent=label});if(ctx.getMode()==='locked')throw new Error('Vuelve a entrar para descargar el expediente.');saveBlob(result.blob,result.name);ctx.toast('Expediente descargado con el listado y los justificantes.')}catch(e){ctx.toast(e.message,true)}finally{if(bundle.isConnected){bundle.disabled=false;bundle.textContent='Descargar expediente del trimestre'}}};}
+export function expensesPage(state) {
+  const all = state.expenses || [], term = fold(expenseQuery);
+  const matchesFilter = (e, filter) => filter === 'all' || (filter === 'review' ? needsReview(e) : e.paymentStatus === filter);
+  const rows = all.filter(e => matchesFilter(e, expenseFilter) && fold([e.description, e.supplier, e.reference, e.category, e.notes].join(' ')).includes(term)).sort((a, b) => b.date.localeCompare(a.date));
+  const filters = [['all', 'Todos'], ['paid', 'Pagados'], ['pending', 'Pendientes'], ['review', 'Por revisar']];
+  return `<div class="page-heading"><div><div class="eyebrow">GASTOS</div><h1>Cada gasto, con su justificante.</h1><p>Un concepto, el total y una foto o archivo. Listo para tu gestor.</p></div><button class="button primary" data-action="new-expense">+ Nuevo gasto</button></div>
+  <section class="card expense-list"><div class="list-toolbar"><div class="search-box"><svg class="icon" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m15.5 15.5 5 5"/></svg><input id="expense-search" placeholder="Buscar concepto, proveedor o número…" value="${esc(expenseQuery)}" aria-label="Buscar gastos"></div><span class="expense-list-note">Todo el histórico</span></div>
+  <div class="tabs" role="group" aria-label="Filtrar gastos">${filters.map(([value, label]) => `<button type="button" data-expense-filter="${value}" class="${expenseFilter === value ? 'selected' : ''}">${label}<span>${all.filter(e => matchesFilter(e, value)).length}</span></button>`).join('')}</div>
+  <div class="table-scroll"><table><thead><tr><th>Concepto / proveedor</th><th>Fecha</th><th>Total</th><th>Pago</th><th>Justificantes</th><th></th></tr></thead><tbody>${rows.map(e => {
+    const count = (e.attachments || []).length;
+    return `<tr><td><button class="doc-link" data-expense="${esc(e.id)}"><span><strong>${esc(e.description)}</strong>${e.kind === 'credit' ? '<small class="expense-credit-note">Abono / devolución</small>' : ''}<small>${esc(e.supplier || e.category || 'Gasto registrado')}${e.reference ? ' · ' + esc(e.reference) : ''}</small>${needsReview(e) ? `<small class="expense-review-label">${e.vatReviewNeeded ? 'IVA por revisar' : count ? 'Por revisar' : 'Falta justificante'}</small>` : ''}</span></button></td><td class="date-cell">${dateLabel(e.date)}</td><td class="amount">${money(expenseTotals(e).total)}</td><td><span class="badge ${e.paymentStatus === 'paid' ? 'paid' : 'issued'}"><i></i>${e.paymentStatus === 'paid' ? e.kind === 'credit' ? 'Reembolsado' : 'Pagado' : 'Pendiente'}</span></td><td><span class="expense-file-count ${count ? '' : 'is-missing'}">${count} ${count === 1 ? 'archivo' : 'archivos'}</span></td><td><button class="icon-btn" data-expense="${esc(e.id)}" aria-label="Editar gasto: ${esc(e.description)}">›</button></td></tr>`;
+  }).join('') || `<tr><td colspan="6"><div class="expense-empty"><strong>${all.length ? 'No hay gastos con este filtro.' : 'Guarda tu primer justificante.'}</strong><p>${all.length ? 'Prueba con otro concepto o selecciona «Todos».' : 'Añade el concepto y el total, haz una foto o adjunta el archivo y guárdalo.'}</p>${all.length ? '<button class="button secondary" id="reset-expense-filter">Ver todos los gastos</button>' : '<button class="button secondary" data-action="new-expense">+ Nuevo gasto</button>'}</div></td></tr>`}</tbody></table></div>
+  <div class="table-footer">${rows.length} ${rows.length === 1 ? 'gasto' : 'gastos'}<span>Selecciona un gasto para ver o editar sus datos</span></div></section>`;
+}
 
-export function openingBalanceModal(ctx){const c=ctx.getState().company,editable=ctx.getMode()!=='cloud'||ctx.getBackend()?.workspaceInfo()?.role==='admin';ctx.openModal(ctx.modalHeader('Saldo inicial','El punto de partida para tu caja y tu cuenta.')+`<form id="opening-form"><div class="form-grid">${field('Saldo al comienzo del día (€)','openingBalance',c.openingBalance??'','number','step="0.01" required')}${field('Día de inicio','openingBalanceDate',c.openingBalanceDate||todayISO(),'date',`max="${todayISO()}" required`)}</div><p class="field-hint">Introduce el saldo antes de los movimientos de ese día. Los cobros y gastos pagados desde esa fecha se añadirán o restarán. No se consulta el banco automáticamente.</p>${!editable?'<p class="note-banner">Nicole puede ajustar el saldo inicial compartido.</p>':''}<div class="modal-actions"><button class="button secondary" type="button" data-close>Cancelar</button><button class="button primary" ${editable?'':'disabled'}>Guardar saldo inicial</button></div></form>`);ctx.enhance();const form=ctx.modalRoot.querySelector('#opening-form');form.onsubmit=async e=>{e.preventDefault();if(!editable)return;const f=new FormData(form);if(await ctx.commit(s=>{s.company.openingBalance=Number(f.get('openingBalance'));s.company.openingBalanceDate=f.get('openingBalanceDate')},'Saldo inicial guardado.'))ctx.closeModal()};}
+export function bindExpenses(root, ctx) {
+  root.querySelectorAll('[data-expense]').forEach(b => b.onclick = () => expenseModal(ctx, ctx.getState().expenses.find(e => e.id === b.dataset.expense)));
+  root.querySelectorAll('[data-expense-filter]').forEach(b => b.onclick = () => {
+    expenseFilter = b.dataset.expenseFilter;
+    ctx.render();
+    root.querySelector(`[data-expense-filter="${expenseFilter}"]`)?.focus();
+  });
+  const search = root.querySelector('#expense-search');
+  if (search) search.oninput = () => {
+    const caret = search.selectionStart;
+    expenseQuery = search.value;
+    ctx.render();
+    const next = root.querySelector('#expense-search');
+    next?.focus(); next?.setSelectionRange(caret, caret);
+  };
+  const reset = root.querySelector('#reset-expense-filter');
+  if (reset) reset.onclick = () => { expenseQuery = ''; expenseFilter = 'all'; ctx.render(); };
+}
 
-export function expenseModal(ctx,expense){const draft=structuredClone(expense||{id:crypto.randomUUID(),date:todayISO(),supplier:'',supplierTaxId:'',description:'',category:'Otros',base:0,vatRate:21,vatAmount:0,total:0,vatDeductibleAmount:0,paymentStatus:'pending',paidDate:null,reference:'',notes:'',attachments:[]}),pending=[],removed=[];draft.attachments||=[];const originalAttachments=structuredClone(draft.attachments);let manual=draft.vatRate===undefined||![0,4,10,21].includes(draft.vatRate)||(expense&&splitExpenseTotal(draft.total,draft.vatRate).vatAmount!==draft.vatAmount);
-ctx.openModal(ctx.modalHeader(expense?'Editar gasto':'Registrar gasto','Un justificante, sus importes y el estado de su pago.')+`<form id="expense-form"><div class="form-grid">${field('Proveedor / comercio','supplier',draft.supplier,'text','required maxlength="240"')}${field('NIF del proveedor (opcional)','supplierTaxId',draft.supplierTaxId,'text','maxlength="80"')}${field('Fecha del justificante','date',draft.date,'date',`required max="${todayISO()}"`)}${field('Número de factura o ticket (opcional)','reference',draft.reference,'text','maxlength="240"')}${field('Concepto del gasto','description',draft.description,'text','required maxlength="1000"')}${select('Categoría','category',categories,draft.category)}</div><div class="expense-section"><h3>Importes del justificante</h3><div class="form-grid">${field('Total, IVA incluido (€)','total',draft.total||'','number','min="0.01" step="0.01" required')}${select('IVA del justificante','vatRate',[['21','21%'],['10','10%'],['4','4%'],['0','Sin IVA'],['manual','Indicar IVA del documento']],manual?'manual':draft.vatRate)}${field('IVA soportado (€)','vatAmount',draft.vatAmount,'number','min="0" step="0.01" required')}${field('Base imponible (€)','base',draft.base,'number','readonly step="0.01"')}</div><p class="field-hint">Comprueba el desglose del documento. Si tiene varios tipos de IVA, elige «Indicar IVA del documento».</p><label class="checkbox-label"><input name="deductible" type="checkbox" ${draft.vatDeductibleAmount>0?'checked':''}>IVA confirmado para revisión del gestor</label>${field('Importe de IVA confirmado (€)','vatDeductibleAmount',draft.vatDeductibleAmount||0,'number','min="0" step="0.01"')}<p class="field-hint">Marcarlo no presenta una declaración ni confirma por sí solo que el gasto sea deducible.</p></div><div class="expense-section"><h3>Pago y seguimiento</h3><div class="form-grid">${select('Estado del pago','paymentStatus',[['pending','Pendiente de pagar'],['paid','Pagado']],draft.paymentStatus)}${field('Fecha del pago','paidDate',draft.paidDate||draft.date,'date',`max="${todayISO()}"`)}</div><label class="field"><span>Notas (opcional)</span><textarea name="notes" rows="2" maxlength="10000">${esc(draft.notes)}</textarea></label><label class="checkbox-label"><input name="reviewNeeded" type="checkbox" ${draft.reviewNeeded?'checked':''}>Revisar este justificante con el gestor</label></div><div class="expense-section"><h3>Fotos y archivos</h3><p class="field-hint">Hasta 10 MB por archivo. PDF, fotos y documentos de Office. Se guardan privados con el gasto.</p><div class="receipt-actions"><label class="button secondary">Adjuntar archivos<input class="visually-hidden" type="file" id="receipt-files" multiple accept="${Object.keys(RECEIPT_FILE_TYPES).map(e=>'.'+e).join(',')}"></label><label class="button secondary">Tomar una foto<input class="visually-hidden" type="file" id="receipt-camera" accept="image/jpeg,image/png,image/webp,image/heic,image/heif" capture="environment"></label></div><div class="receipt-list" id="receipt-list"></div><p class="field-hint">Los archivos se suben al guardar. La copia JSON guarda sus referencias; el expediente trimestral incluye los archivos.</p></div><div class="modal-actions">${expense?'<button type="button" class="text-button danger" id="remove-expense">Eliminar gasto</button>':''}<button class="button secondary" type="button" data-close>Cancelar</button><button class="button primary" id="save-expense">Guardar gasto</button></div></form>`,true);
-const form=ctx.modalRoot.querySelector('#expense-form'),list=form.querySelector('#receipt-list');
-function redrawFiles(){list.innerHTML=draft.attachments.map((a,i)=>`<div class="receipt-row"><div><strong>${esc(a.name)}</strong><small>${(a.size/1024).toFixed(0)} KB · guardado</small></div><button type="button" class="text-button" data-open-file="${i}">Descargar</button><button type="button" class="icon-btn danger" data-remove-file="${i}" aria-label="Quitar ${esc(a.name)}">×</button></div>`).join('')+pending.map((f,i)=>`<div class="receipt-row"><div><strong>${esc(f.name)}</strong><small>${(f.size/1024).toFixed(0)} KB · listo para guardar</small></div><button type="button" class="icon-btn danger" data-remove-pending="${i}" aria-label="Quitar ${esc(f.name)}">×</button></div>`).join('');list.querySelectorAll('[data-remove-file]').forEach(b=>b.onclick=()=>{removed.push(draft.attachments.splice(Number(b.dataset.removeFile),1)[0]);redrawFiles()});list.querySelectorAll('[data-remove-pending]').forEach(b=>b.onclick=()=>{pending.splice(Number(b.dataset.removePending),1);redrawFiles()});list.querySelectorAll('[data-open-file]').forEach(b=>b.onclick=async()=>{b.disabled=true;try{const a=draft.attachments[Number(b.dataset.openFile)],blob=ctx.getMode()==='cloud'?await ctx.getBackend().downloadReceipt(a):await localReceipt(a);if(ctx.getMode()==='locked')throw new Error('Vuelve a entrar para descargar el archivo.');saveBlob(blob,a.name)}catch(e){ctx.toast(e.message,true)}finally{b.disabled=false}})}
-function syncAmounts(){try{manual=form.elements.vatRate.value==='manual';form.elements.vatAmount.readOnly=!manual;const t=manual?splitExpenseTotalManual(form.elements.total.value||0,form.elements.vatAmount.value||0):splitExpenseTotal(form.elements.total.value||0,Number(form.elements.vatRate.value));if(!manual)form.elements.vatAmount.value=t.vatAmount.toFixed(2);form.elements.base.value=t.base.toFixed(2);form.elements.vatDeductibleAmount.max=String(t.vatAmount);}catch(e){form.elements.base.value=''}}
-function syncPayment(){const paid=form.elements.paymentStatus.value==='paid';form.elements.paidDate.disabled=!paid;form.elements.paidDate.required=paid;form.elements.paidDate.closest('label').hidden=!paid;ctx.enhance()}
-for(const name of ['total','vatAmount','vatRate'])form.elements[name].addEventListener('input',syncAmounts);form.elements.vatRate.addEventListener('change',syncAmounts);form.elements.paymentStatus.onchange=syncPayment;syncAmounts();syncPayment();const confirmed=form.elements.vatDeductibleAmount;confirmed.disabled=!form.elements.deductible.checked;confirmed.closest('label').hidden=!form.elements.deductible.checked;form.elements.deductible.onchange=()=>{confirmed.disabled=!form.elements.deductible.checked;confirmed.closest('label').hidden=!form.elements.deductible.checked;confirmed.value=form.elements.deductible.checked?form.elements.vatAmount.value:'0'};redrawFiles();ctx.enhance();
-for(const input of form.querySelectorAll('input[type="file"]'))input.onchange=async()=>{for(const file of input.files){try{await validateReceiptFile(file);if(draft.attachments.length+pending.length>=10)throw new Error('Puedes guardar hasta 10 archivos por gasto.');pending.push(file)}catch(e){ctx.toast(e.message,true)}}input.value='';redrawFiles()};
-form.onsubmit=async e=>{e.preventDefault();if(ctx.isBusy())return;const f=new FormData(form),next={...draft,supplier:String(f.get('supplier')).trim(),supplierTaxId:String(f.get('supplierTaxId')).trim(),date:f.get('date'),description:String(f.get('description')).trim(),category:f.get('category'),reference:String(f.get('reference')).trim(),notes:f.get('notes'),paymentStatus:f.get('paymentStatus'),paidDate:f.get('paymentStatus')==='paid'?f.get('paidDate'):null,reviewNeeded:f.has('reviewNeeded')};try{Object.assign(next,manual?splitExpenseTotalManual(Number(f.get('total')),Number(f.get('vatAmount'))):splitExpenseTotal(Number(f.get('total')),Number(f.get('vatRate'))));if(manual)delete next.vatRate;else next.vatRate=Number(f.get('vatRate'));next.vatDeductibleAmount=f.has('deductible')?Number(f.get('vatDeductibleAmount')):0;const sample=structuredClone(ctx.getState());sample.expenses||=[];const i=sample.expenses.findIndex(v=>v.id===next.id);if(i>=0)sample.expenses[i]=next;else sample.expenses.push(next);ctx.validate(sample);}catch(error){ctx.toast(error.message,true);return}
-const queued=[...pending],kept=structuredClone(draft.attachments),removedAtSave=[...removed],disabledBefore=[...form.querySelectorAll('input,select,textarea,button')].map(input=>[input,input.disabled]);disabledBefore.forEach(([input])=>input.disabled=true);const uploaded=[],cloud=ctx.getMode()==='cloud',activeBackend=ctx.getBackend();form.querySelector('#save-expense').disabled=true;ctx.setBusy(true);try{for(const file of queued){let meta;if(cloud)meta=await activeBackend.uploadReceipt(next.id,file);else{const v=await validateReceiptFile(file),id=crypto.randomUUID(),path=`${LOCAL_ORG}/${next.id}/${id}.${v.extension}`;await localFile('put',path,file);meta={id,name:v.name,path,mimeType:v.mimeType,size:v.size}}uploaded.push(meta)}if(!form.isConnected||ctx.getMode()==='locked')throw new Error('La sesión cambió. Vuelve a entrar antes de guardar.');next.attachments=[...kept,...uploaded];ctx.setBusy(false);const saved=await ctx.commit(s=>{s.expenses||=[];const i=s.expenses.findIndex(v=>v.id===next.id);if(i>=0)s.expenses[i]=next;else s.expenses.push(next)},'Gasto y justificantes guardados.');if(!saved)throw new Error('El gasto no se guardó. Puedes volver a intentarlo.');for(const a of removedAtSave)try{if(cloud)await activeBackend.deleteReceipt(a);else await localFile('delete',a.path)}catch{ctx.toast('El gasto se guardó; un archivo retirado quedó pendiente de limpiar.',true)}ctx.closeModal();}catch(error){let cleanupPending=false;for(const a of uploaded)try{if(cloud)await activeBackend.deleteReceipt(a);else await localFile('delete',a.path)}catch{cleanupPending=true}ctx.toast(error.message+(cleanupPending?' Un archivo permanece privado y pendiente de limpiar.':''),true);}finally{ctx.setBusy(false);if(form.isConnected){disabledBefore.forEach(([input,wasDisabled])=>input.disabled=wasDisabled);form.querySelector('#save-expense').disabled=false}}};
-form.querySelector('#remove-expense')?.addEventListener('click',()=>ctx.confirmModal('Eliminar este gasto','Se quitará el registro y se recalculará el saldo. Descarga sus justificantes antes de continuar.',async()=>{if(await ctx.commit(s=>s.expenses=s.expenses.filter(e=>e.id!==draft.id),'Gasto eliminado.')){for(const a of originalAttachments)try{if(ctx.getMode()==='cloud')await ctx.getBackend().deleteReceipt(a);else await localFile('delete',a.path)}catch{ctx.toast('Un justificante quedó pendiente de limpiar.',true)}ctx.closeModal()}}));
+export function openingBalanceModal(ctx) {
+  const c = ctx.getState().company, editable = ctx.getMode() !== 'cloud' || ctx.getBackend()?.workspaceInfo()?.role === 'admin';
+  ctx.openModal(ctx.modalHeader('Saldo inicial', 'El punto de partida para tu caja y tu cuenta.') + `<form id="opening-form"><div class="form-grid">${field('Saldo al comienzo del día (€)', 'openingBalance', c.openingBalance ?? '', 'number', 'step="0.01" required')}${field('Día de inicio', 'openingBalanceDate', c.openingBalanceDate || todayISO(), 'date', `max="${todayISO()}" required`)}</div><p class="field-hint">Introduce el saldo antes de los movimientos de ese día. Los cobros y gastos pagados desde esa fecha se añadirán o restarán. No se consulta el banco automáticamente.</p>${!editable ? '<p class="note-banner">Nicole puede ajustar el saldo inicial compartido.</p>' : ''}<div class="modal-actions"><button class="button secondary" type="button" data-close>Cancelar</button><button class="button primary" ${editable ? '' : 'disabled'}>Guardar saldo inicial</button></div></form>`);
+  ctx.enhance();
+  const form = ctx.modalRoot.querySelector('#opening-form');
+  form.onsubmit = async e => {
+    e.preventDefault(); if (!editable) return;
+    const f = new FormData(form);
+    if (await ctx.commit(s => { s.company.openingBalance = Number(f.get('openingBalance')); s.company.openingBalanceDate = f.get('openingBalanceDate'); }, 'Saldo inicial guardado.')) ctx.closeModal();
+  };
+}
+
+export function expenseModal(ctx, expense) {
+  const draft = structuredClone(expense || { id: crypto.randomUUID(), date: todayISO(), supplier: '', supplierTaxId: '', description: '', category: 'Otros', base: 0, vatAmount: 0, total: 0, vatDeductibleAmount: 0, vatReviewNeeded: true, paymentStatus: 'paid', paidDate: todayISO(), reference: '', notes: '', attachments: [] });
+  const pending = [], removed = [];
+  draft.attachments ||= [];
+  const originalAttachments = structuredClone(draft.attachments), isCredit = draft.kind === 'credit', hasCashMovements = Array.isArray(draft.cashMovements) && draft.cashMovements.length > 0;
+  const expenseCategories=categories.some(([value])=>value===draft.category)||!draft.category?categories:[...categories,[draft.category,draft.category]];
+  const cashDetails = hasCashMovements ? `<div class="expense-cash-evidence"><strong>Pagos registrados</strong>${draft.cashMovements.map(m => `<div><span>${dateLabel(m.date)}</span><b>${money(m.amount)}</b></div>`).join('')}<p>Estas fechas e importes se conservan al editar el gasto. Al guardarlo como pendiente se retirarán sus pagos del registro.</p></div>` : draft.cashAmount !== undefined ? `<div class="expense-cash-evidence"><strong>Importe pagado registrado</strong><div><span>Total del movimiento</span><b>${money(draft.cashAmount)}</b></div><p>Este importe puede diferir del justificante por descuentos o ajustes. Se conserva al editar el gasto; se retira si lo guardas como pendiente.</p></div>` : '';
+  let verifyingFiles = 0;
+  const knownRate = [0, 4, 10, 21].includes(draft.vatRate) && splitExpenseTotal(draft.total - (draft.additionalAmount || 0), draft.vatRate).vatAmount === draft.vatAmount;
+  const vatChoice = draft.vatReviewNeeded ? 'review' : knownRate ? String(draft.vatRate) : 'manual';
+  ctx.openModal(ctx.modalHeader(expense ? 'Editar gasto' : 'Nuevo gasto', 'Guarda el justificante ahora. Completa los detalles cuando quieras.') + `<form id="expense-form" class="expense-quick-form">
+  <div class="expense-quick-fields">${field('Concepto / nombre del gasto', 'description', draft.description, 'text', 'required maxlength="2000" placeholder="Comida, material, transporte…"')}
+  <div class="form-grid expense-amount-grid">${field(isCredit ? 'Importe del abono, IVA incluido (€)' : 'Total, IVA incluido (€)', 'total', draft.total || '', 'number', `${isCredit ? 'max="-0.01"' : 'min="0.01"'} step="0.01" required inputmode="decimal" placeholder="0,00"`)}${select('IVA del justificante', 'vatRate', [['review', 'Por revisar'], ['21', '21%'], ['10', '10%'], ['4', '4%'], ['0', 'Sin IVA'], ['manual', 'Indicar importe de IVA']], vatChoice)}</div>
+  <div id="manual-vat-field" ${vatChoice === 'manual' ? '' : 'hidden'}>${field('IVA que aparece en el documento (€)', 'vatAmount', draft.vatAmount, 'number', `${isCredit ? 'max="0"' : 'min="0"'} step="0.01" inputmode="decimal"`)}</div><p class="field-hint expense-vat-hint" id="expense-vat-hint"></p>
+  <label class="checkbox-label expense-paid-toggle"><input name="alreadyPaid" type="checkbox" ${draft.paymentStatus === 'paid' ? 'checked' : ''}>${isCredit ? 'Reembolso recibido' : 'Ya está pagado'}</label><p class="field-hint expense-payment-warning" id="expense-cash-change-warning" hidden>Al guardar como pendiente se retirarán del saldo sus pagos registrados.</p></div>
+  <section class="expense-receipts"><div class="expense-section-heading"><h3>Justificante</h3><span>${expense ? 'Fotos y archivos' : 'Necesario para guardar'}</span></div><div class="receipt-actions"><label class="button primary">Tomar una foto<input class="visually-hidden" type="file" id="receipt-camera" accept="image/jpeg,image/png,image/webp,image/heic,image/heif" capture="environment"></label><label class="button secondary">Adjuntar archivos<input class="visually-hidden" type="file" id="receipt-files" multiple accept="${Object.keys(RECEIPT_FILE_TYPES).map(e => '.' + e).join(',')}"></label></div><div class="receipt-list" id="receipt-list"></div><p class="field-hint">PDF, fotos o documentos. Hasta 10 MB por archivo; se guardan privados.</p></section>
+  <details class="expense-details"><summary><span>Más detalles</span><small>Fecha, proveedor y datos para el gestor</small></summary><div class="expense-details-body"><div class="form-grid">${field('Fecha del justificante', 'date', draft.date, 'date', `required max="${todayISO()}"`)}${field(isCredit ? 'Fecha del reembolso' : 'Fecha del pago', 'paidDate', draft.paidDate || (expense ? draft.date : todayISO()), 'date', `max="${todayISO()}"`)}${field('Proveedor / comercio (opcional)', 'supplier', draft.supplier, 'text', 'maxlength="240"')}${field('NIF del proveedor (opcional)', 'supplierTaxId', draft.supplierTaxId, 'text', 'maxlength="80"')}${field('Número de factura o ticket (opcional)', 'reference', draft.reference, 'text', 'maxlength="240"')}${select('Categoría', 'category', expenseCategories, draft.category || 'Otros')}</div>${cashDetails}<div class="expense-section"><h3>Desglose para el gestor</h3>${field('Suplidos / importe adicional sin IVA (€)', 'additionalAmount', draft.additionalAmount || 0, 'number', `${isCredit ? 'max="0"' : 'min="0"'} step="0.01" inputmode="decimal"`)}${field('Base imponible (€)', 'base', draft.vatReviewNeeded ? '' : draft.base, 'number', 'readonly step="0.01"')}<p class="field-hint">Si hay varios tipos de IVA, selecciona «Indicar importe de IVA» y copia el total de IVA del documento.</p><label class="checkbox-label"><input name="deductible" type="checkbox" ${draft.vatDeductibleAmount !== 0 && draft.vatDeductibleAmount !== undefined ? 'checked' : ''}>IVA confirmado para revisión del gestor</label>${field('Importe de IVA confirmado (€)', 'vatDeductibleAmount', draft.vatDeductibleAmount || 0, 'number', 'min="0" step="0.01"')}<p class="field-hint">El gestor revisará si el gasto y su IVA son deducibles.</p></div><div class="expense-section"><label class="field"><span>Notas (opcional)</span><textarea name="notes" rows="2" maxlength="10000">${esc(draft.notes || '')}</textarea></label><label class="checkbox-label"><input name="reviewNeeded" type="checkbox" ${draft.reviewNeeded ? 'checked' : ''}>Revisar este justificante con el gestor</label></div></div></details>
+  <div class="modal-actions">${expense ? '<button type="button" class="text-button danger" id="remove-expense">Eliminar gasto</button>' : ''}<button class="button secondary" type="button" data-close>Cancelar</button><button class="button primary" id="save-expense">Guardar gasto</button></div></form>`);
+  const form = ctx.modalRoot.querySelector('#expense-form'), list = form.querySelector('#receipt-list'), save = form.querySelector('#save-expense');
+  form.addEventListener('invalid', e => { const details = e.target.closest('details'); if (details) details.open = true; }, true);
+  function redrawFiles() {
+    list.innerHTML = draft.attachments.map((a, i) => `<div class="receipt-row"><div><strong>${esc(a.name)}</strong><small>${(a.size / 1024).toFixed(0)} KB · guardado</small></div><button type="button" class="text-button" data-open-file="${i}">Descargar</button><button type="button" class="icon-btn danger" data-remove-file="${i}" aria-label="Quitar ${esc(a.name)}">×</button></div>`).join('') + pending.map((f, i) => `<div class="receipt-row"><div><strong>${esc(f.name)}</strong><small>${(f.size / 1024).toFixed(0)} KB · listo para guardar</small></div><button type="button" class="icon-btn danger" data-remove-pending="${i}" aria-label="Quitar ${esc(f.name)}">×</button></div>`).join('') || '<div class="expense-receipt-placeholder">Haz una foto o añade el archivo que has recibido.</div>';
+    list.querySelectorAll('[data-remove-file]').forEach(b => b.onclick = () => { removed.push(draft.attachments.splice(Number(b.dataset.removeFile), 1)[0]); redrawFiles(); });
+    list.querySelectorAll('[data-remove-pending]').forEach(b => b.onclick = () => { pending.splice(Number(b.dataset.removePending), 1); redrawFiles(); });
+    list.querySelectorAll('[data-open-file]').forEach(b => b.onclick = async () => {
+      b.disabled = true;
+      try {
+        const a = draft.attachments[Number(b.dataset.openFile)], blob = ctx.getMode() === 'cloud' ? await ctx.getBackend().downloadReceipt(a) : await localReceipt(a);
+        if (ctx.getMode() === 'locked') throw new Error('Vuelve a entrar para descargar el archivo.');
+        saveBlob(blob, a.name);
+      } catch (e) { ctx.toast(e.message, true); } finally { b.disabled = false; }
+    });
+  }
+  function syncConfirmed() {
+    const reviewing = form.elements.vatRate.value === 'review';
+    if (reviewing) { form.elements.deductible.checked = false; form.elements.vatDeductibleAmount.value = '0'; }
+    form.elements.deductible.disabled = reviewing;
+    const enabled = !reviewing && form.elements.deductible.checked;
+    form.elements.vatDeductibleAmount.disabled = !enabled;
+    form.elements.vatDeductibleAmount.closest('label').hidden = !enabled;
+  }
+  function syncAmounts() {
+    const choice = form.elements.vatRate.value, manual = choice === 'manual', reviewing = choice === 'review';
+    form.querySelector('#manual-vat-field').hidden = !manual;
+    form.elements.vatAmount.required = manual;
+    form.elements.vatAmount.readOnly = !manual;
+    const hint = form.querySelector('#expense-vat-hint');
+    try {
+      const additional = Number(form.elements.additionalAmount.value || 0), taxableTotal = Number(form.elements.total.value || 0) - additional;
+      const t = manual ? splitExpenseTotalManual(taxableTotal, form.elements.vatAmount.value || 0) : splitExpenseTotal(taxableTotal, reviewing ? 0 : Number(choice));
+      if (!manual) form.elements.vatAmount.value = t.vatAmount.toFixed(2);
+      form.elements.base.value = reviewing ? '' : t.base.toFixed(2);
+      form.elements.vatDeductibleAmount.min = String(isCredit ? t.vatAmount : 0);
+      form.elements.vatDeductibleAmount.max = String(isCredit ? 0 : t.vatAmount);
+      hint.textContent = reviewing ? 'El total queda guardado. El IVA se deja pendiente para revisar el documento.' : `Base: ${money(t.base)} · IVA: ${money(t.vatAmount)}${additional ? ' · Adicional: ' + money(additional) : ''}`;
+    } catch { form.elements.base.value = ''; hint.textContent = 'Revisa el total y el IVA del justificante.'; }
+    syncConfirmed();
+  }
+  function syncPayment() {
+    const paid = form.elements.alreadyPaid.checked;
+    form.elements.paidDate.disabled = !paid || hasCashMovements; form.elements.paidDate.required = paid && !hasCashMovements;
+    form.elements.paidDate.closest('label').hidden = !paid;
+    form.querySelector('#expense-cash-change-warning').hidden = paid || (!hasCashMovements && draft.cashAmount === undefined);
+    ctx.enhance();
+  }
+  for (const name of ['total', 'vatAmount', 'additionalAmount']) form.elements[name].addEventListener('input', syncAmounts);
+  form.elements.vatRate.addEventListener('change', syncAmounts);
+  form.elements.alreadyPaid.onchange = syncPayment;
+  form.elements.deductible.onchange = () => { form.elements.vatDeductibleAmount.value = form.elements.deductible.checked ? form.elements.vatAmount.value : '0'; syncConfirmed(); };
+  syncAmounts(); syncPayment(); redrawFiles(); ctx.enhance();
+  for (const input of form.querySelectorAll('input[type="file"]')) input.onchange = async () => {
+    const files = [...input.files]; input.value = ''; verifyingFiles++; save.disabled = true;
+    try {
+      for (const file of files) {
+        try {
+          await validateReceiptFile(file);
+          if (!form.isConnected) return;
+          if (draft.attachments.length + pending.length >= 10) throw new Error('Puedes guardar hasta 10 archivos por gasto.');
+          pending.push(file);
+        } catch (e) { ctx.toast(e.message, true); }
+      }
+    } finally { verifyingFiles--; if (form.isConnected) { save.disabled = verifyingFiles > 0 || ctx.isBusy(); redrawFiles(); } }
+  };
+  form.onsubmit = async e => {
+    e.preventDefault();
+    if (ctx.isBusy()) return;
+    if (verifyingFiles) { ctx.toast('Espera a que termine la comprobación del justificante.', true); return; }
+    if (!expense && !draft.attachments.length && !pending.length) { ctx.toast('Añade una foto o un archivo como justificante del gasto.', true); form.querySelector('#receipt-camera').closest('label').scrollIntoView({ block: 'center', behavior: 'smooth' }); return; }
+    const f = new FormData(form), paid = f.has('alreadyPaid'), choice = String(f.get('vatRate'));
+    const next = { ...draft, additionalAmount: Number(f.get('additionalAmount') || 0), supplier: String(f.get('supplier') || '').trim(), supplierTaxId: String(f.get('supplierTaxId') || '').trim(), date: f.get('date'), description: String(f.get('description') || '').trim(), category: f.get('category'), reference: String(f.get('reference') || '').trim(), notes: String(f.get('notes') || ''), paymentStatus: paid ? 'paid' : 'pending', paidDate: paid ? hasCashMovements ? draft.paidDate : f.get('paidDate') : null, reviewNeeded: f.has('reviewNeeded'), vatReviewNeeded: choice === 'review' };
+    try {
+      if (!paid) { delete next.cashAmount; delete next.cashMovements; }
+      const total = Number(f.get('total')), taxableTotal = total - next.additionalAmount;
+      Object.assign(next, choice === 'manual' ? splitExpenseTotalManual(taxableTotal, Number(f.get('vatAmount'))) : splitExpenseTotal(taxableTotal, choice === 'review' ? 0 : Number(choice)));
+      next.total = total;
+      if (choice === 'manual' || choice === 'review') delete next.vatRate; else next.vatRate = Number(choice);
+      next.vatDeductibleAmount = choice !== 'review' && f.has('deductible') ? Number(f.get('vatDeductibleAmount')) : 0;
+      const sample = structuredClone(ctx.getState()); sample.expenses ||= [];
+      const i = sample.expenses.findIndex(v => v.id === next.id);
+      if (i >= 0) sample.expenses[i] = next; else sample.expenses.push(next);
+      ctx.validate(sample);
+    } catch (error) { ctx.toast(error.message, true); return; }
+    const queued = [...pending], kept = structuredClone(draft.attachments), removedAtSave = [...removed];
+    const disabledBefore = [...form.querySelectorAll('input,select,textarea,button')].map(input => [input, input.disabled]);
+    disabledBefore.forEach(([input]) => input.disabled = true);
+    const uploaded = [], cloud = ctx.getMode() === 'cloud', activeBackend = ctx.getBackend();
+    ctx.setBusy(true);
+    try {
+      for (const file of queued) {
+        let meta;
+        if (cloud) meta = await activeBackend.uploadReceipt(next.id, file);
+        else {
+          const v = await validateReceiptFile(file), id = crypto.randomUUID(), path = `${LOCAL_ORG}/${next.id}/${id}.${v.extension}`;
+          await localFile('put', path, file);
+          meta = { id, name: v.name, path, mimeType: v.mimeType, size: v.size };
+        }
+        uploaded.push(meta);
+      }
+      if (!form.isConnected || ctx.getMode() === 'locked') throw new Error('La sesión cambió. Vuelve a entrar antes de guardar.');
+      next.attachments = [...kept, ...uploaded];
+      ctx.setBusy(false);
+      const saved = await ctx.commit(s => {
+        s.expenses ||= [];
+        const i = s.expenses.findIndex(v => v.id === next.id);
+        if (i >= 0) s.expenses[i] = next; else s.expenses.push(next);
+      }, 'Gasto y justificantes guardados.');
+      if (!saved) throw new Error('El gasto no se guardó. Puedes volver a intentarlo.');
+      for (const a of removedAtSave) try { if (cloud) await activeBackend.deleteReceipt(a); else await localFile('delete', a.path); } catch { ctx.toast('El gasto se guardó; un archivo retirado quedó pendiente de limpiar.', true); }
+      ctx.closeModal();
+    } catch (error) {
+      let cleanupPending = false;
+      for (const a of uploaded) try { if (cloud) await activeBackend.deleteReceipt(a); else await localFile('delete', a.path); } catch { cleanupPending = true; }
+      ctx.toast(error.message + (cleanupPending ? ' Un archivo permanece privado y pendiente de limpiar.' : ''), true);
+    } finally {
+      ctx.setBusy(false);
+      if (form.isConnected) { disabledBefore.forEach(([input, wasDisabled]) => input.disabled = wasDisabled); save.disabled = false; }
+    }
+  };
+  form.querySelector('#remove-expense')?.addEventListener('click', () => ctx.confirmModal('Eliminar este gasto', 'Se quitará el registro y se recalculará el saldo. Descarga sus justificantes antes de continuar.', async () => {
+    if (await ctx.commit(s => s.expenses = s.expenses.filter(e => e.id !== draft.id), 'Gasto eliminado.')) {
+      for (const a of originalAttachments) try { if (ctx.getMode() === 'cloud') await ctx.getBackend().deleteReceipt(a); else await localFile('delete', a.path); } catch { ctx.toast('Un justificante quedó pendiente de limpiar.', true); }
+      ctx.closeModal();
+    }
+  }));
 }

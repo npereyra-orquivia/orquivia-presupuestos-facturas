@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { inflateSync } from 'node:zlib';
 import JSZip from 'jszip';
-import { buildQuarterBundle } from '../src/quarter-export.js';
+import { buildQuarterBundle, buildPeriodBundle } from '../src/quarter-export.js';
 
 const ORG = 'a2000000-0000-4000-8000-000000000001';
 const EXPENSE = 'a4000000-0000-4000-8000-000000000001';
@@ -128,4 +128,32 @@ test('a missing or incomplete receipt aborts the quarter export before any downl
   await assert.rejects(buildQuarterBundle(fixture({ documents: false }), 2025, 1, {
     async downloadLocalReceipt() { return new Blob(['short']); },
   }), /No se ha creado un archivo parcial/);
+});
+
+test('year and all-history bundles export their entire selected period without depending on later changes', async () => {
+  const state = fixture({ attachments: [] });
+  const period = { type: 'year', year: 2025 };
+  const annual = await buildPeriodBundle(state, period, { onProgress() { period.year = 2026; } });
+  assert.equal(annual.name, 'Orquivia_2025_Anual.zip');
+  assert.equal(annual.invoiceCount, 2);
+  const yearZip = await openBundle(annual);
+  const yearCSV = await yearZip.file('registro-anual.csv').async('string');
+  assert.match(yearCSV, /F-2025-001/);
+  assert.match(yearCSV, /F-2025-002/);
+  assert.doesNotMatch(yearCSV, /PR-2025-001/);
+  state.expenses[0].supplier = '';
+  state.expenses[0].base = 121;
+  state.expenses[0].vatAmount = 0;
+  state.expenses[0].vatDeductibleAmount = 0;
+  state.expenses[0].vatReviewNeeded = true;
+  delete state.expenses[0].vatRate;
+  const all = await buildPeriodBundle(state, { type: 'all' });
+  assert.equal(all.name, 'Orquivia_Historico_completo.zip');
+  const allZip = await openBundle(all);
+  assert.ok(allZip.file('registro-historico.csv'));
+  const summary = await allZip.file('resumen.txt').async('string');
+  assert.match(summary, /Todo el histórico/);
+  assert.match(summary, /Gastos con base e IVA pendientes de revisar: 1/);
+  assert.match(summary, /Diferencia de actividad antes de retenciones: Pendiente/);
+  assert.equal(all.invoiceCount, 2);
 });
