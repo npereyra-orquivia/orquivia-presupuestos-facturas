@@ -167,8 +167,9 @@ async function action(name,id,kind){const d=state.documents.find(x=>x.id===id);
 
 }
 function disposeModalControls(){modalControlDisposers.splice(0).forEach(dispose=>dispose())}
+function registerModalCleanup(dispose){modalControlDisposers.push(dispose);return()=>{const index=modalControlDisposers.indexOf(dispose);if(index>=0)modalControlDisposers.splice(index,1)}}
 function enhanceModal(onCreateClient){modalControlDisposers.push(enhanceControls(modalRoot,{onCreateClient}))}
-function expenseContext(){return {getState:()=>state,getMode:()=>mode,getBackend:()=>backend,modalRoot,logo:documentLogo,openModal,modalHeader,closeModal,confirmModal,commit,render,toast,validate:validateState,isBusy:()=>busy,setBusy:value=>busy=value,enhance:()=>enhanceModal()}}
+function expenseContext(){return {getState:()=>state,getMode:()=>mode,getIdentity:()=>user?.id||mode,getBackend:()=>backend,registerModalCleanup,modalRoot,logo:documentLogo,openModal,modalHeader,closeModal,confirmModal,commit,render,toast,validate:validateState,isBusy:()=>busy,setBusy:value=>busy=value,enhance:()=>enhanceModal()}}
 function openModal(content,wide=false){disposeModalControls();modalCancel=null;previousFocus=document.activeElement;app.inert=true;modalRoot.innerHTML=`<div class="modal-backdrop"><section class="modal ${wide?'wide':''}" role="dialog" aria-modal="true" aria-label="Detalle de Orquívia">${content}</section></div>`;document.body.classList.add('modal-open');modalRoot.querySelectorAll('[data-close]').forEach(b=>b.onclick=()=>closeModal());modalRoot.querySelector('.modal-backdrop').onclick=e=>{if(e.target===e.currentTarget)closeModal()};setTimeout(()=>modalRoot.querySelector('input,select,button')?.focus(),0)}
 function closeModal(force=false){if(busy&&!force)return;if(!force&&modalCancel){const back=modalCancel;modalCancel=null;back();return}modalCancel=null;disposeModalControls();modalRoot.innerHTML='';app.inert=false;document.body.classList.remove('modal-open');editor=null;previousFocus?.focus()}
 document.addEventListener('keydown',e=>{if(!modalRoot.childElementCount)return;if(e.key==='Escape')closeModal();if(e.key==='Tab'){const nodes=[...modalRoot.querySelectorAll('button,input,select,textarea,a[href]')].filter(n=>!n.disabled&&n.tabIndex>=0&&n.offsetParent!==null&&!n.closest('[hidden]'));if(!nodes.length)return;const first=nodes[0],last=nodes.at(-1);if(e.shiftKey&&document.activeElement===first){last.focus();e.preventDefault()}else if(!e.shiftKey&&document.activeElement===last){first.focus();e.preventDefault()}}});
@@ -312,7 +313,7 @@ setInterval(async()=>{
   if(sessionShouldLock({lastActivityAt})){try{await backend.signOut()}finally{lockPrivate('La sesión se cerró tras 30 minutos sin actividad.')}return}
   try{await backend.refreshAccess()}catch(e){if(['ACCESS_REVOKED','MFA_REQUIRED','MEMBERSHIP_REQUIRED','AUTH_REQUIRED','AUTH_ERROR','AUTH_CHANGED'].includes(e.code))lockPrivate(e.message)}
 },30000);
-setInterval(()=>{if(mode!=='locked'&&page!=='personal'&&!modalRoot.childElementCount&&!busy&&!personalBusy&&!document.activeElement?.closest('input,textarea,select,[role="combobox"]')&&!app.querySelector('[role="combobox"][aria-expanded="true"]')){render()}},60000);
+setInterval(()=>{if(mode!=='locked'&&page!=='personal'&&!modalRoot.childElementCount&&!document.querySelector('[data-receipt-viewer]')&&!busy&&!personalBusy&&!document.activeElement?.closest('input,textarea,select,[role="combobox"]')&&!app.querySelector('[role="combobox"][aria-expanded="true"]')){render()}},60000);
 if(window.top!==window.self){app.textContent='Abre Orquívia directamente en su página para iniciar sesión.';}
 else if(publicConfigIsValid(config)){
   connectBackend();lockPrivate();

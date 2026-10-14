@@ -2,6 +2,7 @@ import './expenses.css';
 import { money, todayISO, escapeHTML as esc } from './domain.js';
 import { expenseTotals, splitExpenseTotal, splitExpenseTotalManual, cashSummary } from './expenses.js';
 import { validateReceiptFile, RECEIPT_FILE_TYPES } from './backend.js';
+import { icon } from './icons.js';
 
 const LOCAL_ORG = '00000000-0000-4000-8000-000000000001';
 const field = (label, name, value = '', type = 'text', extra = '') => `<label class="field"><span>${label}</span><input name="${name}" type="${type}" value="${esc(String(value ?? ''))}" ${extra}></label>`;
@@ -10,7 +11,7 @@ const dateLabel = date => new Intl.DateTimeFormat('es-ES', { dateStyle: 'medium'
 const categories = [['Servicios', 'Servicios profesionales'], ['Material', 'Material y equipos'], ['Transporte', 'Transporte'], ['Suministros', 'Suministros'], ['Comidas', 'Comidas y dietas'], ['Otros', 'Otros gastos']];
 const fold = value => String(value ?? '').normalize('NFD').replace(/\p{Diacritic}/gu, '').toLocaleLowerCase('es');
 const needsReview = expense => expense.reviewNeeded || expense.vatReviewNeeded || !(expense.attachments || []).length;
-let expenseQuery = '', expenseFilter = 'all';
+let expenseQuery = '', expenseFilter = 'all', viewerRequest=0, activeViewer=null;
 const saveBlob = (blob, name) => {
   const url = URL.createObjectURL(blob), a = document.createElement('a');
   a.href = url; a.download = name; a.click();
@@ -45,6 +46,25 @@ export async function localReceipt(attachment) {
   return blob;
 }
 
+async function previewReceipts(ctx,attachments,initialIndex=0,{pendingFiles=new Map(),trigger}={}){
+  if(!attachments.length||ctx.getMode()==='locked')return;
+  const request=++viewerRequest,mode=ctx.getMode(),backend=ctx.getBackend(),identity=ctx.getIdentity();
+  const isActive=()=>ctx.getMode()===mode&&ctx.getBackend()===backend&&ctx.getIdentity()===identity;
+  if(trigger)trigger.disabled=true;
+  try{
+    const {openReceiptViewer}=await import('./receipt-viewer.js');
+    if(request!==viewerRequest||!isActive()||trigger&&!trigger.isConnected)return;
+    activeViewer?.dispose();let unregister=()=>{},controller=null;
+    controller=openReceiptViewer({attachments:structuredClone(attachments),initialIndex,isActive,returnFocus:trigger,
+      loadAttachment:async attachment=>{
+        if(!isActive())throw new Error('La sesión ha cambiado. Vuelve a entrar para ver el justificante.');
+        const file=pendingFiles.get(attachment.id);
+        return file|| (mode==='cloud'?await backend.downloadReceipt(attachment):await localReceipt(attachment));
+      },onClose:()=>{unregister();if(activeViewer===controller)activeViewer=null}});
+    activeViewer=controller;unregister=ctx.registerModalCleanup(controller.dispose);
+  }catch(error){if(isActive())ctx.toast(error.message,true)}finally{if(trigger?.isConnected)trigger.disabled=false}
+}
+
 export function cashCard(state) {
   const c = cashSummary(state);
   return `<section class="card cash-card"><div class="cash-main"><span class="eyebrow">TU SALDO SEGÚN EL REGISTRO</span><h2>${c.configured ? money(c.balance) : 'Configura tu saldo inicial'}</h2><p>${c.configured ? 'Saldo inicial + cobros − gastos pagados desde ' + dateLabel(c.openingBalanceDate) + '.' : 'Indica el saldo al comienzo de un día para calcular lo que queda en caja o en cuenta.'}</p><button class="text-button" data-action="opening-balance">${c.configured ? 'Ajustar saldo inicial' : 'Añadir saldo inicial'}</button></div><div class="cash-metrics"><div><small>Cobros registrados${c.configured ? ' desde el inicio' : ''}</small><strong>${money(c.received)}</strong></div><div><small>Gastos pagados${c.configured ? ' desde el inicio' : ''}</small><strong>${money(c.paidExpenses)}</strong></div><div><small>Previsión tras cobrar y pagar pendientes</small><strong>${c.configured ? money(c.forecastBalance) : '—'}</strong></div></div><p class="cash-footnote">Saldo registrado para contrastar con el banco. Los cobros sin confirmar se excluyen de la previsión.</p></section>`;
@@ -60,13 +80,14 @@ export function expensesPage(state) {
   <div class="tabs" role="group" aria-label="Filtrar gastos">${filters.map(([value, label]) => `<button type="button" data-expense-filter="${value}" class="${expenseFilter === value ? 'selected' : ''}">${label}<span>${all.filter(e => matchesFilter(e, value)).length}</span></button>`).join('')}</div>
   <div class="table-scroll"><table><thead><tr><th>Concepto / proveedor</th><th>Fecha</th><th>Total</th><th>Pago</th><th>Justificantes</th><th></th></tr></thead><tbody>${rows.map(e => {
     const count = (e.attachments || []).length;
-    return `<tr><td><button class="doc-link" data-expense="${esc(e.id)}"><span><strong>${esc(e.description)}</strong>${e.kind === 'credit' ? '<small class="expense-credit-note">Abono / devolución</small>' : ''}<small>${esc(e.supplier || e.category || 'Gasto registrado')}${e.reference ? ' · ' + esc(e.reference) : ''}</small>${needsReview(e) ? `<small class="expense-review-label">${e.vatReviewNeeded ? 'IVA por revisar' : count ? 'Por revisar' : 'Falta justificante'}</small>` : ''}</span></button></td><td class="date-cell">${dateLabel(e.date)}</td><td class="amount">${money(expenseTotals(e).total)}</td><td><span class="badge ${e.paymentStatus === 'paid' ? 'paid' : 'issued'}"><i></i>${e.paymentStatus === 'paid' ? e.kind === 'credit' ? 'Reembolsado' : 'Pagado' : 'Pendiente'}</span></td><td><span class="expense-file-count ${count ? '' : 'is-missing'}">${count} ${count === 1 ? 'archivo' : 'archivos'}</span></td><td><button class="icon-btn" data-expense="${esc(e.id)}" aria-label="Editar gasto: ${esc(e.description)}">›</button></td></tr>`;
+    return `<tr><td><button class="doc-link" data-expense="${esc(e.id)}"><span><strong>${esc(e.description)}</strong>${e.kind === 'credit' ? '<small class="expense-credit-note">Abono / devolución</small>' : ''}<small>${esc(e.supplier || e.category || 'Gasto registrado')}${e.reference ? ' · ' + esc(e.reference) : ''}</small>${needsReview(e) ? `<small class="expense-review-label">${e.vatReviewNeeded ? 'IVA por revisar' : count ? 'Por revisar' : 'Falta justificante'}</small>` : ''}</span></button></td><td class="date-cell">${dateLabel(e.date)}</td><td class="amount">${money(expenseTotals(e).total)}</td><td><span class="badge ${e.paymentStatus === 'paid' ? 'paid' : 'issued'}"><i></i>${e.paymentStatus === 'paid' ? e.kind === 'credit' ? 'Reembolsado' : 'Pagado' : 'Pendiente'}</span></td><td>${count?`<button type="button" class="text-button expense-preview-link" data-preview-expense="${esc(e.id)}" aria-label="Ver justificantes: ${esc(e.description)}">${icon('eye')}${count} ${count === 1 ? 'archivo' : 'archivos'}</button>`:'<span class="expense-file-count is-missing">Sin archivos</span>'}</td><td><button class="icon-btn" data-expense="${esc(e.id)}" aria-label="Editar gasto: ${esc(e.description)}">›</button></td></tr>`;
   }).join('') || `<tr><td colspan="6"><div class="expense-empty"><strong>${all.length ? 'No hay gastos con este filtro.' : 'Guarda tu primer justificante.'}</strong><p>${all.length ? 'Prueba con otro concepto o selecciona «Todos».' : 'Añade el concepto y el total, haz una foto o adjunta el archivo y guárdalo.'}</p>${all.length ? '<button class="button secondary" id="reset-expense-filter">Ver todos los gastos</button>' : '<button class="button secondary" data-action="new-expense">+ Nuevo gasto</button>'}</div></td></tr>`}</tbody></table></div>
   <div class="table-footer">${rows.length} ${rows.length === 1 ? 'gasto' : 'gastos'}<span>Selecciona un gasto para ver o editar sus datos</span></div></section>`;
 }
 
 export function bindExpenses(root, ctx) {
   root.querySelectorAll('[data-expense]').forEach(b => b.onclick = () => expenseModal(ctx, ctx.getState().expenses.find(e => e.id === b.dataset.expense)));
+  root.querySelectorAll('[data-preview-expense]').forEach(b=>b.onclick=()=>{const expense=ctx.getState().expenses.find(e=>e.id===b.dataset.previewExpense);if(expense)previewReceipts(ctx,expense.attachments||[],0,{trigger:b})});
   root.querySelectorAll('[data-expense-filter]').forEach(b => b.onclick = () => {
     expenseFilter = b.dataset.expenseFilter;
     ctx.render();
@@ -117,7 +138,11 @@ export function expenseModal(ctx, expense) {
   const form = ctx.modalRoot.querySelector('#expense-form'), list = form.querySelector('#receipt-list'), save = form.querySelector('#save-expense');
   form.addEventListener('invalid', e => { const details = e.target.closest('details'); if (details) details.open = true; }, true);
   function redrawFiles() {
-    list.innerHTML = draft.attachments.map((a, i) => `<div class="receipt-row"><div><strong>${esc(a.name)}</strong><small>${(a.size / 1024).toFixed(0)} KB · guardado</small></div><button type="button" class="text-button" data-open-file="${i}">Descargar</button><button type="button" class="icon-btn danger" data-remove-file="${i}" aria-label="Quitar ${esc(a.name)}">×</button></div>`).join('') + pending.map((f, i) => `<div class="receipt-row"><div><strong>${esc(f.name)}</strong><small>${(f.size / 1024).toFixed(0)} KB · listo para guardar</small></div><button type="button" class="icon-btn danger" data-remove-pending="${i}" aria-label="Quitar ${esc(f.name)}">×</button></div>`).join('') || '<div class="expense-receipt-placeholder">Haz una foto o añade el archivo que has recibido.</div>';
+    list.innerHTML = draft.attachments.map((a, i) => `<div class="receipt-row"><div><strong>${esc(a.name)}</strong><small>${(a.size / 1024).toFixed(0)} KB · guardado</small></div><button type="button" class="text-button" data-preview-file="${i}" aria-label="Ver ${esc(a.name)}">${icon('eye')}Ver</button><button type="button" class="text-button" data-open-file="${i}">Descargar</button><button type="button" class="icon-btn danger" data-remove-file="${i}" aria-label="Quitar ${esc(a.name)}">×</button></div>`).join('') + pending.map((f, i) => `<div class="receipt-row"><div><strong>${esc(f.name)}</strong><small>${(f.size / 1024).toFixed(0)} KB · listo para guardar</small></div><button type="button" class="text-button" data-preview-pending="${i}" aria-label="Ver ${esc(f.name)}">${icon('eye')}Ver</button><button type="button" class="icon-btn danger" data-remove-pending="${i}" aria-label="Quitar ${esc(f.name)}">×</button></div>`).join('') || '<div class="expense-receipt-placeholder">Haz una foto o añade el archivo que has recibido.</div>';
+    const pendingFiles=new Map();
+    const previewAttachments=[...draft.attachments,...pending.map((file,index)=>{const id=`pending-${index}`;pendingFiles.set(id,file);return {id,name:file.name,mimeType:RECEIPT_FILE_TYPES[file.name.split('.').at(-1).toLowerCase()],size:file.size}})];
+    list.querySelectorAll('[data-preview-file]').forEach(button=>button.onclick=()=>previewReceipts(ctx,previewAttachments,Number(button.dataset.previewFile),{pendingFiles,trigger:button}));
+    list.querySelectorAll('[data-preview-pending]').forEach(button=>button.onclick=()=>previewReceipts(ctx,previewAttachments,draft.attachments.length+Number(button.dataset.previewPending),{pendingFiles,trigger:button}));
     list.querySelectorAll('[data-remove-file]').forEach(b => b.onclick = () => { removed.push(draft.attachments.splice(Number(b.dataset.removeFile), 1)[0]); redrawFiles(); });
     list.querySelectorAll('[data-remove-pending]').forEach(b => b.onclick = () => { pending.splice(Number(b.dataset.removePending), 1); redrawFiles(); });
     list.querySelectorAll('[data-open-file]').forEach(b => b.onclick = async () => {
