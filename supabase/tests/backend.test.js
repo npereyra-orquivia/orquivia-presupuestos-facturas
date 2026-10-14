@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createBackend, validateCloudState } from '../../src/backend.js';
+import { createBackend, validateCloudState, validateReceiptFile, MAX_RECEIPT_BYTES } from '../../src/backend.js';
 import { reminderLines } from '../functions/_shared/reminders.js';
 import { build } from 'esbuild';
 import { historicalImportDecision, stateDigest } from '../scripts/bootstrap-team.mjs';
@@ -386,4 +386,95 @@ test('bootstrap imports are stable and cannot rewind production edits on a retry
   assert.throws(() => historicalImportDecision(workspace, original, { overwrite: true, expectedVersion: 3, expectedHash: stateDigest(original) }), /EXPECTED_VERSION_AND_HASH/);
   assert.equal(historicalImportDecision(workspace, original, { overwrite: true, expectedVersion: 3, expectedHash: stateDigest(edited) }).expectedVersion, 3);
   assert.throws(() => historicalImportDecision({ state: empty(), version: 2 }, original), /NONEMPTY_WORKSPACE/);
+});
+
+test('receipt validation accepts private originals and canonicalizes browser MIME omissions', async () => {
+  const pdf = new File(['%PDF-1.7\nExample'], 'Factura.PDF', { type: 'application/pdf' });
+  assert.deepEqual(await validateReceiptFile(pdf), { name: 'Factura.PDF', extension: 'pdf', mimeType: 'application/pdf', size: pdf.size });
+  const heic = new File([new Uint8Array([0, 0, 0, 24]), 'ftypheic', new Uint8Array(20)], 'Foto.heic');
+  assert.equal((await validateReceiptFile(heic)).mimeType, 'image/heic');
+  const rtf = new File(['{\\rtf1 Texto}'], 'Factura.rtf', { type: 'text/rtf' });
+  assert.equal((await validateReceiptFile(rtf)).mimeType, 'application/rtf');
+  const png = new File([new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])], 'Ticket.png', { type: 'image/png' });
+  assert.equal((await validateReceiptFile(png)).extension, 'png');
+});
+
+test('receipt validation rejects active web formats, executables, disguised contents and oversize files', async () => {
+  for (const file of [
+    new File(['<svg/>'], 'Ticket.svg', { type: 'image/svg+xml' }),
+    new File(['<html>Active content</html>'], 'Factura.html', { type: 'text/html' }),
+    new File(['MZ'], 'Archivo.exe', { type: 'application/octet-stream' }),
+    new File(['<html>Disguised</html>'], 'Factura.pdf', { type: 'application/pdf' }),
+    new File(['%PDF-1.7'], 'Factura.pdf', { type: 'text/html' }),
+    new File([], 'Factura.pdf', { type: 'application/pdf' }),
+    new File(['%PDF-1.7', new Uint8Array(MAX_RECEIPT_BYTES)], 'Factura.pdf', { type: 'application/pdf' }),
+  ]) await assert.rejects(validateReceiptFile(file), { code: 'INVALID_RECEIPT' });
+});
+
+test('private receipt transport rechecks membership, uses immutable organization paths and 60-second links', async () => {
+  const originalFetch = globalThis.fetch;
+  const user = { id: 'b1000000-0000-4000-8000-000000000005', aud: 'authenticated', email: 'owner@example.test' };
+  const org = 'a2000000-0000-4000-8000-000000000001', expenseId = 'a4000000-0000-4000-8000-000000000001';
+  const access = { organization_id: org, organization_name: 'Orquívia', role: 'admin', require_mfa: true };
+  const json = (body, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
+  let uploadedPath = null, denyAccess = false, denyDelete = false, storageCalls = 0, refreshes = 0;
+  globalThis.fetch = async (input, init = {}) => {
+    const url = String(input);
+    if (url.includes('/auth/v1/token')) return json({ access_token: token('authenticated', { sub: user.id, aal: 'aal2' }), refresh_token: 'test-refresh', token_type: 'bearer', expires_in: 3600, user });
+    if (url.includes('/auth/v1/user')) return json(user);
+    if (url.includes('/rest/v1/rpc/load_orquivia_workspace')) return json({ ...access, state: empty(), version: 1 });
+    if (url.includes('/rest/v1/rpc/refresh_orquivia_access')) { refreshes++; return denyAccess ? json({ code: '42501', message: 'MFA_REQUIRED' }, 403) : json(access); }
+    if (url.includes('/storage/v1/object/sign/')) {
+      storageCalls++;
+      assert.deepEqual(JSON.parse(init.body), { expiresIn: 60 });
+      return json({ signedURL: `/object/sign/orquivia-receipts/${uploadedPath}?token=fictional-signed-token` });
+    }
+    if (url.includes('/storage/v1/object/orquivia-receipts/') && init.method === 'POST') {
+      storageCalls++;
+      uploadedPath = url.split('/orquivia-receipts/')[1];
+      assert.match(uploadedPath, new RegExp(`^${org}/${expenseId}/[0-9a-f-]{36}\\.pdf$`));
+      assert.equal(new Headers(init.headers).get('x-upsert'), 'false');
+      assert.equal(init.body.get('cacheControl'), '0');
+      assert.equal(init.body.get('').type, 'application/pdf', 'Canonical MIME must be applied to the multipart file');
+      return json({ Id: 'storage-object-id', Key: `orquivia-receipts/${uploadedPath}` });
+    }
+    if (url.includes('/storage/v1/object/orquivia-receipts/') && (!init.method || init.method === 'GET')) {
+      storageCalls++;
+      assert.equal(init.cache, 'no-store');
+      return new Response('%PDF-1.7\nExample', { headers: { 'Content-Type': 'application/pdf' } });
+    }
+    if (url.endsWith('/storage/v1/object/orquivia-receipts') && init.method === 'DELETE') {
+      storageCalls++;
+      assert.deepEqual(JSON.parse(init.body), { prefixes: [uploadedPath] });
+      return json(denyDelete ? [] : [{ name: uploadedPath }]);
+    }
+    throw new Error(`Unexpected receipt request ${url}`);
+  };
+  let backend;
+  try {
+    backend = createBackend({ url: 'https://example.supabase.co', anonKey: 'sb_publishable_test' });
+    await backend.signIn(user.email, 'fictional-password');
+    await backend.loadState();
+    const attachment = await backend.uploadReceipt(expenseId, new File(['%PDF-1.7\nExample'], 'Factura.pdf'));
+    assert.equal(attachment.path, uploadedPath);
+    assert.equal(attachment.mimeType, 'application/pdf');
+    const signedUrl = await backend.receiptUrl(attachment, { download: true });
+    assert.equal(new URL(signedUrl).searchParams.get('download'), 'Factura.pdf');
+    assert.equal(await (await backend.downloadReceipt(attachment)).text(), '%PDF-1.7\nExample');
+    const previousCalls = storageCalls;
+    await assert.rejects(backend.downloadReceipt({ ...attachment, path: attachment.path.replace(org, 'b2000000-0000-4000-8000-000000000001') }), { code: 'INVALID_RECEIPT' });
+    assert.equal(storageCalls, previousCalls, 'Cross-company paths must be refused before Storage transport');
+    denyDelete = true;
+    await assert.rejects(backend.deleteReceipt(attachment), { code: 'RECEIPT_DELETE_ERROR' });
+    denyDelete = false;
+    await backend.deleteReceipt(attachment);
+    const beforeRevocation = storageCalls;
+    denyAccess = true;
+    await assert.rejects(backend.downloadReceipt(attachment), { code: 'MFA_REQUIRED' });
+    assert.equal(storageCalls, beforeRevocation, 'MFA/membership revocation must block all new file requests');
+    assert.ok(refreshes >= 7);
+  } finally {
+    backend?.dispose();
+    globalThis.fetch = originalFetch;
+  }
 });

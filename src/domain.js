@@ -318,6 +318,13 @@ export function validateWorkspace(workspace, today = todayISO()) {
     for (const key of ['vat', 'withholding']) if (company[key] !== undefined) requireNumber(company[key], `company.${key}`, { maximum: 100 });
     if (company.paymentTerms !== undefined) requireNumber(company.paymentTerms, 'company.paymentTerms', { maximum: 365, decimals: 0 });
     if (company.emailNotifications !== undefined && typeof company.emailNotifications !== 'boolean') error('company.emailNotifications', 'debe ser verdadero o falso.');
+    const hasOpeningAmount = company.openingBalance !== undefined && company.openingBalance !== null;
+    const hasOpeningDate = company.openingBalanceDate !== undefined && company.openingBalanceDate !== null && company.openingBalanceDate !== '';
+    if (hasOpeningAmount !== hasOpeningDate) error('company.openingBalance', 'indica juntos el saldo inicial y su fecha.');
+    if (hasOpeningAmount) requireNumber(company.openingBalance, 'company.openingBalance', {
+      minimum: -Number.MAX_SAFE_INTEGER / 100, maximum: Number.MAX_SAFE_INTEGER / 100 });
+    if (hasOpeningDate && (!validDate(company.openingBalanceDate)
+      || (validDate(today) && company.openingBalanceDate > today))) error('company.openingBalanceDate', 'indica una fecha válida que no esté en el futuro.');
   }
   for (const key of ['clients', 'documents', 'payments']) {
     if (!Array.isArray(workspace[key])) error(key, 'debe ser una lista.');
@@ -425,5 +432,76 @@ export function validateWorkspace(workspace, today = todayISO()) {
     if (doc.status === 'partial' && (paid <= 0n || paid >= total)) error(`${path}.status`, 'el estado parcial exige un cobro mayor que cero e inferior al total.');
     if (doc.status === 'overdue' && (paid >= total || !validDate(doc.dueDate) || !validDate(today) || doc.dueDate >= today)) error(`${path}.status`, 'el estado vencido exige saldo pendiente y un vencimiento pasado.');
   });
+  // Old backups have no expenses collection. Its absence must not invalidate or replace them.
+  if (workspace.expenses !== undefined && !Array.isArray(workspace.expenses)) error('expenses', 'debe ser una lista.');
+  if (Array.isArray(workspace.expenses)) {
+    if (workspace.expenses.length > 10000) error('expenses', 'la lista supera el límite de 10000 registros.');
+    const expenseIds = new Set(), attachmentIds = new Set(), attachmentPaths = new Set();
+    const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+    const mimeByExtension = {
+      pdf: 'application/pdf', jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', webp: 'image/webp',
+      gif: 'image/gif', heic: 'image/heic', heif: 'image/heif', doc: 'application/msword',
+      docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      xls: 'application/vnd.ms-excel', xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      odt: 'application/vnd.oasis.opendocument.text', ods: 'application/vnd.oasis.opendocument.spreadsheet',
+      rtf: 'application/rtf',
+    };
+    const expenseText = (value, path, maximum, required = false) => {
+      requireString(value, path, required);
+      if (typeof value === 'string' && value.length > maximum) error(path, `el texto supera ${maximum} caracteres.`);
+    };
+    workspace.expenses.forEach((expense, index) => {
+      const path = `expenses[${index}]`;
+      if (!isRecord(expense)) { error(path, 'el registro debe ser un objeto.'); return; }
+      if (typeof expense.id !== 'string' || !uuid.test(expense.id)) error(`${path}.id`, 'indica un identificador UUID válido en minúsculas.');
+      if (expenseIds.has(expense.id)) error(`${path}.id`, 'el identificador está duplicado.');
+      expenseIds.add(expense.id);
+      if (!validDate(expense.date) || (validDate(today) && expense.date > today)) error(`${path}.date`, 'indica la fecha real del gasto, sin fechas futuras.');
+      expenseText(expense.supplier, `${path}.supplier`, 240, true);
+      expenseText(expense.supplierTaxId, `${path}.supplierTaxId`, 80);
+      expenseText(expense.description, `${path}.description`, 2000, true);
+      for (const [key, maximum] of [['category', 100], ['reference', 240], ['notes', 10000]]) expenseText(expense[key], `${path}.${key}`, maximum);
+      for (const key of ['base', 'vatAmount']) requireNumber(expense[key], `${path}.${key}`, { maximum: Number.MAX_SAFE_INTEGER / 100 });
+      requireNumber(expense.total, `${path}.total`, { minimum: 0.01, maximum: Number.MAX_SAFE_INTEGER / 100 });
+      if (expense.vatRate !== undefined) requireNumber(expense.vatRate, `${path}.vatRate`, { maximum: 100 });
+      if (expense.vatDeductibleAmount !== undefined) {
+        requireNumber(expense.vatDeductibleAmount, `${path}.vatDeductibleAmount`, { maximum: Number.MAX_SAFE_INTEGER / 100 });
+        if (typeof expense.vatDeductibleAmount === 'number' && expense.vatDeductibleAmount > expense.vatAmount) error(`${path}.vatDeductibleAmount`, 'el IVA confirmado no puede superar el IVA del documento.');
+      }
+      const amounts = [expense.base, expense.vatAmount, expense.total].map((amount) => fraction(amount));
+      if (amounts.every(Boolean)) {
+        const [base, vat, total] = amounts;
+        const expectedNumerator = base.numerator * vat.denominator + vat.numerator * base.denominator;
+        if (expectedNumerator * total.denominator !== total.numerator * base.denominator * vat.denominator) error(`${path}.total`, 'no coincide con la base más el IVA registrado.');
+      }
+      if (!['paid', 'pending'].includes(expense.paymentStatus)) error(`${path}.paymentStatus`, 'el estado debe ser paid o pending.');
+      if (expense.paymentStatus === 'paid') {
+        if (!validDate(expense.paidDate) || (validDate(today) && expense.paidDate > today)) error(`${path}.paidDate`, 'un gasto pagado exige una fecha de pago válida, sin fechas futuras.');
+      } else if (expense.paidDate !== undefined && expense.paidDate !== null && expense.paidDate !== '') error(`${path}.paidDate`, 'un gasto pendiente no debe tener fecha de pago.');
+      if (expense.reviewNeeded !== undefined && typeof expense.reviewNeeded !== 'boolean') error(`${path}.reviewNeeded`, 'debe ser verdadero o falso.');
+      if (expense.attachments !== undefined && !Array.isArray(expense.attachments)) error(`${path}.attachments`, 'debe ser una lista.');
+      if (!Array.isArray(expense.attachments)) return;
+      if (expense.attachments.length > 10) error(`${path}.attachments`, 'se admiten como máximo 10 justificantes por gasto.');
+      expense.attachments.forEach((attachment, attachmentIndex) => {
+        const attachmentPath = `${path}.attachments[${attachmentIndex}]`;
+        if (!isRecord(attachment)) { error(attachmentPath, 'el justificante debe ser un objeto.'); return; }
+        if (typeof attachment.id !== 'string' || !uuid.test(attachment.id)) error(`${attachmentPath}.id`, 'indica un identificador UUID válido en minúsculas.');
+        if (attachmentIds.has(attachment.id)) error(`${attachmentPath}.id`, 'el identificador del justificante está duplicado.');
+        attachmentIds.add(attachment.id);
+        expenseText(attachment.name, `${attachmentPath}.name`, 240, true);
+        if (typeof attachment.name === 'string' && /[\/\\\u0000-\u001f\u007f]/u.test(attachment.name)) error(`${attachmentPath}.name`, 'el nombre contiene caracteres de control.');
+        requireNumber(attachment.size, `${attachmentPath}.size`, { minimum: 1, maximum: 10 * 1024 * 1024, decimals: 0 });
+        const parts = typeof attachment.path === 'string' ? attachment.path.split('/') : [];
+        const filename = parts[2]?.split('.'), extension = filename?.[1];
+        if (parts.length !== 3 || !uuid.test(parts[0]) || parts[1] !== expense.id
+          || filename?.length !== 2 || filename[0] !== attachment.id || !Object.hasOwn(mimeByExtension, extension ?? '')) {
+          error(`${attachmentPath}.path`, 'la ruta privada del justificante no es válida para este gasto.');
+        }
+        if (attachmentPaths.has(attachment.path)) error(`${attachmentPath}.path`, 'la ruta del justificante está duplicada.');
+        attachmentPaths.add(attachment.path);
+        if (attachment.mimeType !== mimeByExtension[extension]) error(`${attachmentPath}.mimeType`, 'el tipo de archivo no coincide con el justificante permitido.');
+      });
+    });
+  }
   return errors;
 }

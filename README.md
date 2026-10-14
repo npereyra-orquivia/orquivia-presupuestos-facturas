@@ -1,6 +1,6 @@
-# Orquívia · Presupuestos, facturas y cobros
+# Orquívia · Presupuestos, facturas, gastos y caja
 
-Portal en español para **GitHub Pages + Supabase**. Nicole y Liliana trabajan con los mismos clientes, presupuestos, facturas y cobros, cada una con su cuenta. Nicole administra la empresa; Liliana puede editar documentos y registrar cobros. La página pública contiene la interfaz y la pantalla de acceso; los datos de la empresa se cargan desde Supabase después de verificar la cuenta y el segundo factor.
+Portal en español para **GitHub Pages + Supabase**. Nicole y Liliana trabajan con los mismos clientes, presupuestos, facturas, cobros y gastos, cada una con su cuenta. Nicole administra la empresa y el saldo inicial; Liliana puede editar documentos, registrar cobros y gestionar gastos y justificantes. La página pública contiene la interfaz y la pantalla de acceso; los datos y los archivos privados de la empresa se cargan desde Supabase después de verificar la cuenta y el segundo factor.
 
 ## Probar en el ordenador
 
@@ -15,11 +15,13 @@ Abre `http://127.0.0.1:5173/`. En Windows también puedes abrir `Abrir Orquivia.
 
 La preparación local carga `private/initial-state.json`, si existe, mediante una ruta del servidor de desarrollo limitada a localhost. Conserva los cambios de esa preparación en `sessionStorage` de la pestaña. El archivo privado y esa ruta no se incluyen en el build publicado. No se importa nada a Supabase desde la preparación local. Para probar con datos ficticios, abre `http://127.0.0.1:5173/?demo=1`; sus PDF se identifican como documentos de prueba.
 
+Los justificantes adjuntos en modo local se guardan en IndexedDB de ese navegador. No se sincronizan con Supabase ni se incluyen en el build. Descarga el expediente trimestral para conservar una copia de los archivos junto a sus registros.
+
 ## Preparar Supabase
 
 Consulta [supabase/README.md](supabase/README.md) para el procedimiento completo de provisión, importación, seguridad y pruebas del entorno real.
 
-1. Crea un proyecto y aplica **las dos migraciones en orden**: `supabase/migrations/202610130001_orquivia.sql` y `supabase/migrations/202610140002_team_production.sql`. Expón `public` mediante Data API y mantén `orquivia_private` fuera de los esquemas expuestos.
+1. Crea un proyecto y aplica **las tres migraciones en orden**: `supabase/migrations/202610130001_orquivia.sql`, `supabase/migrations/202610140002_team_production.sql` y `supabase/migrations/202610140003_expenses.sql`. La tercera añade gastos y crea el bucket privado de justificantes. Expón `public` mediante Data API y mantén `orquivia_private` fuera de los esquemas expuestos. Si el proyecto ya tiene las dos primeras, aplica únicamente la tercera.
 2. Desactiva el registro público en Supabase Auth. Configura la URL del sitio y los destinos de autenticación para la dirección final de GitHub Pages, sin comodines abiertos.
 3. Desde un entorno de operador, ejecuta `supabase/scripts/bootstrap-team.mjs` con su configuración por stdin. El script valida por defecto sin crear nada; `apply:true` provisiona las dos cuentas, asigna los roles y exige MFA. Las contraseñas iniciales tienen al menos 16 caracteres. La clave de servidor y las contraseñas se mantienen fuera del navegador y del repositorio.
 4. Para importar el histórico, indica al script el archivo privado validado en `statePath`. La importación conserva números originales y advertencias; solo procede sobre un espacio nuevo o reconoce una importación idéntica ya realizada. Los cambios posteriores no se sobrescriben en un reintento.
@@ -42,14 +44,35 @@ Para compilar la versión oficial desde un entorno local, configura esas tres va
 ## Trabajar con documentos
 
 - Completa los datos fiscales de la empresa y del cliente antes de emitir. Puedes crear una factura directamente o convertir un presupuesto en una factura vinculada.
+- En el desplegable **Cliente** puedes buscar una ficha o elegir **Crear cliente**. Al guardar o cancelar la ficha vuelves al documento conservando lo que habías escrito. Los calendarios permiten elegir la fecha o introducirla en el campo.
 - Los borradores no tienen número definitivo. Al emitir, el servidor asigna una secuencia anual independiente para presupuestos (`PR-AAAA-NNN`) y facturas (`F-AAAA-NNN`). La conversión conserva el número del presupuesto y asigna a la factura el siguiente número de su propia serie. Los números históricos importados se conservan y cuentan para la secuencia correspondiente.
 - Los documentos emitidos no pueden borrarse, volver a borrador ni cambiar de número, tipo o fecha. Los conceptos y datos fiscales de una factura emitida quedan fijos. Sus notas, referencia **PO / orden de pedido**, vencimiento y seguimiento de contrato siguen siendo editables. Las rectificativas requieren una ampliación específica.
 - Descarga el PDF desde el detalle. Los importes se calculan en céntimos, con IVA, descuentos y retenciones; los documentos largos se reparten en varias páginas. Al emitir se conserva una copia de los datos de empresa y cliente.
 - Verifica los movimientos bancarios y usa **Registrar cobro** para registrar pagos completos o parciales. El portal no tiene conexión con el banco. Las facturas históricas cuyo pago no está acreditado quedan **por revisar** y no se cuentan como deuda confirmada hasta revisar el cobro.
-- Usa la fecha prevista de contrato para generar un aviso hasta marcar **Contrato recibido**. Las advertencias de importación señalan las fechas o importes originales que requieren revisión.
+- La **Referencia interna del trabajo** es opcional: ayuda a encontrar el documento en el portal y no aparece en el PDF. El campo **PO / orden de pedido** aparece en la factura y también es opcional; puedes completarlo al convertir un presupuesto o después de emitir la factura.
+- **Seguimiento opcional de la aceptación o contrato** permite anotar una fecha prevista y generar un aviso hasta marcar **Aceptación / contrato recibido**. Puedes dejar ambos campos vacíos. Este seguimiento no cambia el estado ni los importes del presupuesto; la aceptación del presupuesto se gestiona por separado. Las advertencias de importación señalan las fechas o importes originales que requieren revisión.
 - Exporta listas a CSV y descarga una copia JSON desde Configuración. La restauración de una copia local es independiente de la importación administrada del espacio compartido.
 
 Los cambios de otra sesión se detectan mediante una versión en el servidor para impedir sobrescrituras silenciosas. Si aparece un conflicto, recarga y concilia los cambios antes de volver a guardar.
+
+## Gastos, justificantes y trimestre
+
+En **Gastos y caja → Registrar gasto**, indica el proveedor, la fecha, el concepto y el total del justificante. Elige su IVA o introduce el IVA impreso cuando haya varios tipos o un desglose diferente. Registra si está pendiente o pagado; al marcarlo pagado, indica la fecha del pago. La casilla de IVA confirmado prepara el registro para la revisión del gestor.
+
+Puedes **Adjuntar archivos** descargados del correo o usar **Tomar una foto**. En un móvil compatible, esta opción abre la cámara; el navegador puede ofrecer también su selector de archivos. Se admiten PDF, fotos JPEG/PNG/WebP/GIF/HEIC/HEIF y documentos Word, Excel, OpenDocument y RTF: hasta **10 archivos por gasto**, de **10 MB por archivo** (10 485 760 bytes). Los archivos se suben al guardar el gasto y permanecen privados en Supabase Storage. Los formatos de archivo no se convierten.
+
+Selecciona el año y trimestre para ver el registro y descargar:
+
+- **Listado CSV** con facturas emitidas y gastos, sus importes, estados y referencias a justificantes.
+- **Expediente del trimestre**, un ZIP con el CSV, un resumen, los PDF de las facturas emitidas y los justificantes originales de los gastos. Los documentos se agrupan por su fecha de emisión o de justificante; los movimientos de caja usan sus propias fechas de cobro y pago. Si falta un justificante, la exportación se detiene para que puedas resolverlo. El paquete admite hasta 300 MB.
+
+Los importes de IVA repercutido, IVA soportado registrado e IVA confirmado se muestran por separado. El expediente prepara información para que el gestor la revise; la aplicación no presenta la declaración trimestral. La **copia JSON contiene únicamente los datos y las referencias de los adjuntos**, no sus bytes. Conserva también los ZIP para respaldar los justificantes.
+
+## Saldo registrado y previsión
+
+Nicole puede configurar un **saldo inicial al comienzo de un día**, antes de sus movimientos. Desde esa fecha, el portal calcula **saldo inicial + cobros registrados − gastos pagados**, hasta el día actual. Los documentos pendientes no alteran el saldo actual. La previsión añade cobros pendientes confirmados y resta gastos pendientes; excluye las facturas históricas cuyo cobro sigue por confirmar.
+
+El saldo representa los movimientos registrados en el portal. Revisa y concilia el resultado con la cuenta bancaria y registra los gastos o cobros que falten; no hay conexión automática con el banco.
 
 ## Recordatorios
 

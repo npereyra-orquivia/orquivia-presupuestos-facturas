@@ -2,6 +2,63 @@ import { createClient } from '@supabase/supabase-js';
 import { validateWorkspace } from './domain.js';
 
 const MAX_STATE_BYTES = 5_000_000;
+export const RECEIPT_BUCKET = 'orquivia-receipts';
+export const MAX_RECEIPT_BYTES = 10 * 1024 * 1024;
+export const RECEIPT_FILE_TYPES = Object.freeze({
+  pdf: 'application/pdf', jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png',
+  webp: 'image/webp', gif: 'image/gif', heic: 'image/heic', heif: 'image/heif',
+  doc: 'application/msword', docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  xls: 'application/vnd.ms-excel', xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  odt: 'application/vnd.oasis.opendocument.text', ods: 'application/vnd.oasis.opendocument.spreadsheet',
+  rtf: 'application/rtf',
+});
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
+/** Files are private originals; active web formats and extension disguises are rejected. */
+export async function validateReceiptFile(file) {
+  const name = String(file?.name || '').split(/[\\/]/).at(-1).replace(/[\u0000-\u001f\u007f]/g, '').trim();
+  const extension = name.split('.').at(-1)?.toLowerCase();
+  const mimeType = RECEIPT_FILE_TYPES[extension];
+  if (!name || name.length > 240 || !mimeType || typeof file?.slice !== 'function') {
+    throw backendError('Admite PDF, imágenes y documentos de Office. No se permiten archivos ejecutables ni páginas web.', 'INVALID_RECEIPT');
+  }
+  if (!Number.isSafeInteger(file.size) || file.size <= 0 || file.size > MAX_RECEIPT_BYTES) {
+    throw backendError('Cada justificante debe ocupar entre 1 byte y 10 MB.', 'INVALID_RECEIPT');
+  }
+  const declared = String(file.type || '').toLowerCase();
+  if (declared && declared !== 'application/octet-stream' && declared !== mimeType && !(extension === 'rtf' && declared === 'text/rtf')) {
+    throw backendError('El tipo del archivo no coincide con su extensión.', 'INVALID_RECEIPT');
+  }
+  const bytes = new Uint8Array(await file.slice(0, 64).arrayBuffer());
+  const ascii = new TextDecoder('latin1').decode(bytes);
+  const prefix = (...values) => values.every((value, index) => bytes[index] === value);
+  const signatureValid = extension === 'pdf' ? ascii.startsWith('%PDF-')
+    : ['jpg', 'jpeg'].includes(extension) ? prefix(0xff, 0xd8, 0xff)
+      : extension === 'png' ? prefix(0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a)
+        : extension === 'webp' ? ascii.startsWith('RIFF') && ascii.slice(8, 12) === 'WEBP'
+          : extension === 'gif' ? /^GIF8[79]a/.test(ascii)
+            : ['heic', 'heif'].includes(extension) ? ascii.slice(4, 8) === 'ftyp' && /heic|heix|hevc|hevx|mif1|msf1/.test(ascii.slice(8, 40))
+              : ['doc', 'xls'].includes(extension) ? prefix(0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1)
+                : extension === 'rtf' ? ascii.startsWith('{\\rtf')
+                  : prefix(0x50, 0x4b, 0x03, 0x04);
+  if (!signatureValid) throw backendError('El contenido del archivo no coincide con el formato indicado.', 'INVALID_RECEIPT');
+  return { name, mimeType, size: file.size, extension };
+}
+
+function receiptPath(attachment, organizationId) {
+  if (!attachment || !UUID_PATTERN.test(attachment.id) || typeof attachment.path !== 'string') {
+    throw backendError('El justificante no tiene un identificador válido.', 'INVALID_RECEIPT');
+  }
+  const parts = attachment.path.split('/');
+  const [org, expenseId, filename] = parts;
+  const extension = filename?.split('.').at(-1);
+  if (parts.length !== 3 || org !== organizationId || !UUID_PATTERN.test(expenseId)
+    || filename !== `${attachment.id}.${extension}` || !Object.hasOwn(RECEIPT_FILE_TYPES, extension)
+    || attachment.mimeType !== RECEIPT_FILE_TYPES[extension]) {
+    throw backendError('Este justificante no pertenece a la empresa activa.', 'INVALID_RECEIPT');
+  }
+  return attachment.path;
+}
 
 function backendError(message, code, cause) {
   return Object.assign(new Error(message, { cause }), { code });
@@ -185,7 +242,7 @@ export function createBackend({ url, anonKey }) {
       version = null;
       return backendError('Otra sesión ha actualizado los datos. Exporta tus cambios y recarga antes de continuar.', 'VERSION_CONFLICT', error);
     }
-    const known = ['MEMBERSHIP_REQUIRED', 'MFA_REQUIRED', 'ADMIN_REQUIRED', 'ISSUE_REQUIRED', 'ISSUED_DOCUMENT_IMMUTABLE', 'ISSUED_DOCUMENT_DELETE_DENIED', 'INVALID_STATE'];
+    const known = ['MEMBERSHIP_REQUIRED', 'MFA_REQUIRED', 'ADMIN_REQUIRED', 'ISSUE_REQUIRED', 'ISSUED_DOCUMENT_IMMUTABLE', 'ISSUED_DOCUMENT_DELETE_DENIED', 'INVALID_RECEIPT_REFERENCE', 'INVALID_STATE'];
     const code = known.find((name) => error?.message?.includes(name));
     if (code === 'MFA_REQUIRED' || code === 'MEMBERSHIP_REQUIRED') denyWorkspaceAccess(code);
     const messages = {
@@ -194,6 +251,7 @@ export function createBackend({ url, anonKey }) {
       ISSUE_REQUIRED: 'Emite el borrador para que el servidor asigne su número.',
       ISSUED_DOCUMENT_IMMUTABLE: 'Los datos fiscales de un documento emitido no se pueden modificar.',
       ISSUED_DOCUMENT_DELETE_DENIED: 'Conserva el documento emitido para mantener su historial.',
+      INVALID_RECEIPT_REFERENCE: 'Un justificante no está guardado en la empresa o no coincide con el archivo subido.',
       INVALID_STATE: 'Los datos no superan la validación de la base de datos.',
     };
     return backendError(messages[code] || fallback, code || 'SAVE_ERROR', error);
@@ -333,6 +391,64 @@ export function createBackend({ url, anonKey }) {
         .eq('organization_id', workspace.organizationId).order('id', { ascending: false }).limit(Math.max(1, Math.min(500, limit)));
       if (error) throw backendError('No se pudo cargar el historial.', 'LOAD_ERROR', error);
       return data;
+    },
+    async uploadReceipt(expenseId, file) {
+      const metadata = await validateReceiptFile(file);
+      const user = await requireUser();
+      if (!workspace || version === null) throw backendError('Carga primero la empresa.', 'STATE_NOT_LOADED');
+      if (!UUID_PATTERN.test(expenseId)) throw backendError('El gasto no tiene un identificador válido.', 'INVALID_RECEIPT');
+      const organizationId = workspace.organizationId;
+      const id = crypto.randomUUID();
+      const path = `${organizationId}/${expenseId}/${id}.${metadata.extension}`;
+      // Browsers sometimes leave HEIC/Office MIME empty. Give the multipart file
+      // the verified canonical type so bucket validation sees the correct MIME.
+      const body = file.slice(0, file.size, metadata.mimeType);
+      const { error } = await client.storage.from(RECEIPT_BUCKET).upload(path, body, {
+        contentType: metadata.mimeType, cacheControl: '0', upsert: false,
+      });
+      if (error) throw backendError('No se pudo guardar el justificante privado.', 'RECEIPT_UPLOAD_ERROR', error);
+      if (ownerId !== user.id || workspace?.organizationId !== organizationId) {
+        throw backendError('La sesión cambió durante la subida. Recarga la empresa.', 'AUTH_CHANGED');
+      }
+      return { id, name: metadata.name, path, mimeType: metadata.mimeType, size: metadata.size };
+    },
+    async receiptUrl(attachment, { download = false } = {}) {
+      const user = await requireUser();
+      if (!workspace) throw backendError('Carga primero la empresa.', 'STATE_NOT_LOADED');
+      const organizationId = workspace.organizationId;
+      const path = receiptPath(attachment, organizationId);
+      const { data, error } = await client.storage.from(RECEIPT_BUCKET).createSignedUrl(path, 60, {
+        download: download ? attachment.name : false,
+      });
+      if (error || !data?.signedUrl) throw backendError('No se pudo abrir el justificante privado.', 'RECEIPT_READ_ERROR', error);
+      if (ownerId !== user.id || workspace?.organizationId !== organizationId) throw backendError('La sesión cambió durante la lectura.', 'AUTH_CHANGED');
+      const parsed = new URL(data.signedUrl);
+      if (parsed.origin !== new URL(url).origin || !parsed.pathname.startsWith('/storage/v1/object/sign/')) {
+        throw backendError('La dirección del justificante no es válida.', 'RECEIPT_READ_ERROR');
+      }
+      return data.signedUrl;
+    },
+    async downloadReceipt(attachment) {
+      const user = await requireUser();
+      if (!workspace) throw backendError('Carga primero la empresa.', 'STATE_NOT_LOADED');
+      const organizationId = workspace.organizationId;
+      const path = receiptPath(attachment, organizationId);
+      const { data, error } = await client.storage.from(RECEIPT_BUCKET).download(path, {}, { cache: 'no-store' });
+      if (error || !data) throw backendError('No se pudo descargar el justificante privado.', 'RECEIPT_READ_ERROR', error);
+      if (ownerId !== user.id || workspace?.organizationId !== organizationId) throw backendError('La sesión cambió durante la descarga.', 'AUTH_CHANGED');
+      return data;
+    },
+    async deleteReceipt(attachment) {
+      // Remove the metadata with saveState first. The database denies deletion
+      // while any expense in the current workspace still references this path.
+      await requireUser();
+      if (!workspace) throw backendError('Carga primero la empresa.', 'STATE_NOT_LOADED');
+      const path = receiptPath(attachment, workspace.organizationId);
+      const { data, error } = await client.storage.from(RECEIPT_BUCKET).remove([path]);
+      if (error) throw backendError('No se pudo eliminar el justificante. Comprueba que el gasto ya está guardado sin él.', 'RECEIPT_DELETE_ERROR', error);
+      if (!data?.some((object) => object.name === path)) {
+        throw backendError('El justificante sigue vinculado a un gasto o ya no existe.', 'RECEIPT_DELETE_ERROR');
+      }
     },
     dispose() {
       disposed = true;
