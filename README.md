@@ -1,0 +1,72 @@
+# Orquívia · Presupuestos, facturas y cobros
+
+Portal en español para **GitHub Pages + Supabase**. Nicole y Liliana trabajan con los mismos clientes, presupuestos, facturas y cobros, cada una con su cuenta. Nicole administra la empresa; Liliana puede editar documentos y registrar cobros. La página pública contiene la interfaz y la pantalla de acceso; los datos de la empresa se cargan desde Supabase después de verificar la cuenta y el segundo factor.
+
+## Probar en el ordenador
+
+Requiere Node.js 22.12 o posterior.
+
+```sh
+npm ci
+npm run dev
+```
+
+Abre `http://127.0.0.1:5173/`. En Windows también puedes abrir `Abrir Orquivia.cmd`; mantén su ventana abierta mientras utilizas el portal.
+
+La preparación local carga `private/initial-state.json`, si existe, mediante una ruta del servidor de desarrollo limitada a localhost. Conserva los cambios de esa preparación en `sessionStorage` de la pestaña. El archivo privado y esa ruta no se incluyen en el build publicado. No se importa nada a Supabase desde la preparación local. Para probar con datos ficticios, abre `http://127.0.0.1:5173/?demo=1`; sus PDF se identifican como documentos de prueba.
+
+## Preparar Supabase
+
+Consulta [supabase/README.md](supabase/README.md) para el procedimiento completo de provisión, importación, seguridad y pruebas del entorno real.
+
+1. Crea un proyecto y aplica **las dos migraciones en orden**: `supabase/migrations/202610130001_orquivia.sql` y `supabase/migrations/202610140002_team_production.sql`. Expón `public` mediante Data API y mantén `orquivia_private` fuera de los esquemas expuestos.
+2. Desactiva el registro público en Supabase Auth. Configura la URL del sitio y los destinos de autenticación para la dirección final de GitHub Pages, sin comodines abiertos.
+3. Desde un entorno de operador, ejecuta `supabase/scripts/bootstrap-team.mjs` con su configuración por stdin. El script valida por defecto sin crear nada; `apply:true` provisiona las dos cuentas, asigna los roles y exige MFA. Las contraseñas iniciales tienen al menos 16 caracteres. La clave de servidor y las contraseñas se mantienen fuera del navegador y del repositorio.
+4. Para importar el histórico, indica al script el archivo privado validado en `statePath`. La importación conserva números originales y advertencias; solo procede sobre un espacio nuevo o reconoce una importación idéntica ya realizada. Los cambios posteriores no se sobrescriben en un reintento.
+5. Comprueba el acceso de las dos titulares, el alta y la verificación del autenticador, el rechazo de una cuenta ajena y los conflictos entre dos sesiones antes de dar por finalizado el despliegue.
+
+La pertenencia a la empresa requiere una membresía explícita. Las políticas RLS y las funciones del servidor comprueban esa membresía y el nivel MFA antes de permitir leer o guardar datos. El navegador guarda la sesión en `sessionStorage`; la interfaz se bloquea al cerrar sesión, perder acceso o alcanzar 30 minutos de inactividad. El cambio de contraseña exige la contraseña actual y vuelve a pedir inicio de sesión. Las modificaciones se registran en una auditoría que las cuentas de la aplicación no pueden borrar.
+
+## Publicar en GitHub Pages
+
+1. Sube el código a la rama `main`. Revisa la lista de archivos antes de subirla: **no publiques** `private/`, `tmp/`, `output/`, `node_modules/`, `dist/`, `.env`, documentos originales, copias JSON, contraseñas ni claves de servidor. `.gitignore` excluye las carpetas y archivos locales habituales; una carga manual por navegador también debe respetar estas exclusiones.
+2. En **Settings → Pages → Build and deployment**, selecciona **GitHub Actions**.
+3. En **Settings → Secrets and variables → Actions → Variables**, configura `VITE_SUPABASE_URL` y `VITE_SUPABASE_PUBLISHABLE_KEY`. Son la URL del proyecto y su clave **publishable**, o la clave antigua **anon**. Nunca uses `service_role` ni `sb_secret_…` en una variable `VITE_…`.
+4. Ejecuta el workflow **Publicar Orquívia en GitHub Pages** o haz un push a `main`. El workflow establece `VITE_APP_MODE=production`, instala las dependencias, ejecuta las pruebas y llama a `npm run build:production` antes de publicar.
+5. Comprueba la dirección que muestra GitHub en el despliegue y en Settings → Pages. Las rutas relativas permiten servir el portal bajo `/nombre-del-repositorio/`.
+
+`build:production` se detiene si falta el modo de producción o una configuración pública válida. Después de compilar, revisa `dist` con `scripts/check-public-build.mjs`: rechaza documentos privados, nombres de archivos sensibles, claves `sb_secret_…` y, si existe el histórico local, los datos identificativos de sus clientes y de la empresa. Esta comprobación complementa la revisión de archivos; no sustituye las políticas de Supabase. El build normal sin configuración muestra una pantalla de preparación bloqueada y no da acceso al histórico local.
+
+Para compilar la versión oficial desde un entorno local, configura esas tres variables en el entorno. Puedes usar `.env.example` como referencia para los valores públicos, pero `assert-production-config.mjs` lee las variables del proceso: hay que declararlas también en la terminal que ejecute `npm run build:production`.
+
+## Trabajar con documentos
+
+- Completa los datos fiscales de la empresa y del cliente antes de emitir. Puedes crear una factura directamente o convertir un presupuesto en una factura vinculada.
+- Los borradores no tienen número definitivo. Al emitir, el servidor asigna una secuencia anual independiente para presupuestos (`PR-AAAA-NNN`) y facturas (`F-AAAA-NNN`). La conversión conserva el número del presupuesto y asigna a la factura el siguiente número de su propia serie. Los números históricos importados se conservan y cuentan para la secuencia correspondiente.
+- Los documentos emitidos no pueden borrarse, volver a borrador ni cambiar de número, tipo o fecha. Los conceptos y datos fiscales de una factura emitida quedan fijos. Sus notas, referencia **PO / orden de pedido**, vencimiento y seguimiento de contrato siguen siendo editables. Las rectificativas requieren una ampliación específica.
+- Descarga el PDF desde el detalle. Los importes se calculan en céntimos, con IVA, descuentos y retenciones; los documentos largos se reparten en varias páginas. Al emitir se conserva una copia de los datos de empresa y cliente.
+- Verifica los movimientos bancarios y usa **Registrar cobro** para registrar pagos completos o parciales. El portal no tiene conexión con el banco. Las facturas históricas cuyo pago no está acreditado quedan **por revisar** y no se cuentan como deuda confirmada hasta revisar el cobro.
+- Usa la fecha prevista de contrato para generar un aviso hasta marcar **Contrato recibido**. Las advertencias de importación señalan las fechas o importes originales que requieren revisión.
+- Exporta listas a CSV y descarga una copia JSON desde Configuración. La restauración de una copia local es independiente de la importación administrada del espacio compartido.
+
+Los cambios de otra sesión se detectan mediante una versión en el servidor para impedir sobrescrituras silenciosas. Si aparece un conflicto, recarga y concilia los cambios antes de volver a guardar.
+
+## Recordatorios
+
+Los avisos se calculan al abrir el portal. Los avisos del navegador son opcionales y requieren que el portal esté abierto. Para recibir correos con el portal cerrado, despliega y activa la función y el cron descritos en [supabase/README.md](supabase/README.md), configura un proveedor de correo y habilita los envíos a la dirección propia de la empresa. Preparar estos archivos no activa el servicio ni envía correos.
+
+## Comprobaciones
+
+```sh
+npm test
+npm run build
+node scripts/check-public-build.mjs
+```
+
+Para el build publicable con configuración de producción válida:
+
+```sh
+npm run build:production
+```
+
+La carpeta `dist` es el resultado estático. Las pruebas de PostgreSQL y sus límites se describen en [supabase/README.md](supabase/README.md); las pruebas locales no verifican Supabase Auth, el gateway, el correo ni la concurrencia real del proyecto desplegado.

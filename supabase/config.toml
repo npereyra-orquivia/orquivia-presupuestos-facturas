@@ -1,0 +1,6 @@
+project_id = "orquivia"
+
+[functions.daily-reminders]
+# Only the server-side scheduled job knows ORQUIVIA_CRON_SECRET. The function
+# verifies that custom secret itself and never accepts a browser session token.
+verify_jwt = false
