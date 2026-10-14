@@ -235,7 +235,7 @@ export function createBackend({ url, anonKey }) {
         if (data.user?.id !== user.id || (await currentUser())?.id !== user.id) {
           throw backendError('La sesión cambió. Inicia sesión antes de cambiar la contraseña.', 'AUTH_CHANGED');
         }
-        const { error } = await client.auth.updateUser({ password: newPassword });
+        const { error } = await client.auth.updateUser({ password: newPassword, current_password: currentPassword });
         if (error) throw backendError('No se pudo cambiar la contraseña.', 'AUTH_ERROR', error);
         const { error: logoutError } = await client.auth.signOut({ scope: 'others' });
         if (logoutError) throw backendError('La contraseña cambió, pero no se pudieron cerrar las otras sesiones.', 'OTHER_SESSIONS_ERROR', logoutError);

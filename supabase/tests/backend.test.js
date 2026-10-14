@@ -273,7 +273,9 @@ test('password reauthentication preserves the active MFA session and revokes its
       assert.equal(authorization(init), `Bearer ${activeToken}`, 'The portal must retain the AAL2 token for every account request');
       if (init.method === 'PUT') {
         passwordUpdates++;
-        assert.equal(JSON.parse(init.body).password, 'new-fictional-password');
+        const update = JSON.parse(init.body);
+        assert.equal(update.password, 'new-fictional-password');
+        assert.equal(update.current_password, 'current-fictional-password');
         if (updateFailure) return json({ code: 'unexpected_failure', msg: 'Account update failed' }, 500);
       }
       return json(user);
