@@ -4,3 +4,8 @@ project_id = "orquivia"
 # Only the server-side scheduled job knows ORQUIVIA_CRON_SECRET. The function
 # verifies that custom secret itself and never accepts a browser session token.
 verify_jwt = false
+
+[functions.send-push-reminders]
+# Public GET exposes only the VAPID public key. POST requires the private cron
+# secret, verified by the function against its service-only configuration RPC.
+verify_jwt = false

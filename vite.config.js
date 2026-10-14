@@ -22,7 +22,7 @@ const localImport = {
   transformIndexHtml(html, ctx) {
     const dev = !!ctx.server;
     const connect = dev ? "'self' http://127.0.0.1:* ws://127.0.0.1:*" : "'self'";
-    const csp = `default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src ${connect} https://*.supabase.co wss://*.supabase.co; object-src 'none'; base-uri 'self'; form-action 'none'; frame-src 'none'; worker-src 'self' blob:`;
+    const csp = `default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src ${connect} https://*.supabase.co wss://*.supabase.co; object-src 'none'; base-uri 'self'; form-action 'none'; frame-src 'none'; worker-src 'self' blob:; manifest-src 'self'`;
     return html.replace('<!-- SECURITY_POLICY -->', `<meta http-equiv="Content-Security-Policy" content="${csp}">`);
   },
 };

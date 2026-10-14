@@ -1,4 +1,5 @@
 import { createClient } from '@supabase/supabase-js';
+import { createPersonalBackend } from './personal-backend.js';
 import { validateWorkspace } from './domain.js';
 
 const MAX_STATE_BYTES = 5_000_000;
@@ -265,6 +266,7 @@ export function createBackend({ url, anonKey }) {
   }
 
   return {
+    personal: createPersonalBackend({ client, requireUser, getWorkspace: () => workspace, url }),
     async signIn(email, password) {
       const { data, error } = await client.auth.signInWithPassword({ email: email.trim(), password });
       if (error) throw backendError('No se pudo iniciar sesión. Revisa el correo y la contraseña.', 'AUTH_ERROR', error);

@@ -59,8 +59,12 @@ export function createPDF(document, company, client, { logoData, demo = false } 
     y += gap;
   }
 
-  if (logoData) pdf.addImage(logoData, 'PNG', 25, 12, 15, 17.2);
-  else fit(company.name || 'Orquívia', left, 24, 68, 18);
+  if (logoData) {
+    const image = pdf.getImageProperties(logoData);
+    const ratio = image.width / image.height;
+    const imageWidth = Math.min(ratio >= 2 ? 62 : 15, 20 * ratio);
+    pdf.addImage(logoData, 'PNG', 25, ratio >= 2 ? 14 : 12, imageWidth, imageWidth / ratio);
+  } else fit(company.name || 'Orquívia', left, 24, 68, 18);
   text(kind.toUpperCase(), right, 26, 26, { align: 'right' });
   fit(`Número: ${number}`, right, 34, 87, 9, { align: 'right' });
   text(`Fecha: ${date(document.date)}`, right, 39, 9, { color: muted, align: 'right' });

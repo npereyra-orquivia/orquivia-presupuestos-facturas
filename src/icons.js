@@ -13,7 +13,7 @@ const paths = {
   download: '<path d="M12 3v12m-5-5 5 5 5-5M4 17v4h16v-4"/>',
   check: '<path d="m5 12 4 4L19 6"/>',
   clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
-  euro: '<path d="M19 5a7 7 0 1 0 0 14M3 10h12M3 14h10"/>',
+  euro: '<path d="M19 5.5C17.7 4.5 16.1 4 14.5 4 10.1 4 7.5 7.4 7.5 12s2.6 8 7 8c1.6 0 3.2-.5 4.5-1.5M5 10h10.5M5 14h9"/>',
   close: '<path d="m6 6 12 12M6 18 18 6"/>',
   trash: '<path d="M3 6h18M9 6V3h6v3M5 6l1 15h12l1-15M10 10v7M14 10v7"/>',
   edit: '<path d="m16 3 5 5-13 13H3v-5zM14 5l5 5"/>',

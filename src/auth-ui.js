@@ -1,9 +1,9 @@
 import { escapeHTML as esc } from './domain.js';
 import { validatePasswordChange } from './security.js';
 
-export function renderAccess(container,{backend,logo,onAuthenticated,message=''}){
+export function renderAccess(container,{backend,logo,brandLogo=logo,onAuthenticated,message=''}){
   container.inert=false;
-  container.innerHTML=`<main class="access-page"><section class="access-intro"><a class="brand"><img src="${logo}" alt=""><span>Orquívia<small>GESTIÓN DE NEGOCIO</small></span></a><div><span class="eyebrow">TU EMPRESA, EN UN SOLO LUGAR</span><h1>De la primera propuesta<br>al último cobro.</h1><p>Presupuestos, facturas y seguimiento de tus proyectos.</p></div><small>Acceso privado a los documentos de Orquívia.</small></section><section class="access-card"><div id="auth-content"></div></section></main>`;
+  container.innerHTML=`<main class="access-page"><section class="access-intro"><a class="brand"><img class="brand-full" src="${brandLogo}" alt="Orquívia"></a><div><span class="eyebrow">TU EMPRESA, EN UN SOLO LUGAR</span><h1>De la primera propuesta<br>al último cobro.</h1><p>Presupuestos, facturas y seguimiento de tus proyectos.</p></div><small>Acceso privado a los documentos de Orquívia.</small></section><section class="access-card"><div id="auth-content"></div></section></main>`;
   const host=container.querySelector('#auth-content');
   const error=(m)=>{let p=host.querySelector('[role="alert"]');if(!p){p=document.createElement('p');p.className='auth-error';p.setAttribute('role','alert');host.append(p)}p.textContent=m};
   async function finish(){

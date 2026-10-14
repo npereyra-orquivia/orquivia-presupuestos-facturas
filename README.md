@@ -21,7 +21,7 @@ Los justificantes adjuntos en modo local se guardan en IndexedDB de ese navegado
 
 Consulta [supabase/README.md](supabase/README.md) para el procedimiento completo de provisión, importación, seguridad y pruebas del entorno real.
 
-1. Crea un proyecto y aplica **las tres migraciones en orden**: `supabase/migrations/202610130001_orquivia.sql`, `supabase/migrations/202610140002_team_production.sql` y `supabase/migrations/202610140003_expenses.sql`. La tercera añade gastos y crea el bucket privado de justificantes. Expón `public` mediante Data API y mantén `orquivia_private` fuera de los esquemas expuestos. Si el proyecto ya tiene las dos primeras, aplica únicamente la tercera.
+1. Crea un proyecto y aplica **las seis migraciones en orden**: `202610130001_orquivia.sql`, `202610140002_team_production.sql`, `202610140003_expenses.sql`, `202610140004_personal_profiles.sql`, `202610140005_push_runtime.sql` y `202610140006_personal_identity.sql`, dentro de `supabase/migrations/`. La tercera añade gastos y justificantes privados; la cuarta incorpora perfiles, fotos y dispositivos privados por usuaria; la quinta prepara el servicio de avisos y la sexta vincula cada petición personal a la usuaria que la inició. En un proyecto existente, aplica únicamente las migraciones pendientes. Expón `public` mediante Data API y mantén `orquivia_private` fuera de los esquemas expuestos.
 2. Desactiva el registro público en Supabase Auth. Configura la URL del sitio y los destinos de autenticación para la dirección final de GitHub Pages, sin comodines abiertos.
 3. Desde un entorno de operador, ejecuta `supabase/scripts/bootstrap-team.mjs` con su configuración por stdin. El script valida por defecto sin crear nada; `apply:true` provisiona las dos cuentas, asigna los roles y exige MFA. Las contraseñas iniciales tienen al menos 16 caracteres. La clave de servidor y las contraseñas se mantienen fuera del navegador y del repositorio.
 4. Para importar el histórico, indica al script el archivo privado validado en `statePath`. La importación conserva números originales y advertencias; solo procede sobre un espacio nuevo o reconoce una importación idéntica ya realizada. Los cambios posteriores no se sobrescriben en un reintento.
@@ -76,7 +76,19 @@ El saldo representa los movimientos registrados en el portal. Revisa y concilia 
 
 ## Recordatorios
 
-Los avisos se calculan al abrir el portal. Los avisos del navegador son opcionales y requieren que el portal esté abierto. Para recibir correos con el portal cerrado, despliega y activa la función y el cron descritos en [supabase/README.md](supabase/README.md), configura un proveedor de correo y habilita los envíos a la dirección propia de la empresa. Preparar estos archivos no activa el servicio ni envía correos.
+En **Mi espacio**, cada usuaria elige si quiere recordatorios de cobros pendientes, aceptación o contrato y registros por revisar. Puede indicar cuántos días antes del plazo recibir un aviso, incluir el mismo día, repetir pendientes cada cierto número de días y elegir la hora de España peninsular. Un `0` desactiva la antelación o la repetición. Los recordatorios personales están **desactivados por defecto** y se guardan separados de la información de la empresa.
+
+Para recibirlos con el portal cerrado hacen falta el servicio push y el cron desplegados, las preferencias activadas, el registro de ese dispositivo y el permiso del navegador. Pulsa **Activar avisos en este dispositivo** desde Mi espacio. El servidor comprueba los pendientes cada hora, en el minuto 20, y envía como máximo un resumen por dispositivo y día, a partir de la hora elegida; no promete llegar en el minuto exacto seleccionado. Las notificaciones muestran un mensaje general: los clientes, importes y documentos se consultan después de iniciar sesión. **Desactivar este dispositivo** retira su registro; las preferencias personales siguen disponibles para otros dispositivos.
+
+En un **iPhone**, abre el portal oficial en Safari, toca **Compartir → Añadir a pantalla de inicio** y entra desde ese nuevo icono. Después inicia sesión, abre Mi espacio y activa los avisos en el dispositivo cuando el sistema lo permita. Los avisos web en iPhone requieren una versión de iOS compatible (16.4 o posterior) y abrir el acceso instalado. La web app requiere conexión para cargar datos; no guarda documentos financieros en una caché del service worker.
+
+El despliegue del servicio y del cron se describe en [supabase/README.md](supabase/README.md). Los correos de empresa son una alternativa independiente que requiere configurar su proveedor y su propio cron. Preparar el código de un servicio no lo activa.
+
+## Perfil y barra lateral
+
+Pulsa tu nombre o tu avatar para abrir **Mi espacio**. Puedes cambiar el nombre que ves en el portal y elegir o quitar una foto. El nombre y la foto pertenecen solo a esa cuenta y no modifican los datos fiscales, documentos ni cobros de Orquívia. Las imágenes elegidas se recortan y reducen en el navegador antes de guardarlas en el bucket privado `orquivia-avatars`; se admiten JPG, PNG y WebP, y el archivo guardado no supera 2 MB. Sin foto aparece la inicial del nombre personal. La zona de seguridad permite cambiar la contraseña.
+
+El botón junto al logo pliega la barra lateral y conserva los iconos de navegación con sus etiquetas al pasar el cursor. La preferencia de plegado se conserva en ese navegador.
 
 ## Comprobaciones
 
