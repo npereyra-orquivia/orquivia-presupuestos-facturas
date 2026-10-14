@@ -46,10 +46,10 @@ export async function localReceipt(attachment) {
   return blob;
 }
 
-async function previewReceipts(ctx,attachments,initialIndex=0,{pendingFiles=new Map(),trigger}={}){
+async function previewReceipts(ctx,attachments,initialIndex=0,{pendingFiles=new Map(),trigger,isCurrent=()=>true}={}){
   if(!attachments.length||ctx.getMode()==='locked')return;
   const request=++viewerRequest,mode=ctx.getMode(),backend=ctx.getBackend(),identity=ctx.getIdentity();
-  const isActive=()=>ctx.getMode()===mode&&ctx.getBackend()===backend&&ctx.getIdentity()===identity;
+  const isActive=()=>ctx.getMode()===mode&&ctx.getBackend()===backend&&ctx.getIdentity()===identity&&isCurrent();
   if(trigger)trigger.disabled=true;
   try{
     const {openReceiptViewer}=await import('./receipt-viewer.js');
@@ -77,7 +77,7 @@ export function expensesPage(state) {
   const filters = [['all', 'Todos'], ['paid', 'Pagados'], ['pending', 'Pendientes'], ['review', 'Por revisar']];
   return `<div class="page-heading"><div><div class="eyebrow">GASTOS</div><h1>Cada gasto, con su justificante.</h1><p>Un concepto, el total y una foto o archivo. Listo para tu gestor.</p></div><button class="button primary" data-action="new-expense">+ Nuevo gasto</button></div>
   <section class="card expense-list"><div class="list-toolbar"><div class="search-box"><svg class="icon" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m15.5 15.5 5 5"/></svg><input id="expense-search" placeholder="Buscar concepto, proveedor o número…" value="${esc(expenseQuery)}" aria-label="Buscar gastos"></div><span class="expense-list-note">Todo el histórico</span></div>
-  <div class="tabs" role="group" aria-label="Filtrar gastos">${filters.map(([value, label]) => `<button type="button" data-expense-filter="${value}" class="${expenseFilter === value ? 'selected' : ''}">${label}<span>${all.filter(e => matchesFilter(e, value)).length}</span></button>`).join('')}</div>
+  <div class="tabs" role="group" aria-label="Filtrar gastos" aria-describedby="expense-filter-help">${filters.map(([value, label]) => `<button type="button" data-expense-filter="${value}" class="${expenseFilter === value ? 'selected' : ''}">${label}<span>${all.filter(e => matchesFilter(e, value)).length}</span></button>`).join('')}</div><p class="expense-filter-help" id="expense-filter-help">Un gasto pagado puede estar por revisar: el pago y la revisión del justificante se registran por separado.</p>
   <div class="table-scroll"><table><thead><tr><th>Concepto / proveedor</th><th>Fecha</th><th>Total</th><th>Pago</th><th>Justificantes</th><th></th></tr></thead><tbody>${rows.map(e => {
     const count = (e.attachments || []).length;
     return `<tr><td><button class="doc-link" data-expense="${esc(e.id)}"><span><strong>${esc(e.description)}</strong>${e.kind === 'credit' ? '<small class="expense-credit-note">Abono / devolución</small>' : ''}<small>${esc(e.supplier || e.category || 'Gasto registrado')}${e.reference ? ' · ' + esc(e.reference) : ''}</small>${needsReview(e) ? `<small class="expense-review-label">${e.vatReviewNeeded ? 'IVA por revisar' : count ? 'Por revisar' : 'Falta justificante'}</small>` : ''}</span></button></td><td class="date-cell">${dateLabel(e.date)}</td><td class="amount">${money(expenseTotals(e).total)}</td><td><span class="badge ${e.paymentStatus === 'paid' ? 'paid' : 'issued'}"><i></i>${e.paymentStatus === 'paid' ? e.kind === 'credit' ? 'Reembolsado' : 'Pagado' : 'Pendiente'}</span></td><td>${count?`<button type="button" class="text-button expense-preview-link" data-preview-expense="${esc(e.id)}" aria-label="Ver justificantes: ${esc(e.description)}">${icon('eye')}${count} ${count === 1 ? 'archivo' : 'archivos'}</button>`:'<span class="expense-file-count is-missing">Sin archivos</span>'}</td><td><button class="icon-btn" data-expense="${esc(e.id)}" aria-label="Editar gasto: ${esc(e.description)}">›</button></td></tr>`;
@@ -87,7 +87,7 @@ export function expensesPage(state) {
 
 export function bindExpenses(root, ctx) {
   root.querySelectorAll('[data-expense]').forEach(b => b.onclick = () => expenseModal(ctx, ctx.getState().expenses.find(e => e.id === b.dataset.expense)));
-  root.querySelectorAll('[data-preview-expense]').forEach(b=>b.onclick=()=>{const expense=ctx.getState().expenses.find(e=>e.id===b.dataset.previewExpense);if(expense)previewReceipts(ctx,expense.attachments||[],0,{trigger:b})});
+  root.querySelectorAll('[data-preview-expense]').forEach(b=>b.onclick=()=>{const expense=ctx.getState().expenses.find(e=>e.id===b.dataset.previewExpense);if(expense)expenseModal(ctx,expense)});
   root.querySelectorAll('[data-expense-filter]').forEach(b => b.onclick = () => {
     expenseFilter = b.dataset.expenseFilter;
     ctx.render();
@@ -119,7 +119,7 @@ export function openingBalanceModal(ctx) {
 
 export function expenseModal(ctx, expense) {
   const draft = structuredClone(expense || { id: crypto.randomUUID(), date: todayISO(), supplier: '', supplierTaxId: '', description: '', category: 'Otros', base: 0, vatAmount: 0, total: 0, vatDeductibleAmount: 0, vatReviewNeeded: true, paymentStatus: 'paid', paidDate: todayISO(), reference: '', notes: '', attachments: [] });
-  const pending = [], removed = [];
+  const pending = [], removed = [], pendingIds = new WeakMap();
   draft.attachments ||= [];
   const originalAttachments = structuredClone(draft.attachments), isCredit = draft.kind === 'credit', hasCashMovements = Array.isArray(draft.cashMovements) && draft.cashMovements.length > 0;
   const expenseCategories=categories.some(([value])=>value===draft.category)||!draft.category?categories:[...categories,[draft.category,draft.category]];
@@ -127,32 +127,73 @@ export function expenseModal(ctx, expense) {
   let verifyingFiles = 0;
   const knownRate = [0, 4, 10, 21].includes(draft.vatRate) && splitExpenseTotal(draft.total - (draft.additionalAmount || 0), draft.vatRate).vatAmount === draft.vatAmount;
   const vatChoice = draft.vatReviewNeeded ? 'review' : knownRate ? String(draft.vatRate) : 'manual';
-  ctx.openModal(ctx.modalHeader(expense ? 'Editar gasto' : 'Nuevo gasto', 'Guarda el justificante ahora. Completa los detalles cuando quieras.') + `<form id="expense-form" class="expense-quick-form">
+  ctx.openModal(ctx.modalHeader(expense ? 'Editar gasto' : 'Nuevo gasto', 'Completa los datos con el justificante a la vista.') + `<div class="expense-editor-layout"><form id="expense-form" class="expense-quick-form">
   <div class="expense-quick-fields">${field('Concepto / nombre del gasto', 'description', draft.description, 'text', 'required maxlength="2000" placeholder="Comida, material, transporte…"')}
   <div class="form-grid expense-amount-grid">${field(isCredit ? 'Importe del abono, IVA incluido (€)' : 'Total, IVA incluido (€)', 'total', draft.total || '', 'number', `${isCredit ? 'max="-0.01"' : 'min="0.01"'} step="0.01" required inputmode="decimal" placeholder="0,00"`)}${select('IVA del justificante', 'vatRate', [['review', 'Por revisar'], ['21', '21%'], ['10', '10%'], ['4', '4%'], ['0', 'Sin IVA'], ['manual', 'Indicar importe de IVA']], vatChoice)}</div>
   <div id="manual-vat-field" ${vatChoice === 'manual' ? '' : 'hidden'}>${field('IVA que aparece en el documento (€)', 'vatAmount', draft.vatAmount, 'number', `${isCredit ? 'max="0"' : 'min="0"'} step="0.01" inputmode="decimal"`)}</div><p class="field-hint expense-vat-hint" id="expense-vat-hint"></p>
   <label class="checkbox-label expense-paid-toggle"><input name="alreadyPaid" type="checkbox" ${draft.paymentStatus === 'paid' ? 'checked' : ''}>${isCredit ? 'Reembolso recibido' : 'Ya está pagado'}</label><p class="field-hint expense-payment-warning" id="expense-cash-change-warning" hidden>Al guardar como pendiente se retirarán del saldo sus pagos registrados.</p></div>
   <section class="expense-receipts"><div class="expense-section-heading"><h3>Justificante</h3><span>${expense ? 'Fotos y archivos' : 'Necesario para guardar'}</span></div><div class="receipt-actions"><label class="button primary">Tomar una foto<input class="visually-hidden" type="file" id="receipt-camera" accept="image/jpeg,image/png,image/webp,image/heic,image/heif" capture="environment"></label><label class="button secondary">Adjuntar archivos<input class="visually-hidden" type="file" id="receipt-files" multiple accept="${Object.keys(RECEIPT_FILE_TYPES).map(e => '.' + e).join(',')}"></label></div><div class="receipt-list" id="receipt-list"></div><p class="field-hint">PDF, fotos o documentos. Hasta 10 MB por archivo; se guardan privados.</p></section>
   <details class="expense-details"><summary><span>Más detalles</span><small>Fecha, proveedor y datos para el gestor</small></summary><div class="expense-details-body"><div class="form-grid">${field('Fecha del justificante', 'date', draft.date, 'date', `required max="${todayISO()}"`)}${field(isCredit ? 'Fecha del reembolso' : 'Fecha del pago', 'paidDate', draft.paidDate || (expense ? draft.date : todayISO()), 'date', `max="${todayISO()}"`)}${field('Proveedor / comercio (opcional)', 'supplier', draft.supplier, 'text', 'maxlength="240"')}${field('NIF del proveedor (opcional)', 'supplierTaxId', draft.supplierTaxId, 'text', 'maxlength="80"')}${field('Número de factura o ticket (opcional)', 'reference', draft.reference, 'text', 'maxlength="240"')}${select('Categoría', 'category', expenseCategories, draft.category || 'Otros')}</div>${cashDetails}<div class="expense-section"><h3>Desglose para el gestor</h3>${field('Suplidos / importe adicional sin IVA (€)', 'additionalAmount', draft.additionalAmount || 0, 'number', `${isCredit ? 'max="0"' : 'min="0"'} step="0.01" inputmode="decimal"`)}${field('Base imponible (€)', 'base', draft.vatReviewNeeded ? '' : draft.base, 'number', 'readonly step="0.01"')}<p class="field-hint">Si hay varios tipos de IVA, selecciona «Indicar importe de IVA» y copia el total de IVA del documento.</p><label class="checkbox-label"><input name="deductible" type="checkbox" ${draft.vatDeductibleAmount !== 0 && draft.vatDeductibleAmount !== undefined ? 'checked' : ''}>IVA confirmado para revisión del gestor</label>${field('Importe de IVA confirmado (€)', 'vatDeductibleAmount', draft.vatDeductibleAmount || 0, 'number', 'min="0" step="0.01"')}<p class="field-hint">El gestor revisará si el gasto y su IVA son deducibles.</p></div><div class="expense-section"><label class="field"><span>Notas (opcional)</span><textarea name="notes" rows="2" maxlength="10000">${esc(draft.notes || '')}</textarea></label><label class="checkbox-label"><input name="reviewNeeded" type="checkbox" ${draft.reviewNeeded ? 'checked' : ''}>Revisar este justificante con el gestor</label></div></div></details>
-  <div class="modal-actions">${expense ? '<button type="button" class="text-button danger" id="remove-expense">Eliminar gasto</button>' : ''}<button class="button secondary" type="button" data-close>Cancelar</button><button class="button primary" id="save-expense">Guardar gasto</button></div></form>`);
-  const form = ctx.modalRoot.querySelector('#expense-form'), list = form.querySelector('#receipt-list'), save = form.querySelector('#save-expense');
+  </form><aside class="expense-preview-panel" aria-label="Justificante junto al formulario"><div class="expense-preview-heading"><span class="preview-label">${icon('eye')}VISTA PREVIA DEL JUSTIFICANTE</span><button type="button" class="text-button" id="expand-expense-preview" hidden>Ampliar visor</button></div><div id="expense-inline-preview"></div></aside></div><div class="modal-actions expense-editor-actions">${expense ? '<button type="button" class="text-button danger" id="remove-expense">Eliminar gasto</button>' : ''}<button class="button secondary" type="button" data-close>Cancelar</button><button type="submit" form="expense-form" class="button primary" id="save-expense">Guardar gasto</button></div>`, true);
+  const form = ctx.modalRoot.querySelector('#expense-form'), list = form.querySelector('#receipt-list'), save = ctx.modalRoot.querySelector('#save-expense');
+  const previewHost = ctx.modalRoot.querySelector('#expense-inline-preview'), expandPreview = ctx.modalRoot.querySelector('#expand-expense-preview');
+  const previewMode = ctx.getMode(), previewBackend = ctx.getBackend(), previewIdentity = ctx.getIdentity();
+  const isPreviewActive = () => form.isConnected && ctx.getMode() === previewMode && ctx.getBackend() === previewBackend && ctx.getIdentity() === previewIdentity;
+  let previewController = null, previewGeneration = 0, previewAttachments = [], pendingFiles = new Map();
+  ctx.registerModalCleanup(() => { ++previewGeneration; previewController?.dispose(); previewController = null; });
+  async function showInlinePreview(index = 0, force = false) {
+    if (!isPreviewActive()) return;
+    if (previewController && !force) { previewController.select(index); return; }
+    const token = ++previewGeneration;
+    previewController?.dispose(); previewController = null;
+    expandPreview.hidden = !previewAttachments.length;
+    if (!previewAttachments.length) {
+      previewHost.innerHTML = `<div class="expense-preview-empty">${icon('eye')}<h3>Tu justificante, a la vista</h3><p>Haz una foto o adjunta un archivo. Se mostrará aquí mientras completas el gasto.</p></div>`;
+      return;
+    }
+    previewHost.innerHTML = '<div class="expense-preview-empty"><p>Preparando la vista previa…</p></div>';
+    const attachments = structuredClone(previewAttachments), pendingSnapshot = new Map(pendingFiles);
+    try {
+      const { mountReceiptViewer } = await import('./receipt-viewer.js');
+      if (token !== previewGeneration || !isPreviewActive()) return;
+      previewHost.replaceChildren();
+      previewController = mountReceiptViewer({ attachments, initialIndex: index, parent: previewHost, isActive: isPreviewActive,
+        loadAttachment: async attachment => {
+          if (!isPreviewActive()) throw new Error('La sesión ha cambiado. Vuelve a entrar para ver el justificante.');
+          return pendingSnapshot.get(attachment.id) || (previewMode === 'cloud' ? await previewBackend.downloadReceipt(attachment) : await localReceipt(attachment));
+        } });
+    } catch (error) {
+      if (token === previewGeneration && isPreviewActive()) {
+        previewHost.innerHTML = '<div class="expense-preview-empty"><h3>No se pudo abrir la vista previa</h3><p></p><button type="button" class="button secondary">Volver a intentar</button></div>';
+        previewHost.querySelector('p').textContent = error.message;
+        previewHost.querySelector('button').onclick = () => showInlinePreview(index, true);
+      }
+    }
+  }
+  expandPreview.onclick = () => {
+    const token = previewGeneration;
+    previewReceipts(ctx, previewAttachments, previewController?.getSelectedIndex() || 0, { pendingFiles, trigger: expandPreview, isCurrent: () => token === previewGeneration && isPreviewActive() });
+  };
   form.addEventListener('invalid', e => { const details = e.target.closest('details'); if (details) details.open = true; }, true);
-  function redrawFiles() {
+  function redrawFiles(preferredId) {
+    const selectedId = preferredId || previewAttachments[previewController?.getSelectedIndex() || 0]?.id;
     list.innerHTML = draft.attachments.map((a, i) => `<div class="receipt-row"><div><strong>${esc(a.name)}</strong><small>${(a.size / 1024).toFixed(0)} KB · guardado</small></div><button type="button" class="text-button" data-preview-file="${i}" aria-label="Ver ${esc(a.name)}">${icon('eye')}Ver</button><button type="button" class="text-button" data-open-file="${i}">Descargar</button><button type="button" class="icon-btn danger" data-remove-file="${i}" aria-label="Quitar ${esc(a.name)}">×</button></div>`).join('') + pending.map((f, i) => `<div class="receipt-row"><div><strong>${esc(f.name)}</strong><small>${(f.size / 1024).toFixed(0)} KB · listo para guardar</small></div><button type="button" class="text-button" data-preview-pending="${i}" aria-label="Ver ${esc(f.name)}">${icon('eye')}Ver</button><button type="button" class="icon-btn danger" data-remove-pending="${i}" aria-label="Quitar ${esc(f.name)}">×</button></div>`).join('') || '<div class="expense-receipt-placeholder">Haz una foto o añade el archivo que has recibido.</div>';
-    const pendingFiles=new Map();
-    const previewAttachments=[...draft.attachments,...pending.map((file,index)=>{const id=`pending-${index}`;pendingFiles.set(id,file);return {id,name:file.name,mimeType:RECEIPT_FILE_TYPES[file.name.split('.').at(-1).toLowerCase()],size:file.size}})];
-    list.querySelectorAll('[data-preview-file]').forEach(button=>button.onclick=()=>previewReceipts(ctx,previewAttachments,Number(button.dataset.previewFile),{pendingFiles,trigger:button}));
-    list.querySelectorAll('[data-preview-pending]').forEach(button=>button.onclick=()=>previewReceipts(ctx,previewAttachments,draft.attachments.length+Number(button.dataset.previewPending),{pendingFiles,trigger:button}));
+    pendingFiles = new Map();
+    previewAttachments=[...draft.attachments,...pending.map(file=>{const id=pendingIds.get(file);pendingFiles.set(id,file);return {id,name:file.name,mimeType:RECEIPT_FILE_TYPES[file.name.split('.').at(-1).toLowerCase()],size:file.size}})];
+    list.querySelectorAll('[data-preview-file]').forEach(button=>button.onclick=()=>showInlinePreview(Number(button.dataset.previewFile)));
+    list.querySelectorAll('[data-preview-pending]').forEach(button=>button.onclick=()=>showInlinePreview(draft.attachments.length+Number(button.dataset.previewPending)));
     list.querySelectorAll('[data-remove-file]').forEach(b => b.onclick = () => { removed.push(draft.attachments.splice(Number(b.dataset.removeFile), 1)[0]); redrawFiles(); });
     list.querySelectorAll('[data-remove-pending]').forEach(b => b.onclick = () => { pending.splice(Number(b.dataset.removePending), 1); redrawFiles(); });
     list.querySelectorAll('[data-open-file]').forEach(b => b.onclick = async () => {
       b.disabled = true;
       try {
-        const a = draft.attachments[Number(b.dataset.openFile)], blob = ctx.getMode() === 'cloud' ? await ctx.getBackend().downloadReceipt(a) : await localReceipt(a);
-        if (ctx.getMode() === 'locked') throw new Error('Vuelve a entrar para descargar el archivo.');
+        if (!isPreviewActive()) return;
+        const a = draft.attachments[Number(b.dataset.openFile)], blob = previewMode === 'cloud' ? await previewBackend.downloadReceipt(a) : await localReceipt(a);
+        if (!isPreviewActive()) return;
         saveBlob(blob, a.name);
       } catch (e) { ctx.toast(e.message, true); } finally { b.disabled = false; }
     });
+    showInlinePreview(Math.max(0, previewAttachments.findIndex(a => a.id === selectedId)), true);
   }
   function syncConfirmed() {
     const reviewing = form.elements.vatRate.value === 'review';
@@ -199,10 +240,10 @@ export function expenseModal(ctx, expense) {
           await validateReceiptFile(file);
           if (!form.isConnected) return;
           if (draft.attachments.length + pending.length >= 10) throw new Error('Puedes guardar hasta 10 archivos por gasto.');
-          pending.push(file);
+          pendingIds.set(file, 'pending-' + crypto.randomUUID()); pending.push(file);
         } catch (e) { ctx.toast(e.message, true); }
       }
-    } finally { verifyingFiles--; if (form.isConnected) { save.disabled = verifyingFiles > 0 || ctx.isBusy(); redrawFiles(); } }
+    } finally { verifyingFiles--; if (form.isConnected) { save.disabled = verifyingFiles > 0 || ctx.isBusy(); redrawFiles(pendingIds.get(pending.at(-1))); } }
   };
   form.onsubmit = async e => {
     e.preventDefault();
@@ -224,7 +265,7 @@ export function expenseModal(ctx, expense) {
       ctx.validate(sample);
     } catch (error) { ctx.toast(error.message, true); return; }
     const queued = [...pending], kept = structuredClone(draft.attachments), removedAtSave = [...removed];
-    const disabledBefore = [...form.querySelectorAll('input,select,textarea,button')].map(input => [input, input.disabled]);
+    const disabledBefore = [...form.querySelectorAll('input,select,textarea,button'), save].map(input => [input, input.disabled]);
     disabledBefore.forEach(([input]) => input.disabled = true);
     const uploaded = [], cloud = ctx.getMode() === 'cloud', activeBackend = ctx.getBackend();
     ctx.setBusy(true);
@@ -259,7 +300,7 @@ export function expenseModal(ctx, expense) {
       if (form.isConnected) { disabledBefore.forEach(([input, wasDisabled]) => input.disabled = wasDisabled); save.disabled = false; }
     }
   };
-  form.querySelector('#remove-expense')?.addEventListener('click', () => ctx.confirmModal('Eliminar este gasto', 'Se quitará el registro y se recalculará el saldo. Descarga sus justificantes antes de continuar.', async () => {
+  ctx.modalRoot.querySelector('#remove-expense')?.addEventListener('click', () => ctx.confirmModal('Eliminar este gasto', 'Se quitará el registro y se recalculará el saldo. Descarga sus justificantes antes de continuar.', async () => {
     if (await ctx.commit(s => s.expenses = s.expenses.filter(e => e.id !== draft.id), 'Gasto eliminado.')) {
       for (const a of originalAttachments) try { if (ctx.getMode() === 'cloud') await ctx.getBackend().deleteReceipt(a); else await localFile('delete', a.path); } catch { ctx.toast('Un justificante quedó pendiente de limpiar.', true); }
       ctx.closeModal();

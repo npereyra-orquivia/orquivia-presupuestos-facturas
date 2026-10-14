@@ -6,6 +6,7 @@ const IMAGE_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/gif
 const imageExtensions = /\.(?:jpe?g|png|webp|gif|heic|heif)$/i;
 let activeViewer = null;
 let pdfLibrary = null;
+let viewerSequence = 0;
 
 const icon = path => `<svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">${path}</svg>`;
 const icons = {
@@ -55,17 +56,29 @@ function isMediaSignature(bytes, kind, mime) {
  * The caller owns session identity and must dispose on logout/expiry/modal close.
  * loadAttachment performs the authenticated read; no file URL or contents persist.
  */
-export function openReceiptViewer({ attachments, initialIndex = 0, loadAttachment, parent = document.body, returnFocus = document.activeElement, isActive = () => true, onClose = () => {} }) {
+export function openReceiptViewer(options) {
+  return createReceiptViewer(options);
+}
+
+/** Mounts the same private preview inside an editor without taking over focus. */
+export function mountReceiptViewer(options) {
+  if (!options?.parent?.append) throw new Error('El visor necesita un panel donde mostrarse.');
+  return createReceiptViewer(options, true);
+}
+
+function createReceiptViewer({ attachments, initialIndex = 0, loadAttachment, parent = document.body, returnFocus = document.activeElement, isActive = () => true, onClose = () => {} }, embedded = false) {
   if (!Array.isArray(attachments) || !attachments.length || typeof loadAttachment !== 'function') throw new Error('No hay justificantes para mostrar.');
-  activeViewer?.dispose();
+  if (!embedded) activeViewer?.dispose();
   if (!isActive()) throw new Error('Vuelve a entrar para ver el justificante.');
 
   const files = attachments.map(a => ({ ...a })), previousFocus = returnFocus;
+  const titleId = `receipt-viewer-title-${++viewerSequence}`, privacyId = `receipt-viewer-privacy-${viewerSequence}`;
   const overlay = document.createElement('div');
-  overlay.className = 'receipt-viewer-backdrop';
+  overlay.className = embedded ? 'receipt-viewer-embedded' : 'receipt-viewer-backdrop';
   overlay.dataset.receiptViewer = '';
-  overlay.innerHTML = `<section class="receipt-viewer" role="dialog" aria-modal="true" aria-labelledby="receipt-viewer-title" aria-describedby="receipt-viewer-privacy">
-    <header class="receipt-viewer-header"><div class="receipt-viewer-heading"><span class="receipt-viewer-eyebrow">JUSTIFICANTE ORIGINAL</span><h2 id="receipt-viewer-title"></h2><p id="receipt-viewer-privacy">Vista privada · no se guarda en tu dispositivo</p></div><button type="button" class="receipt-viewer-icon receipt-viewer-close" data-viewer="close" aria-label="Cerrar visor">${icons.close}</button></header>
+  if (embedded) overlay.dataset.receiptViewerEmbedded = '';
+  overlay.innerHTML = `<section class="receipt-viewer" role="${embedded ? 'region' : 'dialog'}" ${embedded ? '' : 'aria-modal="true"'} aria-labelledby="${titleId}" aria-describedby="${privacyId}">
+    <header class="receipt-viewer-header"><div class="receipt-viewer-heading"><span class="receipt-viewer-eyebrow">JUSTIFICANTE ORIGINAL</span><h2 id="${titleId}"></h2><p id="${privacyId}">Vista privada · no se guarda en tu dispositivo</p></div>${embedded ? '' : `<button type="button" class="receipt-viewer-icon receipt-viewer-close" data-viewer="close" aria-label="Cerrar visor">${icons.close}</button>`}</header>
     <div class="receipt-viewer-files"><button type="button" class="receipt-viewer-icon" data-viewer="previous-file" aria-label="Justificante anterior">${icons.previous}</button><label class="receipt-viewer-select"><span>Archivo</span><select data-viewer="file" aria-label="Seleccionar justificante"></select></label><span class="receipt-viewer-file-count"></span><button type="button" class="receipt-viewer-icon" data-viewer="next-file" aria-label="Justificante siguiente">${icons.next}</button><button type="button" class="button secondary receipt-viewer-download" data-viewer="download">${icons.download}<span>Descargar original</span></button></div>
     <div class="receipt-viewer-tools"><div class="receipt-viewer-pages" hidden><button type="button" class="receipt-viewer-icon" data-viewer="previous-page" aria-label="Página anterior">${icons.previous}</button><label>Página <input type="number" data-viewer="page" min="1" step="1" value="1" aria-label="Página del PDF"></label><span data-viewer="pages"></span><button type="button" class="receipt-viewer-icon" data-viewer="next-page" aria-label="Página siguiente">${icons.next}</button></div><div class="receipt-viewer-image-label" hidden>Fotografía / imagen</div><div class="receipt-viewer-zoom"><button type="button" class="receipt-viewer-icon" data-viewer="zoom-out" aria-label="Alejar">${icons.minus}</button><output data-viewer="zoom" aria-label="Nivel de ampliación">100%</output><button type="button" class="receipt-viewer-icon" data-viewer="zoom-in" aria-label="Acercar">${icons.plus}</button><button type="button" class="receipt-viewer-fit" data-viewer="fit">Ajustar</button><button type="button" class="receipt-viewer-icon" data-viewer="rotate" aria-label="Girar 90 grados">${icons.rotate}</button></div></div>
     <div class="receipt-viewer-stage" tabindex="0" aria-label="Vista del justificante"><div class="receipt-viewer-document"></div></div>
@@ -77,10 +90,10 @@ export function openReceiptViewer({ attachments, initialIndex = 0, loadAttachmen
   const status = overlay.querySelector('.receipt-viewer-status'), fileCount = overlay.querySelector('.receipt-viewer-file-count');
   const tools = overlay.querySelector('.receipt-viewer-tools'), pages = overlay.querySelector('.receipt-viewer-pages');
   const imageLabel = overlay.querySelector('.receipt-viewer-image-label');
-  const siblingStates = [...parent.children].map(element => ({ element, inert: element.inert }));
+  const siblingStates = embedded ? [] : [...parent.children].map(element => ({ element, inert: element.inert }));
   siblingStates.forEach(({ element }) => { element.inert = true; });
   parent.append(overlay);
-  document.body.classList.add('receipt-viewer-open');
+  if (!embedded) document.body.classList.add('receipt-viewer-open');
 
   let disposed = false, generation = 0, renderGeneration = 0;
   let currentIndex = Math.max(0, Math.min(files.length - 1, Math.floor(Number(initialIndex) || 0)));
@@ -88,8 +101,15 @@ export function openReceiptViewer({ attachments, initialIndex = 0, loadAttachmen
   let pdf = null, loadingTask = null, renderTask = null, canvas = null;
   let pageNumber = 1, zoom = 1, rotation = 0, ready = false, resizeTimer = null;
   const downloadUrls = new Set(), downloadTimers = new Set();
-  const controller = { dispose };
-  activeViewer = controller;
+  const controller = {
+    dispose,
+    getSelectedIndex: () => currentIndex,
+    select: index => {
+      const next = Math.max(0, Math.min(files.length - 1, Math.floor(Number(index) || 0)));
+      return next === currentIndex ? Promise.resolve() : showFile(next);
+    },
+  };
+  if (!embedded) activeViewer = controller;
 
   function sessionIsActive() {
     if (disposed) return false;
@@ -124,21 +144,21 @@ export function openReceiptViewer({ attachments, initialIndex = 0, loadAttachmen
   function dispose() {
     if (disposed) return;
     disposed = true; clearFile(); resizeObserver?.disconnect();
-    document.removeEventListener('keydown', keydown, true);
+    (embedded ? overlay : document).removeEventListener('keydown', keydown, true);
     document.removeEventListener('visibilitychange', checkSession);
     overlay.remove();
     siblingStates.forEach(({ element, inert }) => { if (element.isConnected) element.inert = inert; });
-    document.body.classList.remove('receipt-viewer-open');
+    if (!embedded) document.body.classList.remove('receipt-viewer-open');
     if (activeViewer === controller) activeViewer = null;
-    if (previousFocus?.isConnected && !previousFocus.closest('[inert]')) previousFocus.focus({ preventScroll: true });
+    if (!embedded && previousFocus?.isConnected && !previousFocus.closest('[inert]')) previousFocus.focus({ preventScroll: true });
     onClose();
   }
   function checkSession() { sessionIsActive(); }
   function keydown(event) {
     if (disposed) return;
     if (!sessionIsActive()) return;
-    if (event.key === 'Escape') { event.preventDefault(); event.stopImmediatePropagation(); dispose(); return; }
-    if (event.key === 'Tab') {
+    if (!embedded && event.key === 'Escape') { event.preventDefault(); event.stopImmediatePropagation(); dispose(); return; }
+    if (!embedded && event.key === 'Tab') {
       event.stopImmediatePropagation();
       const elements = [...section.querySelectorAll('button,input,select,[tabindex="0"]')].filter(e => !e.disabled && !e.closest('[hidden]') && e.getClientRects().length);
       const first = elements[0], last = elements.at(-1);
@@ -248,7 +268,7 @@ export function openReceiptViewer({ attachments, initialIndex = 0, loadAttachmen
       documentArea.innerHTML = '<div class="receipt-viewer-loading"><i aria-hidden="true"></i><p>Abriendo PDF…</p></div>';
       setStatus('Abriendo PDF…'); updatePassword(password);
     };
-    input.focus({ preventScroll: true });
+    if (!embedded) input.focus({ preventScroll: true });
   }
   function showImage(blob, mime, token) {
     imageUrl = URL.createObjectURL(new Blob([blob], { type: mime }));
@@ -324,7 +344,7 @@ export function openReceiptViewer({ attachments, initialIndex = 0, loadAttachmen
   }
 
   files.forEach((attachment, i) => { const option = document.createElement('option'); option.value = String(i); option.textContent = `${i + 1}. ${attachment.name || 'Justificante'}`; by('file').append(option); });
-  by('close').onclick = dispose;
+  if (!embedded) by('close').onclick = dispose;
   by('previous-file').onclick = () => showFile(currentIndex - 1);
   by('next-file').onclick = () => showFile(currentIndex + 1);
   by('file').onchange = event => showFile(Number(event.target.value));
@@ -341,14 +361,14 @@ export function openReceiptViewer({ attachments, initialIndex = 0, loadAttachmen
   by('zoom-in').onclick = () => { zoom = Math.min(3, Math.round((zoom + .25) * 100) / 100); updateView(); };
   by('fit').onclick = () => { zoom = 1; stage.scrollTo(0, 0); updateView(); };
   by('rotate').onclick = () => { rotation = (rotation + 90) % 360; updateView(); };
-  overlay.onclick = event => { if (event.target === overlay) dispose(); };
-  document.addEventListener('keydown', keydown, true);
+  if (!embedded) overlay.onclick = event => { if (event.target === overlay) dispose(); };
+  (embedded ? overlay : document).addEventListener('keydown', keydown, true);
   document.addEventListener('visibilitychange', checkSession);
   const resizeObserver = typeof ResizeObserver === 'function' ? new ResizeObserver(() => {
     clearTimeout(resizeTimer); resizeTimer = setTimeout(() => { if (!disposed && ready) updateView(); }, 120);
   }) : null;
   resizeObserver?.observe(stage);
-  by('close').focus({ preventScroll: true });
+  if (!embedded) by('close').focus({ preventScroll: true });
   showFile(currentIndex);
   return controller;
 }

@@ -67,7 +67,9 @@ La lista de **Gastos** muestra todo el histórico. Busca por concepto, proveedor
 
 ## Ver justificantes
 
-En la columna **Justificantes** de Gastos, pulsa **1 archivo** o el número de archivos del gasto para abrir el visor. Desde el formulario de un gasto, pulsa **Ver** junto al adjunto. También puedes previsualizar las fotos y archivos que acabas de añadir antes de guardar: al cerrar el visor se conserva el borrador del formulario.
+Al abrir un gasto por su concepto o el número de **archivos** de la columna **Justificantes**, se muestran sus datos y la vista previa juntos. En una pantalla amplia, el formulario queda a la izquierda y el justificante a la derecha; en móvil, la vista previa aparece debajo. Una foto o archivo recién adjuntado se muestra automáticamente, antes de guardar. Pulsa **Ver** junto a otro adjunto para cambiar la vista o **Ampliar visor** para abrirlo más grande; al cerrar el visor se conserva el borrador del formulario.
+
+**Pagados** indica el estado del pago; **Por revisar** reúne los justificantes marcados para el gestor, con IVA pendiente de confirmar o sin archivo. Un mismo gasto puede estar en ambos filtros. Para completar su revisión, consulta sus notas y documento, confirma el IVA cuando corresponda y desmarca **Revisar este justificante con el gestor** en **Más detalles**, conservando su estado de pago.
 
 El visor muestra **PDF y fotos** dentro del portal. Permite cambiar de justificante, pasar páginas del PDF, ampliar, ajustar y girar la vista. Si el PDF tiene contraseña, la pide para abrirlo y no la guarda. El soporte de HEIC/HEIF depende del navegador; si no puede mostrar una imagen, aparece una explicación. Para Word, Excel y otros formatos, utiliza **Descargar original**. Esta opción también está disponible para PDF y fotos y conserva el archivo original intacto.
 
