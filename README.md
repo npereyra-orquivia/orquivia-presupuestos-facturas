@@ -15,13 +15,13 @@ Abre `http://127.0.0.1:5173/`. En Windows también puedes abrir `Abrir Orquivia.
 
 La preparación local carga `private/initial-state.json`, si existe, mediante una ruta del servidor de desarrollo limitada a localhost. Conserva los cambios de esa preparación en `sessionStorage` de la pestaña. El archivo privado y esa ruta no se incluyen en el build publicado. No se importa nada a Supabase desde la preparación local. Para probar con datos ficticios, abre `http://127.0.0.1:5173/?demo=1`; sus PDF se identifican como documentos de prueba.
 
-Los justificantes adjuntos en modo local se guardan en IndexedDB de ese navegador. No se sincronizan con Supabase ni se incluyen en el build. Descarga el expediente trimestral para conservar una copia de los archivos junto a sus registros.
+Los justificantes adjuntos en modo local se guardan en IndexedDB de ese navegador. No se sincronizan con Supabase ni se incluyen en el build. Desde **Informes y gestor**, descarga un expediente del período que necesites para conservar una copia de los archivos junto a sus registros.
 
 ## Preparar Supabase
 
 Consulta [supabase/README.md](supabase/README.md) para el procedimiento completo de provisión, importación, seguridad y pruebas del entorno real.
 
-1. Crea un proyecto y aplica **las seis migraciones en orden**: `202610130001_orquivia.sql`, `202610140002_team_production.sql`, `202610140003_expenses.sql`, `202610140004_personal_profiles.sql`, `202610140005_push_runtime.sql` y `202610140006_personal_identity.sql`, dentro de `supabase/migrations/`. La tercera añade gastos y justificantes privados; la cuarta incorpora perfiles, fotos y dispositivos privados por usuaria; la quinta prepara el servicio de avisos y la sexta vincula cada petición personal a la usuaria que la inició. En un proyecto existente, aplica únicamente las migraciones pendientes. Expón `public` mediante Data API y mantén `orquivia_private` fuera de los esquemas expuestos.
+1. Crea un proyecto y aplica **las siete migraciones en orden**: `202610130001_orquivia.sql`, `202610140002_team_production.sql`, `202610140003_expenses.sql`, `202610140004_personal_profiles.sql`, `202610140005_push_runtime.sql`, `202610140006_personal_identity.sql` y `202610140007_expense_quick_entry.sql`, dentro de `supabase/migrations/`. La tercera añade gastos y justificantes privados; la cuarta incorpora perfiles, fotos y dispositivos privados por usuaria; la quinta prepara el servicio de avisos; la sexta vincula cada petición personal a la usuaria que la inició y la séptima permite el registro rápido de gastos y sus desgloses pendientes de revisión. En un proyecto existente, aplica únicamente las migraciones pendientes. Expón `public` mediante Data API y mantén `orquivia_private` fuera de los esquemas expuestos.
 2. Desactiva el registro público en Supabase Auth. Configura la URL del sitio y los destinos de autenticación para la dirección final de GitHub Pages, sin comodines abiertos.
 3. Desde un entorno de operador, ejecuta `supabase/scripts/bootstrap-team.mjs` con su configuración por stdin. El script valida por defecto sin crear nada; `apply:true` provisiona las dos cuentas, asigna los roles y exige MFA. Las contraseñas iniciales tienen al menos 16 caracteres. La clave de servidor y las contraseñas se mantienen fuera del navegador y del repositorio.
 4. Para importar el histórico, indica al script el archivo privado validado en `statePath`. La importación conserva números originales y advertencias; solo procede sobre un espacio nuevo o reconoce una importación idéntica ya realizada. Los cambios posteriores no se sobrescriben en un reintento.
@@ -55,18 +55,38 @@ Para compilar la versión oficial desde un entorno local, configura esas tres va
 
 Los cambios de otra sesión se detectan mediante una versión en el servidor para impedir sobrescrituras silenciosas. Si aparece un conflicto, recarga y concilia los cambios antes de volver a guardar.
 
-## Gastos, justificantes y trimestre
+## Registrar gastos
 
-En **Gastos y caja → Registrar gasto**, indica el proveedor, la fecha, el concepto y el total del justificante. Elige su IVA o introduce el IVA impreso cuando haya varios tipos o un desglose diferente. Registra si está pendiente o pagado; al marcarlo pagado, indica la fecha del pago. La casilla de IVA confirmado prepara el registro para la revisión del gestor.
+En **Gastos → Nuevo gasto**, indica el **concepto / nombre del gasto**, el **total con IVA incluido** y añade **una foto o un archivo como justificante**. La fecha del justificante se propone como hoy. Puedes guardar el IVA como **Por revisar**, seleccionar su porcentaje o introducir el importe que figura en el documento cuando haya varios tipos de IVA.
+
+La casilla **Ya está pagado** aparece marcada al crear un gasto: comprueba que corresponde al pago real y desmárcala si está pendiente. En **Más detalles** puedes cambiar las fechas del justificante y del pago y completar el proveedor, NIF, número de factura o ticket, categoría, notas y desglose para el gestor. El proveedor y esos datos complementarios son opcionales. Los importes cuyo IVA está por revisar cuentan en el total y, si están pagados, en caja; su base e IVA quedan pendientes de confirmar.
 
 Puedes **Adjuntar archivos** descargados del correo o usar **Tomar una foto**. En un móvil compatible, esta opción abre la cámara; el navegador puede ofrecer también su selector de archivos. Se admiten PDF, fotos JPEG/PNG/WebP/GIF/HEIC/HEIF y documentos Word, Excel, OpenDocument y RTF: hasta **10 archivos por gasto**, de **10 MB por archivo** (10 485 760 bytes). Los archivos se suben al guardar el gasto y permanecen privados en Supabase Storage. Los formatos de archivo no se convierten.
 
-Selecciona el año y trimestre para ver el registro y descargar:
+La lista de **Gastos** muestra todo el histórico. Busca por concepto, proveedor o número y filtra por **Todos**, **Pagados**, **Pendientes** o **Por revisar**. Selecciona el concepto para editar el registro. El saldo inicial y el saldo según el registro se consultan en **Resumen**.
 
-- **Listado CSV** con facturas emitidas y gastos, sus importes, estados y referencias a justificantes.
-- **Expediente del trimestre**, un ZIP con el CSV, un resumen, los PDF de las facturas emitidas y los justificantes originales de los gastos. Los documentos se agrupan por su fecha de emisión o de justificante; los movimientos de caja usan sus propias fechas de cobro y pago. Si falta un justificante, la exportación se detiene para que puedas resolverlo. El paquete admite hasta 300 MB.
+## Ver justificantes
 
-Los importes de IVA repercutido, IVA soportado registrado e IVA confirmado se muestran por separado. El expediente prepara información para que el gestor la revise; la aplicación no presenta la declaración trimestral. La **copia JSON contiene únicamente los datos y las referencias de los adjuntos**, no sus bytes. Conserva también los ZIP para respaldar los justificantes.
+En la columna **Justificantes** de Gastos, pulsa **1 archivo** o el número de archivos del gasto para abrir el visor. Desde el formulario de un gasto, pulsa **Ver** junto al adjunto. También puedes previsualizar las fotos y archivos que acabas de añadir antes de guardar: al cerrar el visor se conserva el borrador del formulario.
+
+El visor muestra **PDF y fotos** dentro del portal. Permite cambiar de justificante, pasar páginas del PDF, ampliar, ajustar y girar la vista. Si el PDF tiene contraseña, la pide para abrirlo y no la guarda. El soporte de HEIC/HEIF depende del navegador; si no puede mostrar una imagen, aparece una explicación. Para Word, Excel y otros formatos, utiliza **Descargar original**. Esta opción también está disponible para PDF y fotos y conserva el archivo original intacto.
+
+Los justificantes guardados se cargan mediante la sesión privada y el visor se cierra al bloquear o cerrar la sesión. La vista previa no modifica ni sustituye los originales.
+
+## Informes y gestor
+
+En **Informes y gestor**, elige **Un trimestre**, **Un año completo** o **Todo el histórico** para reunir las facturas emitidas y los gastos del período. Selecciona el año y, cuando corresponda, el trimestre. Puedes descargar:
+
+- **Descargar listado CSV**, con facturas emitidas y gastos, sus importes, estados y referencias a justificantes.
+- **Descargar expediente**, un ZIP con el CSV, un resumen, los PDF de las facturas emitidas y los justificantes originales de los gastos. Si un adjunto registrado no puede recuperarse completo, la exportación se detiene y no crea un paquete parcial. El paquete admite hasta 300 MB; para históricos mayores, exporta por año o trimestre.
+
+Los documentos se agrupan por su fecha de emisión o de justificante; los movimientos de caja usan sus propias fechas de cobro y pago. La evaluación del período muestra ventas sin IVA, bases de gastos desglosados, diferencia de bases, cobros y pagos registrados y totales mensuales. La diferencia queda **Por revisar** cuando hay gastos con IVA pendiente; compara las bases registradas y no representa el beneficio fiscal ni el saldo bancario.
+
+El IVA repercutido, el IVA soportado registrado y el IVA confirmado por la usuaria se distinguen en los informes y el resumen del expediente. Confirmar un importe prepara su revisión y no determina que sea deducible. El gestor revisa los justificantes y presenta las declaraciones; la aplicación prepara el expediente.
+
+**Importar gastos revisados** acepta paquetes ZIP preparados con los datos revisados y sus justificantes originales. Comprueba el paquete, muestra los registros nuevos y los que necesitan revisión y omite los duplicados reconocidos antes de importar. Esta opción se utiliza en la empresa conectada a Supabase.
+
+La **copia JSON de Configuración contiene únicamente los datos y las referencias de los adjuntos**, no sus bytes. Conserva también los ZIP de los expedientes para respaldar los justificantes.
 
 ## Saldo registrado y previsión
 
