@@ -517,6 +517,9 @@ export function validateWorkspace(workspace, today = todayISO()) {
       }
       if (expense.reviewNeeded !== undefined && typeof expense.reviewNeeded !== 'boolean') error(`${path}.reviewNeeded`, 'debe ser verdadero o falso.');
       if (expense.vatReviewNeeded !== undefined && typeof expense.vatReviewNeeded !== 'boolean') error(`${path}.vatReviewNeeded`, 'debe ser verdadero o falso.');
+      if (expense.vatDocumentStatus !== undefined && (!['included-unitemized', 'not-stated'].includes(expense.vatDocumentStatus) || expense.vatReviewNeeded !== true)) {
+        error(`${path}.vatDocumentStatus`, 'indica un estado documental válido y conserva el IVA sin confirmar.');
+      }
       if (expense.vatReviewNeeded === true && (expense.vatAmount !== 0 || (expense.vatDeductibleAmount ?? 0) !== 0 || expense.vatRate !== undefined)) {
         error(`${path}.vatReviewNeeded`, 'un IVA por revisar no puede tener un IVA, porcentaje o deducibilidad confirmados.');
       }

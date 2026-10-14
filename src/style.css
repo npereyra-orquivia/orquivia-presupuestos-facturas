@@ -47,3 +47,13 @@ fieldset{padding:0;margin:0;border:0;min-width:0}fieldset:disabled{opacity:.7}in
 @media(max-width:680px){.sidebar,.sidebar.is-collapsed{width:238px;padding-left:22px;padding-right:22px}.shell,.shell.is-collapsed{margin-left:0}.sidebar-toggle{display:none}.sidebar.is-collapsed .brand .brand-full{opacity:1;visibility:visible}.sidebar.is-collapsed .brand .brand-mark{opacity:0}.sidebar.is-collapsed .workspace-label{opacity:1}.sidebar.is-collapsed .nav-item{gap:12px}.sidebar.is-collapsed .nav-item>span,.sidebar.is-collapsed .nav-item>b{width:auto;max-width:none;opacity:1;visibility:visible}.sidebar.is-collapsed .nav-item>b{margin-left:auto}.sidebar.is-collapsed .help-card{visibility:visible;pointer-events:auto}.sidebar.is-collapsed .profile-copy{width:auto;max-width:none;visibility:visible;opacity:1;flex:1}.sidebar.is-collapsed .profile>.icon-btn{width:31px;max-width:none;visibility:visible;opacity:1;flex-shrink:0;padding:5px;margin-left:auto}.sidebar.is-collapsed .profile,.sidebar.is-collapsed .profile-main{gap:10px}.access-intro .brand .brand-full{width:200px;height:auto}}
 @media(prefers-reduced-motion:reduce){.sidebar,.shell,.sidebar .brand img,.sidebar-toggle .icon,.sidebar .workspace-label,.sidebar .nav-item>span{transition:none}}
 .paper .paper-header img.document-brand{width:100px;height:auto;object-fit:contain;align-self:flex-start;margin-top:3px}.detail-paper .paper .paper-header img.document-brand{width:185px;height:auto;max-width:45%;margin-top:7px}
+.access-page.is-restoring{display:grid;grid-template-columns:1fr;place-items:center;background:#f8faf5}
+.access-page.is-restoring .access-intro{display:none}
+.access-page.is-restoring .access-card{align-self:center;width:min(100%,440px);max-width:440px;margin:0;padding:36px 28px}
+.access-session-check{text-align:center}
+.access-session-logo{display:block;width:190px;max-width:100%;height:auto;margin:0 auto 32px}
+.access-session-spinner{display:block;width:21px;height:21px;margin:0 auto 16px;border:2px solid #dfe7d8;border-top-color:#54734c;border-radius:50%;animation:access-session-spin .9s linear infinite}
+.access-card .access-session-check h2{font-size:20px;margin:0 0 8px;letter-spacing:-.4px}
+.access-card .access-session-check p{margin:0;font-size:12px}
+@keyframes access-session-spin{to{transform:rotate(360deg)}}
+@media(prefers-reduced-motion:reduce){.access-session-spinner{animation:none}}

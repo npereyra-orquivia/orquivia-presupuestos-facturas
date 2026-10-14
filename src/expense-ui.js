@@ -1,6 +1,6 @@
 import './expenses.css';
 import { money, todayISO, escapeHTML as esc } from './domain.js';
-import { expenseTotals, splitExpenseTotal, splitExpenseTotalManual, cashSummary } from './expenses.js';
+import { expenseTotals, splitExpenseTotal, splitExpenseTotalManual, cashSummary, expenseNeedsReview, expenseVATLabel } from './expenses.js';
 import { validateReceiptFile, RECEIPT_FILE_TYPES } from './backend.js';
 import { icon } from './icons.js';
 
@@ -10,7 +10,7 @@ const select = (label, name, options, value) => `<label class="field"><span>${la
 const dateLabel = date => new Intl.DateTimeFormat('es-ES', { dateStyle: 'medium', timeZone: 'UTC' }).format(new Date(date + 'T12:00:00Z'));
 const categories = [['Servicios', 'Servicios profesionales'], ['Material', 'Material y equipos'], ['Transporte', 'Transporte'], ['Suministros', 'Suministros'], ['Comidas', 'Comidas y dietas'], ['Otros', 'Otros gastos']];
 const fold = value => String(value ?? '').normalize('NFD').replace(/\p{Diacritic}/gu, '').toLocaleLowerCase('es');
-const needsReview = expense => expense.reviewNeeded || expense.vatReviewNeeded || !(expense.attachments || []).length;
+const needsReview = expenseNeedsReview;
 let expenseQuery = '', expenseFilter = 'all', viewerRequest=0, activeViewer=null;
 const saveBlob = (blob, name) => {
   const url = URL.createObjectURL(blob), a = document.createElement('a');
@@ -70,7 +70,8 @@ export function cashCard(state) {
   return `<section class="card cash-card"><div class="cash-main"><span class="eyebrow">TU SALDO SEGÚN EL REGISTRO</span><h2>${c.configured ? money(c.balance) : 'Configura tu saldo inicial'}</h2><p>${c.configured ? 'Saldo inicial + cobros − gastos pagados desde ' + dateLabel(c.openingBalanceDate) + '.' : 'Indica el saldo al comienzo de un día para calcular lo que queda en caja o en cuenta.'}</p><button class="text-button" data-action="opening-balance">${c.configured ? 'Ajustar saldo inicial' : 'Añadir saldo inicial'}</button></div><div class="cash-metrics"><div><small>Cobros registrados${c.configured ? ' desde el inicio' : ''}</small><strong>${money(c.received)}</strong></div><div><small>Gastos pagados${c.configured ? ' desde el inicio' : ''}</small><strong>${money(c.paidExpenses)}</strong></div><div><small>Previsión tras cobrar y pagar pendientes</small><strong>${c.configured ? money(c.forecastBalance) : '—'}</strong></div></div><p class="cash-footnote">Saldo registrado para contrastar con el banco. Los cobros sin confirmar se excluyen de la previsión.</p></section>`;
 }
 
-export function expensesPage(state) {
+export function expensesPage(state, preferences) {
+  if (preferences) { expenseFilter = preferences.filter || 'all'; expenseQuery = preferences.query || ''; }
   const all = state.expenses || [], term = fold(expenseQuery);
   const matchesFilter = (e, filter) => filter === 'all' || (filter === 'review' ? needsReview(e) : e.paymentStatus === filter);
   const rows = all.filter(e => matchesFilter(e, expenseFilter) && fold([e.description, e.supplier, e.reference, e.category, e.notes].join(' ')).includes(term)).sort((a, b) => b.date.localeCompare(a.date));
@@ -80,7 +81,7 @@ export function expensesPage(state) {
   <div class="tabs" role="group" aria-label="Filtrar gastos" aria-describedby="expense-filter-help">${filters.map(([value, label]) => `<button type="button" data-expense-filter="${value}" class="${expenseFilter === value ? 'selected' : ''}">${label}<span>${all.filter(e => matchesFilter(e, value)).length}</span></button>`).join('')}</div><p class="expense-filter-help" id="expense-filter-help">Un gasto pagado puede estar por revisar: el pago y la revisión del justificante se registran por separado.</p>
   <div class="table-scroll"><table><thead><tr><th>Concepto / proveedor</th><th>Fecha</th><th>Total</th><th>Pago</th><th>Justificantes</th><th></th></tr></thead><tbody>${rows.map(e => {
     const count = (e.attachments || []).length;
-    return `<tr><td><button class="doc-link" data-expense="${esc(e.id)}"><span><strong>${esc(e.description)}</strong>${e.kind === 'credit' ? '<small class="expense-credit-note">Abono / devolución</small>' : ''}<small>${esc(e.supplier || e.category || 'Gasto registrado')}${e.reference ? ' · ' + esc(e.reference) : ''}</small>${needsReview(e) ? `<small class="expense-review-label">${e.vatReviewNeeded ? 'IVA por revisar' : count ? 'Por revisar' : 'Falta justificante'}</small>` : ''}</span></button></td><td class="date-cell">${dateLabel(e.date)}</td><td class="amount">${money(expenseTotals(e).total)}</td><td><span class="badge ${e.paymentStatus === 'paid' ? 'paid' : 'issued'}"><i></i>${e.paymentStatus === 'paid' ? e.kind === 'credit' ? 'Reembolsado' : 'Pagado' : 'Pendiente'}</span></td><td>${count?`<button type="button" class="text-button expense-preview-link" data-preview-expense="${esc(e.id)}" aria-label="Ver justificantes: ${esc(e.description)}">${icon('eye')}${count} ${count === 1 ? 'archivo' : 'archivos'}</button>`:'<span class="expense-file-count is-missing">Sin archivos</span>'}</td><td><button class="icon-btn" data-expense="${esc(e.id)}" aria-label="Editar gasto: ${esc(e.description)}">›</button></td></tr>`;
+    return `<tr><td><button class="doc-link" data-expense="${esc(e.id)}"><span><strong>${esc(e.description)}</strong>${e.kind === 'credit' ? '<small class="expense-credit-note">Abono / devolución</small>' : ''}<small>${esc(e.supplier || e.category || 'Gasto registrado')}${e.reference ? ' · ' + esc(e.reference) : ''}</small>${needsReview(e) ? `<small class="expense-review-label">${e.vatReviewNeeded && !e.vatDocumentStatus ? 'IVA por revisar' : count ? 'Por revisar' : 'Falta justificante'}</small>` : ''}${e.vatDocumentStatus ? `<small class="expense-vat-document-label">${esc(expenseVATLabel(e))}</small>` : ''}</span></button></td><td class="date-cell">${dateLabel(e.date)}</td><td class="amount">${money(expenseTotals(e).total)}</td><td><span class="badge ${e.paymentStatus === 'paid' ? 'paid' : 'issued'}"><i></i>${e.paymentStatus === 'paid' ? e.kind === 'credit' ? 'Reembolsado' : 'Pagado' : 'Pendiente'}</span></td><td>${count?`<button type="button" class="text-button expense-preview-link" data-preview-expense="${esc(e.id)}" aria-label="Ver justificantes: ${esc(e.description)}">${icon('eye')}${count} ${count === 1 ? 'archivo' : 'archivos'}</button>`:'<span class="expense-file-count is-missing">Sin archivos</span>'}</td><td><button class="icon-btn" data-expense="${esc(e.id)}" aria-label="Editar gasto: ${esc(e.description)}">›</button></td></tr>`;
   }).join('') || `<tr><td colspan="6"><div class="expense-empty"><strong>${all.length ? 'No hay gastos con este filtro.' : 'Guarda tu primer justificante.'}</strong><p>${all.length ? 'Prueba con otro concepto o selecciona «Todos».' : 'Añade el concepto y el total, haz una foto o adjunta el archivo y guárdalo.'}</p>${all.length ? '<button class="button secondary" id="reset-expense-filter">Ver todos los gastos</button>' : '<button class="button secondary" data-action="new-expense">+ Nuevo gasto</button>'}</div></td></tr>`}</tbody></table></div>
   <div class="table-footer">${rows.length} ${rows.length === 1 ? 'gasto' : 'gastos'}<span>Selecciona un gasto para ver o editar sus datos</span></div></section>`;
 }
@@ -90,6 +91,7 @@ export function bindExpenses(root, ctx) {
   root.querySelectorAll('[data-preview-expense]').forEach(b=>b.onclick=()=>{const expense=ctx.getState().expenses.find(e=>e.id===b.dataset.previewExpense);if(expense)expenseModal(ctx,expense)});
   root.querySelectorAll('[data-expense-filter]').forEach(b => b.onclick = () => {
     expenseFilter = b.dataset.expenseFilter;
+    ctx.setViewState?.('expenses', { filter: expenseFilter, query: expenseQuery });
     ctx.render();
     root.querySelector(`[data-expense-filter="${expenseFilter}"]`)?.focus();
   });
@@ -97,12 +99,13 @@ export function bindExpenses(root, ctx) {
   if (search) search.oninput = () => {
     const caret = search.selectionStart;
     expenseQuery = search.value;
+    ctx.setViewState?.('expenses', { filter: expenseFilter, query: expenseQuery });
     ctx.render();
     const next = root.querySelector('#expense-search');
     next?.focus(); next?.setSelectionRange(caret, caret);
   };
   const reset = root.querySelector('#reset-expense-filter');
-  if (reset) reset.onclick = () => { expenseQuery = ''; expenseFilter = 'all'; ctx.render(); };
+  if (reset) reset.onclick = () => { expenseQuery = ''; expenseFilter = 'all'; ctx.setViewState?.('expenses', { filter: expenseFilter, query: expenseQuery }); ctx.render(); };
 }
 
 export function openingBalanceModal(ctx) {
@@ -126,12 +129,12 @@ export function expenseModal(ctx, expense) {
   const cashDetails = hasCashMovements ? `<div class="expense-cash-evidence"><strong>Pagos registrados</strong>${draft.cashMovements.map(m => `<div><span>${dateLabel(m.date)}</span><b>${money(m.amount)}</b></div>`).join('')}<p>Estas fechas e importes se conservan al editar el gasto. Al guardarlo como pendiente se retirarán sus pagos del registro.</p></div>` : draft.cashAmount !== undefined ? `<div class="expense-cash-evidence"><strong>Importe pagado registrado</strong><div><span>Total del movimiento</span><b>${money(draft.cashAmount)}</b></div><p>Este importe puede diferir del justificante por descuentos o ajustes. Se conserva al editar el gasto; se retira si lo guardas como pendiente.</p></div>` : '';
   let verifyingFiles = 0;
   const knownRate = [0, 4, 10, 21].includes(draft.vatRate) && splitExpenseTotal(draft.total - (draft.additionalAmount || 0), draft.vatRate).vatAmount === draft.vatAmount;
-  const vatChoice = draft.vatReviewNeeded ? 'review' : knownRate ? String(draft.vatRate) : 'manual';
+  const vatChoice = draft.vatDocumentStatus || (draft.vatReviewNeeded ? 'review' : knownRate ? String(draft.vatRate) : 'manual');
   ctx.openModal(ctx.modalHeader(expense ? 'Editar gasto' : 'Nuevo gasto', 'Completa los datos con el justificante a la vista.') + `<div class="expense-editor-layout"><form id="expense-form" class="expense-quick-form">
   <div class="expense-quick-fields">${field('Concepto / nombre del gasto', 'description', draft.description, 'text', 'required maxlength="2000" placeholder="Comida, material, transporte…"')}
-  <div class="form-grid expense-amount-grid">${field(isCredit ? 'Importe del abono, IVA incluido (€)' : 'Total, IVA incluido (€)', 'total', draft.total || '', 'number', `${isCredit ? 'max="-0.01"' : 'min="0.01"'} step="0.01" required inputmode="decimal" placeholder="0,00"`)}${select('IVA del justificante', 'vatRate', [['review', 'Por revisar'], ['21', '21%'], ['10', '10%'], ['4', '4%'], ['0', 'Sin IVA'], ['manual', 'Indicar importe de IVA']], vatChoice)}</div>
+  <div class="form-grid expense-amount-grid">${field(isCredit ? 'Importe del abono, IVA incluido (€)' : 'Total, IVA incluido (€)', 'total', draft.total || '', 'number', `${isCredit ? 'max="-0.01"' : 'min="0.01"'} step="0.01" required inputmode="decimal" placeholder="0,00"`)}${select('IVA del justificante', 'vatRate', [['review', 'Por revisar'], ['included-unitemized', 'IVA incluido, sin desglose'], ['not-stated', 'Justificante sin datos de IVA'], ['21', '21%'], ['10', '10%'], ['4', '4%'], ['0', 'Sin IVA'], ['manual', 'Indicar importe de IVA']], vatChoice)}</div>
   <div id="manual-vat-field" ${vatChoice === 'manual' ? '' : 'hidden'}>${field('IVA que aparece en el documento (€)', 'vatAmount', draft.vatAmount, 'number', `${isCredit ? 'max="0"' : 'min="0"'} step="0.01" inputmode="decimal"`)}</div><p class="field-hint expense-vat-hint" id="expense-vat-hint"></p>
-  <label class="checkbox-label expense-paid-toggle"><input name="alreadyPaid" type="checkbox" ${draft.paymentStatus === 'paid' ? 'checked' : ''}>${isCredit ? 'Reembolso recibido' : 'Ya está pagado'}</label><p class="field-hint expense-payment-warning" id="expense-cash-change-warning" hidden>Al guardar como pendiente se retirarán del saldo sus pagos registrados.</p></div>
+  <label class="checkbox-label expense-paid-toggle"><input name="alreadyPaid" type="checkbox" ${draft.paymentStatus === 'paid' ? 'checked' : ''}>${isCredit ? 'Reembolso recibido' : 'Ya está pagado'}</label><p class="field-hint expense-payment-warning" id="expense-cash-change-warning" hidden>Al guardar como pendiente se retirarán del saldo sus pagos registrados.</p><div class="expense-review-choice" id="expense-review-choice" hidden><p>Si ya has comprobado el documento y sus notas, puedes completar su revisión. El desglose de IVA seguirá identificado para el gestor.</p><button type="button" class="text-button" id="complete-expense-review">He revisado el justificante</button><span id="expense-review-feedback" role="status"></span></div></div>
   <section class="expense-receipts"><div class="expense-section-heading"><h3>Justificante</h3><span>${expense ? 'Fotos y archivos' : 'Necesario para guardar'}</span></div><div class="receipt-actions"><label class="button primary">Tomar una foto<input class="visually-hidden" type="file" id="receipt-camera" accept="image/jpeg,image/png,image/webp,image/heic,image/heif" capture="environment"></label><label class="button secondary">Adjuntar archivos<input class="visually-hidden" type="file" id="receipt-files" multiple accept="${Object.keys(RECEIPT_FILE_TYPES).map(e => '.' + e).join(',')}"></label></div><div class="receipt-list" id="receipt-list"></div><p class="field-hint">PDF, fotos o documentos. Hasta 10 MB por archivo; se guardan privados.</p></section>
   <details class="expense-details"><summary><span>Más detalles</span><small>Fecha, proveedor y datos para el gestor</small></summary><div class="expense-details-body"><div class="form-grid">${field('Fecha del justificante', 'date', draft.date, 'date', `required max="${todayISO()}"`)}${field(isCredit ? 'Fecha del reembolso' : 'Fecha del pago', 'paidDate', draft.paidDate || (expense ? draft.date : todayISO()), 'date', `max="${todayISO()}"`)}${field('Proveedor / comercio (opcional)', 'supplier', draft.supplier, 'text', 'maxlength="240"')}${field('NIF del proveedor (opcional)', 'supplierTaxId', draft.supplierTaxId, 'text', 'maxlength="80"')}${field('Número de factura o ticket (opcional)', 'reference', draft.reference, 'text', 'maxlength="240"')}${select('Categoría', 'category', expenseCategories, draft.category || 'Otros')}</div>${cashDetails}<div class="expense-section"><h3>Desglose para el gestor</h3>${field('Suplidos / importe adicional sin IVA (€)', 'additionalAmount', draft.additionalAmount || 0, 'number', `${isCredit ? 'max="0"' : 'min="0"'} step="0.01" inputmode="decimal"`)}${field('Base imponible (€)', 'base', draft.vatReviewNeeded ? '' : draft.base, 'number', 'readonly step="0.01"')}<p class="field-hint">Si hay varios tipos de IVA, selecciona «Indicar importe de IVA» y copia el total de IVA del documento.</p><label class="checkbox-label"><input name="deductible" type="checkbox" ${draft.vatDeductibleAmount !== 0 && draft.vatDeductibleAmount !== undefined ? 'checked' : ''}>IVA confirmado para revisión del gestor</label>${field('Importe de IVA confirmado (€)', 'vatDeductibleAmount', draft.vatDeductibleAmount || 0, 'number', 'min="0" step="0.01"')}<p class="field-hint">El gestor revisará si el gasto y su IVA son deducibles.</p></div><div class="expense-section"><label class="field"><span>Notas (opcional)</span><textarea name="notes" rows="2" maxlength="10000">${esc(draft.notes || '')}</textarea></label><label class="checkbox-label"><input name="reviewNeeded" type="checkbox" ${draft.reviewNeeded ? 'checked' : ''}>Revisar este justificante con el gestor</label></div></div></details>
   </form><aside class="expense-preview-panel" aria-label="Justificante junto al formulario"><div class="expense-preview-heading"><span class="preview-label">${icon('eye')}VISTA PREVIA DEL JUSTIFICANTE</span><button type="button" class="text-button" id="expand-expense-preview" hidden>Ampliar visor</button></div><div id="expense-inline-preview"></div></aside></div><div class="modal-actions expense-editor-actions">${expense ? '<button type="button" class="text-button danger" id="remove-expense">Eliminar gasto</button>' : ''}<button class="button secondary" type="button" data-close>Cancelar</button><button type="submit" form="expense-form" class="button primary" id="save-expense">Guardar gasto</button></div>`, true);
@@ -193,10 +196,11 @@ export function expenseModal(ctx, expense) {
         saveBlob(blob, a.name);
       } catch (e) { ctx.toast(e.message, true); } finally { b.disabled = false; }
     });
+    syncAmounts();
     showInlinePreview(Math.max(0, previewAttachments.findIndex(a => a.id === selectedId)), true);
   }
   function syncConfirmed() {
-    const reviewing = form.elements.vatRate.value === 'review';
+    const reviewing = ['review', 'included-unitemized', 'not-stated'].includes(form.elements.vatRate.value);
     if (reviewing) { form.elements.deductible.checked = false; form.elements.vatDeductibleAmount.value = '0'; }
     form.elements.deductible.disabled = reviewing;
     const enabled = !reviewing && form.elements.deductible.checked;
@@ -204,7 +208,7 @@ export function expenseModal(ctx, expense) {
     form.elements.vatDeductibleAmount.closest('label').hidden = !enabled;
   }
   function syncAmounts() {
-    const choice = form.elements.vatRate.value, manual = choice === 'manual', reviewing = choice === 'review';
+    const choice = form.elements.vatRate.value, manual = choice === 'manual', reviewing = ['review', 'included-unitemized', 'not-stated'].includes(choice), undisclosed = ['included-unitemized', 'not-stated'].includes(choice);
     form.querySelector('#manual-vat-field').hidden = !manual;
     form.elements.vatAmount.required = manual;
     form.elements.vatAmount.readOnly = !manual;
@@ -216,9 +220,14 @@ export function expenseModal(ctx, expense) {
       form.elements.base.value = reviewing ? '' : t.base.toFixed(2);
       form.elements.vatDeductibleAmount.min = String(isCredit ? t.vatAmount : 0);
       form.elements.vatDeductibleAmount.max = String(isCredit ? 0 : t.vatAmount);
-      hint.textContent = reviewing ? 'El total queda guardado. El IVA se deja pendiente para revisar el documento.' : `Base: ${money(t.base)} · IVA: ${money(t.vatAmount)}${additional ? ' · Adicional: ' + money(additional) : ''}`;
+      hint.textContent = undisclosed ? 'El total y el pago se conservan. Base e IVA quedan sin confirmar para el gestor; no se calcula un porcentaje ni una deducción.' : reviewing ? 'El total queda guardado. El IVA se deja pendiente para revisar el documento.' : `Base: ${money(t.base)} · IVA: ${money(t.vatAmount)}${additional ? ' · Adicional: ' + money(additional) : ''}`;
     } catch { form.elements.base.value = ''; hint.textContent = 'Revisa el total y el IVA del justificante.'; }
     syncConfirmed();
+    form.querySelector('#expense-review-choice').hidden = !undisclosed;
+    form.querySelector('#complete-expense-review').hidden = !form.elements.reviewNeeded.checked;
+    const hasReceipt = Boolean(draft.attachments.length + pending.length);
+    form.querySelector('#complete-expense-review').disabled = !hasReceipt;
+    form.querySelector('#expense-review-feedback').textContent = !undisclosed ? '' : !hasReceipt ? 'Falta un justificante para completar la revisión.' : !form.elements.reviewNeeded.checked ? 'Revisión del justificante completada. Se aplicará al guardar.' : '';
   }
   function syncPayment() {
     const paid = form.elements.alreadyPaid.checked;
@@ -230,6 +239,8 @@ export function expenseModal(ctx, expense) {
   for (const name of ['total', 'vatAmount', 'additionalAmount']) form.elements[name].addEventListener('input', syncAmounts);
   form.elements.vatRate.addEventListener('change', syncAmounts);
   form.elements.alreadyPaid.onchange = syncPayment;
+  form.querySelector('#complete-expense-review').onclick = () => { form.elements.reviewNeeded.checked = false; syncAmounts(); };
+  form.elements.reviewNeeded.onchange = syncAmounts;
   form.elements.deductible.onchange = () => { form.elements.vatDeductibleAmount.value = form.elements.deductible.checked ? form.elements.vatAmount.value : '0'; syncConfirmed(); };
   syncAmounts(); syncPayment(); redrawFiles(); ctx.enhance();
   for (const input of form.querySelectorAll('input[type="file"]')) input.onchange = async () => {
@@ -251,14 +262,16 @@ export function expenseModal(ctx, expense) {
     if (verifyingFiles) { ctx.toast('Espera a que termine la comprobación del justificante.', true); return; }
     if (!expense && !draft.attachments.length && !pending.length) { ctx.toast('Añade una foto o un archivo como justificante del gasto.', true); form.querySelector('#receipt-camera').closest('label').scrollIntoView({ block: 'center', behavior: 'smooth' }); return; }
     const f = new FormData(form), paid = f.has('alreadyPaid'), choice = String(f.get('vatRate'));
-    const next = { ...draft, additionalAmount: Number(f.get('additionalAmount') || 0), supplier: String(f.get('supplier') || '').trim(), supplierTaxId: String(f.get('supplierTaxId') || '').trim(), date: f.get('date'), description: String(f.get('description') || '').trim(), category: f.get('category'), reference: String(f.get('reference') || '').trim(), notes: String(f.get('notes') || ''), paymentStatus: paid ? 'paid' : 'pending', paidDate: paid ? hasCashMovements ? draft.paidDate : f.get('paidDate') : null, reviewNeeded: f.has('reviewNeeded'), vatReviewNeeded: choice === 'review' };
+    const unknownVAT = ['review', 'included-unitemized', 'not-stated'].includes(choice);
+    const next = { ...draft, additionalAmount: Number(f.get('additionalAmount') || 0), supplier: String(f.get('supplier') || '').trim(), supplierTaxId: String(f.get('supplierTaxId') || '').trim(), date: f.get('date'), description: String(f.get('description') || '').trim(), category: f.get('category'), reference: String(f.get('reference') || '').trim(), notes: String(f.get('notes') || ''), paymentStatus: paid ? 'paid' : 'pending', paidDate: paid ? hasCashMovements ? draft.paidDate : f.get('paidDate') : null, reviewNeeded: f.has('reviewNeeded'), vatReviewNeeded: unknownVAT };
+    if (['included-unitemized', 'not-stated'].includes(choice)) next.vatDocumentStatus = choice; else delete next.vatDocumentStatus;
     try {
       if (!paid) { delete next.cashAmount; delete next.cashMovements; }
       const total = Number(f.get('total')), taxableTotal = total - next.additionalAmount;
-      Object.assign(next, choice === 'manual' ? splitExpenseTotalManual(taxableTotal, Number(f.get('vatAmount'))) : splitExpenseTotal(taxableTotal, choice === 'review' ? 0 : Number(choice)));
+      Object.assign(next, choice === 'manual' ? splitExpenseTotalManual(taxableTotal, Number(f.get('vatAmount'))) : splitExpenseTotal(taxableTotal, unknownVAT ? 0 : Number(choice)));
       next.total = total;
-      if (choice === 'manual' || choice === 'review') delete next.vatRate; else next.vatRate = Number(choice);
-      next.vatDeductibleAmount = choice !== 'review' && f.has('deductible') ? Number(f.get('vatDeductibleAmount')) : 0;
+      if (choice === 'manual' || unknownVAT) delete next.vatRate; else next.vatRate = Number(choice);
+      next.vatDeductibleAmount = !unknownVAT && f.has('deductible') ? Number(f.get('vatDeductibleAmount')) : 0;
       const sample = structuredClone(ctx.getState()); sample.expenses ||= [];
       const i = sample.expenses.findIndex(v => v.id === next.id);
       if (i >= 0) sample.expenses[i] = next; else sample.expenses.push(next);

@@ -74,6 +74,7 @@ function summaryText(report, { demo, receiptCount }) {
     `Abonos de proveedor incluidos: ${s.creditCount}`,
     `Suplidos y otros importes separados sin IVA: ${money(s.additionalTotal)}`,
     `Gastos con base e IVA pendientes de revisar: ${s.vatReviewCount} (${money(s.vatReviewTotal)})`,
+    `De ellos, justificantes con falta de desglose anotada: ${s.vatUndisclosedCount}`,
     `Diferencia de actividad antes de retenciones: ${s.activityDifference === null ? 'Pendiente de revisar el IVA de los gastos' : money(s.activityDifference)}`,
     `Justificantes originales incluidos: ${receiptCount}`,
     '',

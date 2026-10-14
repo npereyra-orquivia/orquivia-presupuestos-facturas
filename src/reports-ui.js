@@ -1,6 +1,6 @@
 import './reports.css';
 import { money, todayISO, escapeHTML as esc, totals } from './domain.js';
-import { periodReport, reportCSV, expenseCashMovements } from './expenses.js';
+import { periodReport, reportCSV, expenseCashMovements, expenseNeedsReview, expenseVATLabel } from './expenses.js';
 import { buildPeriodBundle } from './quarter-export.js';
 import { localReceipt } from './expense-ui.js';
 import { icon } from './icons.js';
@@ -11,10 +11,11 @@ const save=(blob,name)=>{const url=URL.createObjectURL(blob),a=document.createEl
 const dateLabel=value=>value?new Intl.DateTimeFormat('es-ES',{dateStyle:'medium',timeZone:'UTC'}).format(new Date(value+'T12:00:00Z')):'—';
 const csvName=()=>`Orquivia_${period.type==='all'?'historico':period.year+(period.type==='quarter'?'_T'+period.quarter:'_anual')}.csv`;
 
-export function reportsPage(state){
+export function reportsPage(state,preferences){
+  if(preferences)period={...period,...preferences};
   const report=periodReport(state,period),s=report.summary;
   const years=[...new Set([Number(todayISO().slice(0,4)),period.year,...state.documents.map(d=>Number(d.date.slice(0,4))),...(state.expenses||[]).map(e=>Number(e.date.slice(0,4))),...state.payments.map(p=>Number(p.date.slice(0,4))),...(state.expenses||[]).flatMap(e=>expenseCashMovements(e).map(p=>Number(p.date.slice(0,4))))])].sort((a,b)=>b-a);
-  const rows=[...report.invoices.map(d=>({id:d.id,kind:'invoice',date:d.date,name:d.number,detail:d.client?.name||d.clientSnapshot?.name||'',total:totals(d).total})),...report.expenses.map(e=>({id:e.id,kind:'expense',date:e.date,name:e.description,detail:e.supplier,total:e.total,review:e.reviewNeeded||e.vatReviewNeeded}))].sort((a,b)=>b.date.localeCompare(a.date));
+  const rows=[...report.invoices.map(d=>({id:d.id,kind:'invoice',date:d.date,name:d.number,detail:d.client?.name||d.clientSnapshot?.name||'',total:totals(d).total})),...report.expenses.map(e=>({id:e.id,kind:'expense',date:e.date,name:e.description,detail:[e.supplier,e.vatDocumentStatus?expenseVATLabel(e):''].filter(Boolean).join(' · '),total:e.total,review:expenseNeedsReview(e)}))].sort((a,b)=>b.date.localeCompare(a.date));
   const monthly=new Map();
   for(const row of rows){const key=row.date.slice(0,7),value=monthly.get(key)||{sales:0,expenses:0};value[row.kind==='invoice'?'sales':'expenses']+=row.total;monthly.set(key,value)}
   return `<div class="page-heading"><div><div class="eyebrow">INFORMACIÓN PARA TU GESTOR</div><h1>Tus cuentas, con perspectiva.</h1><p>Reúne las facturas emitidas, los gastos y sus justificantes en un solo expediente.</p></div><button class="button secondary" data-action="expense-import">${icon('upload')}Importar gastos revisados</button></div>
@@ -27,7 +28,7 @@ export function reportsPage(state){
 
 export function bindReports(root,ctx){
   for(const [name,key] of [['reportType','type'],['reportYear','year'],['reportQuarter','quarter']]){
-    const control=root.querySelector(`[name="${name}"]`);if(control)control.onchange=()=>{period[key]=key==='type'?control.value:Number(control.value);ctx.render()};
+    const control=root.querySelector(`[name="${name}"]`);if(control)control.onchange=()=>{period[key]=key==='type'?control.value:Number(control.value);ctx.setViewState?.('reports',period);ctx.render()};
   }
   const csv=root.querySelector('#report-csv');if(csv)csv.onclick=()=>save(new Blob([reportCSV(ctx.getState(),period)],{type:'text/csv;charset=utf-8'}),csvName());
   const button=root.querySelector('#report-bundle');if(button)button.onclick=async()=>{

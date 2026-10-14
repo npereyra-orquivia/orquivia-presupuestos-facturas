@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { validateWorkspace } from '../src/domain.js';
 import { prepareRestore } from '../src/security.js';
 import { cashSummary, expenseTotals, quarterCSV, quarterlyReport, quarterRange, splitExpenseTotal,
-  splitExpenseTotalManual, suggestedExpenseVAT, periodRange, periodReport, reportCSV, expenseCashAmount } from '../src/expenses.js';
+  splitExpenseTotalManual, suggestedExpenseVAT, periodRange, periodReport, reportCSV, expenseCashAmount, expenseNeedsReview, expenseVATLabel } from '../src/expenses.js';
 
 const TODAY = '2026-10-14';
 const EXPENSE_ID = '17b04d52-8e40-4b7b-a858-f726ff809232';
@@ -32,6 +32,43 @@ function attachment(overrides = {}) {
   return { id: ATTACHMENT_ID, name: 'Ticket.pdf', path: `${ORG_ID}/${EXPENSE_ID}/${ATTACHMENT_ID}.pdf`,
     mimeType: 'application/pdf', size: 230, ...overrides };
 }
+
+test('a reviewed voucher with undisclosed VAT keeps unknown tax amounts and its real cash payment', () => {
+  for (const vatDocumentStatus of ['included-unitemized', 'not-stated']) {
+    const e = expense({ total: 2.41, base: 2.41, vatAmount: 0, vatRate: undefined, vatReviewNeeded: true,
+      vatDocumentStatus, reviewNeeded: false, paymentStatus: 'paid', paidDate: '2026-03-31', attachments: [attachment()] });
+    const state = workspace({ expenses: [e], company: { name: 'Orquívia', openingBalance: 100, openingBalanceDate: '2026-03-01' } });
+    assert.deepEqual(validateWorkspace(state, TODAY), []);
+    assert.equal(expenseNeedsReview(e), false);
+    assert.equal(expenseNeedsReview({ ...e, reviewNeeded: true }), true);
+    assert.equal(expenseNeedsReview({ ...e, attachments: [] }), true);
+    assert.equal(expenseNeedsReview({ ...e, vatDocumentStatus: undefined }), true);
+    assert.equal(expenseTotals(e).vatAmount, null);
+    assert.equal(expenseTotals(e).base, null);
+    assert.equal(cashSummary(state, TODAY).paidExpenses, 2.41);
+    assert.equal(cashSummary(state, TODAY).balance, 97.59);
+    const report = periodReport(state, { type: 'all' });
+    assert.equal(report.summary.reviewCount, 0);
+    assert.equal(report.summary.vatUndisclosedCount, 1);
+    assert.equal(report.summary.inputVATRecorded, 0);
+    assert.equal(report.summary.inputVATConfirmed, 0);
+    assert.equal(report.summary.expenseBase, 0);
+    assert.equal(report.summary.activityDifference, null);
+    const csv = reportCSV(state, { type: 'all' });
+    assert.ok(csv.includes('"";"";"0,00";"2,41";""'));
+    assert.ok(csv.includes(expenseVATLabel(e)));
+    assert.equal(prepareRestore(JSON.parse(JSON.stringify(state)), { today: TODAY }).expenses[0].vatDocumentStatus, vatDocumentStatus);
+  }
+});
+
+test('VAT document annotations cannot confirm an unknown tax breakdown', () => {
+  const e = expense({ total: 51.33, base: 51.33, vatAmount: 0, vatRate: undefined, vatReviewNeeded: true,
+    vatDocumentStatus: 'included-unitemized', attachments: [attachment()] });
+  for (const change of [{ vatDocumentStatus: [] }, { vatDocumentStatus: 'exempt' }, { vatDocumentStatus: null },
+    { vatReviewNeeded: false }, { vatRate: 21 }, { vatDeductibleAmount: 1 }, { vatAmount: 1, base: 50.33 }]) {
+    assert.ok(validateWorkspace(workspace({ expenses: [{ ...e, ...change }] }), TODAY).length, JSON.stringify(change));
+  }
+});
 
 test('receipt totals and reverse VAT preserve every cent including half-cent boundaries', () => {
   assert.deepEqual(splitExpenseTotal(121, 21), { base: 100, vatAmount: 21, total: 121 });

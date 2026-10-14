@@ -2,6 +2,17 @@ import { outstanding, status, totals, todayISO } from './domain.js';
 
 const MAX_MONEY_CENTS = BigInt(Number.MAX_SAFE_INTEGER);
 
+/** Reviewing the voucher and confirming its fiscal VAT breakdown are separate. */
+export function expenseNeedsReview(expense) {
+  const recordedUnknown = ['included-unitemized', 'not-stated'].includes(expense.vatDocumentStatus);
+  return Boolean(expense.reviewNeeded || (expense.vatReviewNeeded && !recordedUnknown) || !(expense.attachments || []).length);
+}
+export function expenseVATLabel(expense) {
+  if (expense.vatDocumentStatus === 'included-unitemized') return 'IVA incluido, sin desglose · para el gestor';
+  if (expense.vatDocumentStatus === 'not-stated') return 'Justificante sin datos de IVA · para el gestor';
+  return expense.vatReviewNeeded ? 'Por revisar: base e IVA sin confirmar' : 'Registrado';
+}
+
 function validDate(value) {
   if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
   const parsed = new Date(`${value}T00:00:00Z`);
@@ -160,9 +171,10 @@ export function periodReport(state, period) {
     additionalTotal: sum(expenses, (entry) => entry.amounts.additionalAmount ?? 0),
     cashReceived: sum(payments, (entry) => entry.amount), cashPaid: sum(expensePayments, (entry) => entry.amount),
     reviewCount: invoices.filter((entry) => entry.reviewRequired || entry.paymentReviewNeeded).length
-      + expenses.filter((entry) => entry.reviewNeeded || entry.vatReviewNeeded).length,
+      + expenses.filter(expenseNeedsReview).length,
     vatReviewCount: vatReviewExpenses.length,
     vatReviewTotal: sum(vatReviewExpenses, (entry) => entry.amounts.total),
+    vatUndisclosedCount: vatReviewExpenses.filter(entry => Boolean(entry.vatDocumentStatus)).length,
     attachmentsCount: expenses.reduce((total, entry) => total + (entry.attachments?.length ?? 0), 0),
     creditCount: expenses.filter((entry) => entry.kind === 'credit').length,
   };
@@ -233,8 +245,8 @@ export function reportCSV(state, period) {
     decimalCSV(expense.amounts.total), expense.vatReviewNeeded ? '' : decimalCSV(expense.amounts.vatDeductibleAmount),
     expense.kind === 'credit' ? (expense.paymentStatus === 'paid' ? 'Reembolsado' : 'Reembolso pendiente')
       : (expense.paymentStatus === 'paid' ? 'Pagado' : 'Pendiente'), expense.paidDate ?? '', expense.notes ?? '',
-    (expense.attachments ?? []).map((attachment) => attachment.name).join(' | '), expense.reviewNeeded || expense.vatReviewNeeded ? 'Sí' : 'No',
-    expense.vatReviewNeeded ? 'Por revisar: base e IVA sin confirmar' : 'Registrado', decimalCSV(expense.amounts.additionalAmount ?? 0),
+    (expense.attachments ?? []).map((attachment) => attachment.name).join(' | '), expenseNeedsReview(expense) ? 'Sí' : 'No',
+    expenseVATLabel(expense), decimalCSV(expense.amounts.additionalAmount ?? 0),
     decimalCSV(expenseCashAmount(expense)), expenseCashMovements(expense).map((entry) =>
       `${entry.date}: ${decimalCSV(entry.amount)}${entry.reference ? ` (${entry.reference})` : ''}`).join(' | ')]));
   return '\uFEFF' + [headers, ...rows].map((row) => row.map(safeCSV).join(';')).join('\r\n') + '\r\n';

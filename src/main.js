@@ -13,6 +13,7 @@ import { renderAccess, accountMarkup, bindPasswordForm } from './auth-ui.js';
 import { defaultPersonalProfile, validateProfile } from './personal-backend.js';
 import { personalPage, bindPersonal, profileName, avatarMarkup } from './personal-ui.js';
 import { registerPWA, pushCapability, devicePushSubscription, enableDevicePush, disableDevicePush } from './push-client.js';
+import { defaultViewState, sanitizeViewState, parseViewRoute, applyViewRoute, viewRouteHash, readViewState, writeViewState, readActivityTime, writeActivityTime } from './view-state.js';
 
 const app=document.querySelector('#app'), modalRoot=document.querySelector('#modal-root');
 const logo=`${import.meta.env.BASE_URL}orquivia-logo.png`;
@@ -24,20 +25,30 @@ const storageKey=demoAllowed?'orquivia.demo.v1':'orquivia.local.private.v2';
 const localStore=demoAllowed?localStorage:sessionStorage;
 const loadDemo=()=>{try{return validateState(JSON.parse(localStore.getItem(storageKey)))}catch{return demoAllowed?demoState():emptyState()}};
 let state=emptyState(),page='dashboard',query='',filter='all',mode='locked',user=null,backend=null,busy=false,editor=null,previousFocus=null;
-let lastActivityAt=Date.now(),accessUI=null;
+let lastActivityAt=Date.now(),accessUI=null,accessGeneration=0;
+let viewState=defaultViewState(todayISO()),lastLocationKey='';
 let appControlsCleanup=null,modalControlDisposers=[],modalCancel=null,personalBindingCleanup=null;
 let personalProfile=defaultPersonalProfile(),personalPhotoUrl='',personalLoading=false,personalError='',personalBusy=false;
 let personalDevice={capability:pushCapability(),ready:false,active:false,config:null};
 let sidebarCollapsed=localStorage.getItem('orquivia.sidebar.collapsed')==='true';
-let pendingAlertView=['reminders','alerts'].includes(new URLSearchParams(location.search).get('view'))||location.hash==='#recordatorios';
+let pendingAlertView=false;
 let config={url:import.meta.env.VITE_SUPABASE_URL||'',anonKey:import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY||''};
 if(!production)try{const saved=JSON.parse(localStorage.getItem('orquivia.connection')||'null');if(saved)config=saved}catch{}
 const labels={dashboard:'Resumen',quotes:'Presupuestos',invoices:'Facturas',expenses:'Gastos',reports:'Informes y gestor',clients:'Clientes',reminders:'Recordatorios',settings:'Configuración',personal:'Mi espacio'};
-function lockPrivate(message=''){
+function lockPrivate(message='',{restoring=false}={}){
+  const generation=++accessGeneration,activeBackend=backend;
   appControlsCleanup?.();appControlsCleanup=null;resetPersonal();
-  state=emptyState();user=null;mode='locked';editor=null;busy=false;closeModal(true);
-  accessUI=renderAccess(app,{backend,logo,brandLogo,message,onAuthenticated:({user:account,state:loaded})=>{
-    user=account;state=validateState(loaded);mode='cloud';lastActivityAt=Date.now();page=pendingAlertView?'reminders':'dashboard';pendingAlertView=false;render();loadPersonal();
+  state=emptyState();user=null;mode='locked';editor=null;busy=false;viewState=defaultViewState(todayISO());closeModal(true);
+  accessUI=renderAccess(app,{backend,logo,brandLogo,message,restoring,onAuthenticated:async({user:account,state:loaded,restored})=>{
+    if(generation!==accessGeneration||backend!==activeBackend)return;
+    const storedActivity=readActivityTime(sessionStorage,account.id),now=Date.now();
+    if(restored&&storedActivity!==null&&sessionShouldLock({lastActivityAt:storedActivity,now})){
+      await activeBackend.signOut();
+      if(generation===accessGeneration)lockPrivate('La sesión se cerró tras 30 minutos sin actividad.');
+      return;
+    }
+    user=account;state=validateState(loaded);mode='cloud';lastActivityAt=restored&&storedActivity!==null?storedActivity:now;
+    writeActivityTime(sessionStorage,account.id,lastActivityAt);restoreNavigation();render();loadPersonal();
   }});
 }
 function connectBackend(){
@@ -45,7 +56,7 @@ function connectBackend(){
   active.onAuthStateChange((event,current)=>{
     if(backend!==active)return;
     if(mode==='cloud'&&(['SIGNED_OUT','ACCESS_REVOKED','MFA_REQUIRED'].includes(event)||(current&&user&&current.id!==user.id))){
-      lockPrivate(event==='SIGNED_OUT'?'Sesión cerrada.':'Verifica tu acceso antes de continuar.');
+      lockPrivate(event==='SIGNED_OUT'?'Sesión cerrada.':'Verifica tu acceso antes de continuar.',{restoring:event==='MFA_REQUIRED'});
       if(event==='MFA_REQUIRED')accessUI.resume().catch(e=>toast(e.message,true));
     }else if(event==='TOKEN_REFRESHED')user=current;
   });return active;
@@ -67,12 +78,40 @@ async function commit(change,message){
   catch(e){toast(e.code==='VERSION_CONFLICT'?'Hay cambios desde otra sesión. Recarga los datos en Configuración antes de continuar.':`No se pudo guardar: ${e.message}`,true);return false;}
   finally{busy=false;}
 }
-function navTo(value){page=value;query='';filter='all';render();window.scrollTo(0,0)}
+function viewIdentity(){return mode==='cloud'?user?.id:mode}
+function activateView(){page=viewState.page;query=viewState[page]?.query||'';filter=viewState[page]?.filter||'all'}
+function persistNavigation(historyMode='replace'){
+  if(mode==='locked')return;
+  viewState.page=page;writeViewState(sessionStorage,viewIdentity(),viewState,{today:todayISO()});
+  const url=new URL(location.href);url.hash=viewRouteHash(viewState,{today:todayISO()});
+  if(['alerts','reminders'].includes(url.searchParams.get('view')))url.searchParams.delete('view');
+  if(url.href!==location.href)try{window.history[historyMode==='push'?'pushState':'replaceState'](null,'',url)}catch{}
+  lastLocationKey=location.hash+'|'+location.search;
+}
+function restoreNavigation(){
+  viewState=readViewState(sessionStorage,viewIdentity(),{today:todayISO()});
+  viewState=applyViewRoute(viewState,pendingAlertView?{page:'reminders'}:parseViewRoute(location),{today:todayISO()});
+  pendingAlertView=false;activateView();persistNavigation();
+}
+function setViewState(section,patch,{history='replace'}={}){
+  if(mode==='locked'||!['quotes','invoices','expenses','reports'].includes(section))return;
+  viewState=sanitizeViewState({...viewState,[section]:{...viewState[section],...patch}},{today:todayISO()});
+  activateView();persistNavigation(history);
+}
+function navTo(value){if(!Object.hasOwn(labels,value))return;const changed=page!==value;viewState.page=value;activateView();persistNavigation(changed?'push':'replace');render();window.scrollTo(0,0)}
+function restoreHistoryView(){
+  const key=location.hash+'|'+location.search;
+  if(mode==='locked'||key===lastLocationKey)return;
+  const route=parseViewRoute(location)||{page:'dashboard'};
+  viewState=applyViewRoute(viewState,route,{today:todayISO()});activateView();persistNavigation();render();window.scrollTo(0,0);
+}
+window.addEventListener('popstate',restoreHistoryView);
+window.addEventListener('hashchange',restoreHistoryView);
 function render(){
   appControlsCleanup?.();appControlsCleanup=null;personalBindingCleanup?.();personalBindingCleanup=null;
   if(mode==='locked'){lockPrivate();return}
   const due=alerts(state.documents,state.payments),name=profileName(personalProfile,user,mode);
-  app.innerHTML=`<aside class="sidebar ${sidebarCollapsed?'is-collapsed':''}" id="primary-sidebar"><a class="brand" href="#" data-nav="dashboard" aria-label="Orquívia · Resumen"><img class="brand-full" src="${brandLogo}" alt="Orquívia"><img class="brand-mark" src="${markLogo}" alt=""></a><button class="icon-btn sidebar-toggle" data-action="sidebar-toggle" aria-controls="primary-sidebar" aria-expanded="${!sidebarCollapsed}" aria-label="${sidebarCollapsed?'Desplegar barra lateral':'Plegar barra lateral'}" title="${sidebarCollapsed?'Desplegar barra lateral':'Plegar barra lateral'}">${icon('chevron')}</button><div class="workspace-label">TU ESPACIO DE TRABAJO</div><nav aria-label="Navegación principal">${Object.entries(labels).filter(([id])=>id!=='personal').map(([id,label])=>`<button data-nav="${id}" aria-label="${label}" title="${label}" class="nav-item ${page===id?'active':''}">${icon({dashboard:'grid',quotes:'quote',invoices:'invoice',expenses:'euro',reports:'report',clients:'clients',reminders:'bell',settings:'settings'}[id])}<span>${label}</span>${id==='reminders'&&due.length?`<b>${due.length}</b>`:''}</button>`).join('')}</nav><div class="sidebar-bottom"><div class="help-card">${icon('shield')}<strong>Todo tiene su seguimiento</strong><p>Fechas, contratos y cobros en un mismo lugar.</p><button data-nav="reminders">Ver recordatorios ${icon('arrow')}</button></div><div class="profile"><button class="profile-main" data-nav="personal" aria-label="Mi espacio · ${esc(name)}" title="Mi espacio · ${esc(name)}">${avatarMarkup(name,personalPhotoUrl)}<span class="profile-copy"><strong>${esc(name)}</strong><small>${esc(state.company.name||'Orquívia')}</small></span></button>${mode==='cloud'?`<button class="icon-btn" data-action="logout" aria-label="Cerrar sesión">${icon('logout')}</button>`:''}</div></div></aside><div class="shell ${sidebarCollapsed?'is-collapsed':''}"><header class="topbar"><div class="breadcrumb"><button class="icon-btn mobile-menu" data-action="menu" aria-label="Abrir menú">${icon('menu')}</button><span>Mi empresa</span>${icon('chevron')}<strong>${labels[page]}</strong></div><div class="topbar-right"><span class="connection ${mode==='cloud'?'connected':''}"><i></i>${mode==='cloud'?'Conectado a Supabase':mode==='demo'?'Modo de prueba':'Preparación local'}</span><button class="notification-btn icon-btn" data-nav="reminders" aria-label="Ver ${due.length} recordatorios">${icon('bell')}${due.length?'<i></i>':''}</button><button class="topbar-profile" data-nav="personal" aria-label="Abrir mi espacio · ${esc(name)}" title="Mi espacio">${avatarMarkup(name,personalPhotoUrl,'small')}</button></div></header><main><div class="demo-strip ${mode==='cloud'?'hidden':''}">${icon('info')}<span>${mode==='demo'?'Datos de ejemplo.':'Datos reales en preparación local. Todavía no están publicados.'}</span><button data-nav="settings">Preparar mi empresa ${icon('arrow')}</button></div>${page==='dashboard'?dashboard():page==='quotes'||page==='invoices'?documentsPage():page==='expenses'?expensesPage(state):page==='reports'?reportsPage(state):page==='clients'?clientsPage():page==='reminders'?remindersPage():page==='personal'?personalPage({profile:personalProfile,user,photoUrl:personalPhotoUrl,mode,loading:personalLoading,error:personalError,device:personalDevice,account:mode==='cloud'?accountMarkup():''}):settingsPage()}</main><footer class="app-footer"><span>Orquívia · Un poco menos de administración, un poco más de calma.</span><span>${mode==='cloud'?'Sesión privada · '+esc(user?.email||''):'Preparación en este ordenador'}</span></footer></div>`;
+  app.innerHTML=`<aside class="sidebar ${sidebarCollapsed?'is-collapsed':''}" id="primary-sidebar"><a class="brand" href="#" data-nav="dashboard" aria-label="Orquívia · Resumen"><img class="brand-full" src="${brandLogo}" alt="Orquívia"><img class="brand-mark" src="${markLogo}" alt=""></a><button class="icon-btn sidebar-toggle" data-action="sidebar-toggle" aria-controls="primary-sidebar" aria-expanded="${!sidebarCollapsed}" aria-label="${sidebarCollapsed?'Desplegar barra lateral':'Plegar barra lateral'}" title="${sidebarCollapsed?'Desplegar barra lateral':'Plegar barra lateral'}">${icon('chevron')}</button><div class="workspace-label">TU ESPACIO DE TRABAJO</div><nav aria-label="Navegación principal">${Object.entries(labels).filter(([id])=>id!=='personal').map(([id,label])=>`<button data-nav="${id}" aria-label="${label}" title="${label}" class="nav-item ${page===id?'active':''}">${icon({dashboard:'grid',quotes:'quote',invoices:'invoice',expenses:'euro',reports:'report',clients:'clients',reminders:'bell',settings:'settings'}[id])}<span>${label}</span>${id==='reminders'&&due.length?`<b>${due.length}</b>`:''}</button>`).join('')}</nav><div class="sidebar-bottom"><div class="help-card">${icon('shield')}<strong>Todo tiene su seguimiento</strong><p>Fechas, contratos y cobros en un mismo lugar.</p><button data-nav="reminders">Ver recordatorios ${icon('arrow')}</button></div><div class="profile"><button class="profile-main" data-nav="personal" aria-label="Mi espacio · ${esc(name)}" title="Mi espacio · ${esc(name)}">${avatarMarkup(name,personalPhotoUrl)}<span class="profile-copy"><strong>${esc(name)}</strong><small>${esc(state.company.name||'Orquívia')}</small></span></button>${mode==='cloud'?`<button class="icon-btn" data-action="logout" aria-label="Cerrar sesión">${icon('logout')}</button>`:''}</div></div></aside><div class="shell ${sidebarCollapsed?'is-collapsed':''}"><header class="topbar"><div class="breadcrumb"><button class="icon-btn mobile-menu" data-action="menu" aria-label="Abrir menú">${icon('menu')}</button><span>Mi empresa</span>${icon('chevron')}<strong>${labels[page]}</strong></div><div class="topbar-right"><span class="connection ${mode==='cloud'?'connected':''}"><i></i>${mode==='cloud'?'Conectado a Supabase':mode==='demo'?'Modo de prueba':'Preparación local'}</span><button class="notification-btn icon-btn" data-nav="reminders" aria-label="Ver ${due.length} recordatorios">${icon('bell')}${due.length?'<i></i>':''}</button><button class="topbar-profile" data-nav="personal" aria-label="Abrir mi espacio · ${esc(name)}" title="Mi espacio">${avatarMarkup(name,personalPhotoUrl,'small')}</button></div></header><main><div class="demo-strip ${mode==='cloud'?'hidden':''}">${icon('info')}<span>${mode==='demo'?'Datos de ejemplo.':'Datos reales en preparación local. Todavía no están publicados.'}</span><button data-nav="settings">Preparar mi empresa ${icon('arrow')}</button></div>${page==='dashboard'?dashboard():page==='quotes'||page==='invoices'?documentsPage():page==='expenses'?expensesPage(state,viewState.expenses):page==='reports'?reportsPage(state,viewState.reports):page==='clients'?clientsPage():page==='reminders'?remindersPage():page==='personal'?personalPage({profile:personalProfile,user,photoUrl:personalPhotoUrl,mode,loading:personalLoading,error:personalError,device:personalDevice,account:mode==='cloud'?accountMarkup():''}):settingsPage()}</main><footer class="app-footer"><span>Orquívia · Un poco menos de administración, un poco más de calma.</span><span>${mode==='cloud'?'Sesión privada · '+esc(user?.email||''):'Preparación en este ordenador'}</span></footer></div>`;
   bindApp();bindExpenses(app,expenseContext());bindReports(app,expenseContext());personalBindingCleanup=bindPersonal(app,personalContext());appControlsCleanup=enhanceControls(app);
 }
 function heading(eyebrow,title,description,action=''){return `<div class="page-heading"><div><div class="eyebrow">${eyebrow}</div><h1>${title}</h1><p>${description}</p></div>${action}</div>`}
@@ -126,8 +165,8 @@ function settingsPage(){
 function bindApp(){
   app.querySelectorAll('[data-nav]').forEach(b=>b.onclick=e=>{e.preventDefault();navTo(b.dataset.nav)});
   app.querySelectorAll('[data-action]').forEach(b=>b.onclick=()=>action(b.dataset.action,b.dataset.id,b.dataset.kind));
-  app.querySelectorAll('[data-filter]').forEach(b=>b.onclick=()=>{filter=b.dataset.filter;render()});
-  const search=app.querySelector('#search');if(search)search.oninput=()=>{const pos=search.selectionStart;query=search.value;render();const n=app.querySelector('#search');n.focus();n.setSelectionRange(pos,pos)};
+  app.querySelectorAll('[data-filter]').forEach(b=>b.onclick=()=>{setViewState(page,{filter:b.dataset.filter});render()});
+  const search=app.querySelector('#search');if(search)search.oninput=()=>{const pos=search.selectionStart;setViewState(page,{query:search.value});render();const n=app.querySelector('#search');n.focus();n.setSelectionRange(pos,pos)};
   const companyForm=app.querySelector('#company-form');if(companyForm)companyForm.onsubmit=async e=>{e.preventDefault();const f=new FormData(companyForm),c=Object.fromEntries(f);for(const key of ['vat','withholding','paymentTerms'])c[key]=Number(c[key]);c.emailNotifications=f.has('emailNotifications');if(c.emailNotifications&&!c.notificationEmail){toast('Añade el email al que quieres recibir los recordatorios.',true);return}await commit(s=>Object.assign(s.company,c),'Datos de empresa guardados.')};
   const passwordForm=app.querySelector('#password-form');
   if(passwordForm)bindPasswordForm(passwordForm,{backend,onError:m=>toast(m,true),onComplete:()=>lockPrivate('Contraseña cambiada. Entra de nuevo con la nueva contraseña.')});
@@ -169,7 +208,7 @@ async function action(name,id,kind){const d=state.documents.find(x=>x.id===id);
 function disposeModalControls(){modalControlDisposers.splice(0).forEach(dispose=>dispose())}
 function registerModalCleanup(dispose){modalControlDisposers.push(dispose);return()=>{const index=modalControlDisposers.indexOf(dispose);if(index>=0)modalControlDisposers.splice(index,1)}}
 function enhanceModal(onCreateClient){modalControlDisposers.push(enhanceControls(modalRoot,{onCreateClient}))}
-function expenseContext(){return {getState:()=>state,getMode:()=>mode,getIdentity:()=>user?.id||mode,getBackend:()=>backend,registerModalCleanup,modalRoot,logo:documentLogo,openModal,modalHeader,closeModal,confirmModal,commit,render,toast,validate:validateState,isBusy:()=>busy,setBusy:value=>busy=value,enhance:()=>enhanceModal()}}
+function expenseContext(){return {getState:()=>state,getMode:()=>mode,getIdentity:()=>user?.id||mode,getBackend:()=>backend,getViewState:section=>structuredClone(viewState[section]),setViewState,registerModalCleanup,modalRoot,logo:documentLogo,openModal,modalHeader,closeModal,confirmModal,commit,render,toast,validate:validateState,isBusy:()=>busy,setBusy:value=>busy=value,enhance:()=>enhanceModal()}}
 function openModal(content,wide=false){disposeModalControls();modalCancel=null;previousFocus=document.activeElement;app.inert=true;modalRoot.innerHTML=`<div class="modal-backdrop"><section class="modal ${wide?'wide':''}" role="dialog" aria-modal="true" aria-label="Detalle de Orquívia">${content}</section></div>`;document.body.classList.add('modal-open');modalRoot.querySelectorAll('[data-close]').forEach(b=>b.onclick=()=>closeModal());modalRoot.querySelector('.modal-backdrop').onclick=e=>{if(e.target===e.currentTarget)closeModal()};setTimeout(()=>modalRoot.querySelector('input,select,button')?.focus(),0)}
 function closeModal(force=false){if(busy&&!force)return;if(!force&&modalCancel){const back=modalCancel;modalCancel=null;back();return}modalCancel=null;disposeModalControls();modalRoot.innerHTML='';app.inert=false;document.body.classList.remove('modal-open');editor=null;previousFocus?.focus()}
 document.addEventListener('keydown',e=>{if(!modalRoot.childElementCount)return;if(e.key==='Escape')closeModal();if(e.key==='Tab'){const nodes=[...modalRoot.querySelectorAll('button,input,select,textarea,a[href],[tabindex="0"]')].filter(n=>!n.disabled&&n.tabIndex>=0&&n.offsetParent!==null&&!n.closest('[hidden]'));if(!nodes.length)return;const first=nodes[0],last=nodes.at(-1);if(e.shiftKey&&document.activeElement===first){last.focus();e.preventDefault()}else if(!e.shiftKey&&document.activeElement===last){first.focus();e.preventDefault()}}});
@@ -307,7 +346,11 @@ async function disablePersonalPush(){await disableDevicePush({backend:backend.pe
 function personalContext(){return {getProfile:()=>personalProfile,getDevice:()=>personalDevice,name:()=>profileName(personalProfile,user,mode),save:savePersonal,toast,enablePush:enablePersonalPush,disablePush:disablePersonalPush}}
 registerPWA({onOpenAlerts:()=>{if(mode==='locked')pendingAlertView=true;else navTo('reminders')}}).catch(()=>{});
 
-for(const event of ['pointerdown','keydown','touchstart'])document.addEventListener(event,()=>lastActivityAt=Date.now(),{passive:true});
+for(const event of ['pointerdown','keydown','touchstart'])document.addEventListener(event,()=>{
+  const now=Date.now();
+  if(mode==='cloud'&&sessionShouldLock({lastActivityAt,now}))return;
+  lastActivityAt=now;if(mode==='cloud')writeActivityTime(sessionStorage,user.id,lastActivityAt);
+},{passive:true});
 setInterval(async()=>{
   if(mode!=='cloud')return;
   if(sessionShouldLock({lastActivityAt})){try{await backend.signOut()}finally{lockPrivate('La sesión se cerró tras 30 minutos sin actividad.')}return}
@@ -316,8 +359,8 @@ setInterval(async()=>{
 setInterval(()=>{if(mode!=='locked'&&page!=='personal'&&!modalRoot.childElementCount&&!document.querySelector('[data-receipt-viewer]')&&!busy&&!personalBusy&&!document.activeElement?.closest('input,textarea,select,[role="combobox"]')&&!app.querySelector('[role="combobox"][aria-expanded="true"]')){render()}},60000);
 if(window.top!==window.self){app.textContent='Abre Orquívia directamente en su página para iniciar sesión.';}
 else if(publicConfigIsValid(config)){
-  connectBackend();lockPrivate();
-  try{if(await backend.currentUser())await accessUI.resume()}catch(e){lockPrivate(e.message)}
+  connectBackend();lockPrivate('',{restoring:true});
+  await accessUI.resume();
 }else if(production){lockPrivate();}
 else{
   mode=demoAllowed?'demo':'local';state=loadDemo();
@@ -325,5 +368,5 @@ else{
     const res=await fetch('/__local-import',{cache:'no-store'});
     if(res.ok){state=validateState(await res.json());localStore.setItem(storageKey,JSON.stringify(state));}
   }catch(e){toast('No se pudo preparar la importación local: '+e.message,true)}
-  render();loadPersonal();
+  restoreNavigation();render();loadPersonal();
 }
