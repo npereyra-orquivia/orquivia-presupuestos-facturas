@@ -83,6 +83,10 @@ Los justificantes guardados se cargan mediante la sesión privada y el visor se 
 
 ## Informes y gestor
 
+**Resumen** muestra los totales de todo el histórico: facturación emitida, gastos de proveedores, cobros y salidas de dinero. **Informes y gestor** calcula los mismos totales para el trimestre, año o histórico elegido. Los documentos usan la fecha de emisión; el dinero usa la fecha real del movimiento. El total de gastos incluye el IVA registrado y resta los abonos. Las salidas de dinero suman los pagos brutos de gastos e impuestos; las devoluciones se muestran aparte y se restan para obtener la salida neta.
+
+El gráfico mensual sitúa los cobros y devoluciones por encima del cero y los pagos por debajo, con una escala común en euros. Los pagos se desglosan por categoría y separan los impuestos. **Ver datos por mes** permite consultar los importes exactos. El gráfico y sus totales son independientes del saldo inicial de caja; el expediente incluye también el desglose de pagos brutos, devoluciones y movimientos netos.
+
 En **Informes y gestor**, elige **Un trimestre**, **Un año completo** o **Todo el histórico** para reunir las facturas emitidas y los gastos del período. Selecciona el año y, cuando corresponda, el trimestre. Puedes descargar:
 
 - **Descargar listado CSV**, con facturas emitidas y gastos, sus importes, estados y referencias a justificantes.

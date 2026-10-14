@@ -1,6 +1,7 @@
 import JSZip from 'jszip';
 import { money, todayISO, validateWorkspace } from './domain.js';
 import { reportCSV, periodReport } from './expenses.js';
+import { monthlyCashActivity } from './cash-activity.js';
 import { createPDF } from './pdf.js';
 
 const MAX_BUNDLE_BYTES = 300 * 1024 * 1024;
@@ -52,8 +53,9 @@ async function loadSameOriginLogo(logoUrl) {
   return `data:image/png;base64,${btoa(binary)}`;
 }
 
-function summaryText(report, { demo, receiptCount }) {
+function summaryText(report, { demo, receiptCount, activity }) {
   const s = report.summary;
+  const t = activity.totals;
   return [
     `ORQUÍVIA — ${report.label}`,
     report.from ? `Período seleccionado: ${report.from} a ${report.to}` : 'Período seleccionado: sin registros',
@@ -84,8 +86,14 @@ function summaryText(report, { demo, receiptCount }) {
     `Declaraciones cuyo pago aún requiere confirmación: ${s.taxUnconfirmedCount}`,
     '',
     `Cobros registrados con fecha dentro del período: ${money(s.cashReceived)}`,
-    `Pagos de gastos registrados con fecha dentro del período: ${money(s.cashPaidExpenses)}`,
+    `Pagos brutos de gastos: ${money(t.paidExpenses)}`,
+    `Pagos brutos de impuestos: ${money(t.paidTaxes)}`,
+    `Salidas totales antes de devoluciones: ${money(t.outflows)}`,
+    `Devoluciones recibidas de proveedores e impuestos: ${money(t.expenseRefunds + t.taxRefunds)}`,
+    `Pagos netos de gastos con fecha dentro del período: ${money(s.cashPaidExpenses)}`,
     `Pagos fiscales separados con fecha dentro del período: ${money(s.cashPaidTaxes)}`,
+    `Salida neta de dinero: ${money(s.cashPaid)}`,
+    `Diferencia de entradas y salidas, sin saldo inicial: ${money(t.net)}`,
     `Registros señalados para revisar: ${s.reviewCount}`,
     '',
     'El registro de facturas y gastos usa la fecha de cada documento. Los cobros y pagos usan su propia fecha, aunque el documento pertenezca a otro trimestre.',
@@ -135,7 +143,7 @@ export async function buildPeriodBundle(state, period, {
   await progress('Preparando el registro del período');
   const registerName = ({ quarter: 'registro-trimestre.csv', year: 'registro-anual.csv', all: 'registro-historico.csv' })[report.type];
   await add(registerName, reportCSV(snapshot, selectedPeriod));
-  await add('resumen.txt', summaryText(report, { demo, receiptCount }));
+  await add('resumen.txt', summaryText(report, { demo, receiptCount, activity: monthlyCashActivity(snapshot, selectedPeriod) }));
 
   const logoData = invoiceCount ? await loadSameOriginLogo(logoUrl) : undefined;
   for (const [index, invoice] of report.invoices.entries()) {
