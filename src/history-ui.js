@@ -13,6 +13,7 @@ const fields = {
   paidDate: 'Fecha del pago', reference: 'Referencia', attachments: 'Justificantes', additionalAmount: 'Suplidos / importe adicional',
   cashAmount: 'Importe pagado', cashMovements: 'Pagos del gasto', documentId: 'Factura vinculada', amount: 'Importe',
   openingBalance: 'Saldo inicial', openingBalanceDate: 'Día de inicio', legalName: 'Razón social', iban: 'Cuenta bancaria',
+  model: 'Modelo tributario', year: 'Ejercicio fiscal', quarter: 'Trimestre fiscal', linkedExpenseId: 'Pago incluido en gasto del gestor', missingReceiptReason: 'Motivo de falta de justificante',
   paymentTerms: 'Plazo de pago', other: 'Otros datos del registro', sourceMetadata: 'Datos del archivo de origen',
   originalNumber: 'Número original', importWarnings: 'Advertencias de importación', reviewRequired: 'Revisión del documento', id: 'Identificador',
 };
@@ -37,7 +38,7 @@ const dateTime = value => {
   const date = new Date(value);
   return Number.isFinite(date.getTime()) ? date.toLocaleString('es-ES', { timeZone: 'Europe/Madrid', dateStyle: 'medium', timeStyle: 'short' }) : 'Fecha no disponible';
 };
-const recordType = { document: 'Documento', expense: 'Gasto', client: 'Cliente', payment: 'Cobro', company: 'Empresa' };
+const recordType = { document: 'Documento', expense: 'Gasto', client: 'Cliente', payment: 'Cobro', company: 'Empresa', tax: 'Declaración' };
 function historyAction(entry) {
   const action = { created: 'creado', updated: 'actualizado', deleted: 'eliminado' }[entry.action] || 'actualizado';
   if (entry.entityType === 'payment') return { created: 'Cobro registrado', updated: 'Cobro actualizado', deleted: 'Cobro eliminado' }[entry.action] || 'Cobro actualizado';
@@ -89,7 +90,7 @@ const equal = (a, b) => JSON.stringify(canonical(a)) === JSON.stringify(canonica
 export function changedRecordFields(before, after) {
   return [...new Set([...Object.keys(before || {}), ...Object.keys(after || {})])].filter(key => key !== 'id' && !equal(before?.[key], after?.[key])).sort();
 }
-const collections = { document: 'documents', expense: 'expenses', client: 'clients', payment: 'payments' };
+const collections = { document: 'documents', expense: 'expenses', client: 'clients', payment: 'payments', tax: 'taxRecords' };
 export function compareWorkspaceEdits(base, draft, current, { documentId } = {}) {
   const rows = [];
   function add(entityType, id, before, proposed, latest) {
@@ -121,7 +122,7 @@ function comparisonValue(value, key, record, entityType) {
   else if (key === 'cashMovements' && Array.isArray(value)) text = value.map(payment => `${payment.date || 'Sin fecha'} · ${money(payment.amount)}`).join('\n') || 'Sin pagos';
   else if (['total', 'base', 'vatAmount', 'vatDeductibleAmount', 'additionalAmount', 'cashAmount', 'amount', 'openingBalance'].includes(key) && typeof value === 'number') text = money(value);
   else if (key === 'vatDocumentStatus') text = { 'included-unitemized': 'IVA incluido, sin desglose', 'not-stated': 'Justificante sin datos de IVA' }[value] || 'Por revisar';
-  else if (key === 'paymentStatus') text = { paid: 'Pagado', pending: 'Pendiente' }[value] || String(value);
+  else if (key === 'paymentStatus') text = { paid: 'Pagado', pending: 'Pendiente', 'no-payment': 'Sin ingreso', unconfirmed: 'Pago por confirmar', included: 'Incluido en pago al gestor' }[value] || String(value);
   else if (key === 'status') text = { draft: 'Borrador', issued: 'Emitida', sent: 'Enviado', accepted: 'Aceptado', rejected: 'Rechazado' }[value] || String(value);
   else if (key === 'kind') text = { quote: 'Presupuesto', invoice: 'Factura', credit: 'Abono / devolución' }[value] || String(value);
   else if (typeof value === 'object') text = Object.entries(value).filter(([name]) => Object.hasOwn(fields, name)).map(([name, item]) => `${historyFieldLabel(name)}: ${typeof item === 'object' ? 'Datos del registro' : item ?? 'Vacío'}`).join('\n') || 'Datos del registro';

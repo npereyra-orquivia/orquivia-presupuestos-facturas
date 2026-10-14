@@ -77,15 +77,22 @@ function summaryText(report, { demo, receiptCount }) {
     `De ellos, justificantes con falta de desglose anotada: ${s.vatUndisclosedCount}`,
     `Diferencia de actividad antes de retenciones: ${s.activityDifference === null ? 'Pendiente de revisar el IVA de los gastos' : money(s.activityDifference)}`,
     `Justificantes originales incluidos: ${receiptCount}`,
+    `Gastos sin justificante con motivo anotado: ${report.expenses.filter(e => !(e.attachments || []).length && e.missingReceiptReason?.trim()).length}`,
+    '',
+    `Declaraciones fiscales del período fiscal seleccionado: ${s.taxRecordCount}`,
+    `Resultado declarado (no es gasto ni IVA soportado): ${money(s.taxDeclaredTotal)}`,
+    `Declaraciones cuyo pago aún requiere confirmación: ${s.taxUnconfirmedCount}`,
     '',
     `Cobros registrados con fecha dentro del período: ${money(s.cashReceived)}`,
-    `Pagos de gastos registrados con fecha dentro del período: ${money(s.cashPaid)}`,
+    `Pagos de gastos registrados con fecha dentro del período: ${money(s.cashPaidExpenses)}`,
+    `Pagos fiscales separados con fecha dentro del período: ${money(s.cashPaidTaxes)}`,
     `Registros señalados para revisar: ${s.reviewCount}`,
     '',
     'El registro de facturas y gastos usa la fecha de cada documento. Los cobros y pagos usan su propia fecha, aunque el documento pertenezca a otro trimestre.',
     'El IVA soportado registrado y el IVA confirmado se muestran por separado. Confirmar un importe en el portal no determina su deducibilidad; el gestor revisa los justificantes.',
     'Los gastos con IVA por revisar cuentan en el total y en caja, pero su base e IVA se dejan sin confirmar. La diferencia de actividad compara las bases registradas de ventas y gastos, antes de retenciones; no representa el beneficio fiscal ni el saldo bancario.',
     'Este paquete prepara información y documentos para el gestor. No presenta una declaración fiscal.',
+    'Las declaraciones se incluyen por ejercicio y trimestre fiscal; sus pagos se cuentan por fecha bancaria. Los pagos fiscales vinculados como suplido a otro gasto no se suman de nuevo.',
     'Las facturas PDF se generan con los datos y las instantáneas guardadas de la empresa y del cliente. Los justificantes de gastos conservan sus bytes originales.',
     'El estado de pago de cada fila es el estado actual registrado en el portal. El paquete no confirma movimientos del banco.',
     '',
@@ -101,7 +108,10 @@ export async function buildPeriodBundle(state, period, {
   const snapshot = typeof structuredClone === 'function' ? structuredClone(state) : JSON.parse(JSON.stringify(state));
   const selectedPeriod = { ...period };
   const report = periodReport(snapshot, selectedPeriod);
-  const receipts = report.expenses.flatMap((expense) => (expense.attachments ?? []).map((attachment) => ({ expense, attachment })));
+  const receipts = [
+    ...report.expenses.flatMap((expense) => (expense.attachments ?? []).map((attachment) => ({ expense, attachment, tax: false }))),
+    ...report.taxRecords.flatMap((expense) => (expense.attachments ?? []).map((attachment) => ({ expense, attachment, tax: true }))),
+  ];
   const receiptCount = receipts.length, invoiceCount = report.invoices.length;
   const total = 2 + invoiceCount + receiptCount;
   let completed = 0, totalBytes = 0;
@@ -135,7 +145,7 @@ export async function buildPeriodBundle(state, period, {
     const id = UUID.test(invoice.id) ? invoice.id : `documento-${String(index + 1).padStart(4, '0')}`;
     await add(`facturas/${id}_${basename(invoice.number, 'Factura')}.pdf`, new Uint8Array(pdf.output('arraybuffer')));
   }
-  for (const { expense, attachment } of receipts) {
+  for (const { expense, attachment, tax } of receipts) {
     await progress(`Descargando ${attachment.name}`);
     let file;
     try { file = await downloadReceipt(attachment, expense); }
@@ -146,7 +156,7 @@ export async function buildPeriodBundle(state, period, {
     if (totalBytes + file.size > MAX_BUNDLE_BYTES) throw new Error(SIZE_ERROR);
     const bytes = new Uint8Array(await file.arrayBuffer());
     if (bytes.byteLength !== attachment.size) throw new Error(`El justificante «${attachment.name}» tiene un tamaño distinto del registrado.`);
-    await add(`justificantes/${expense.id}/${receiptName(attachment)}`, bytes);
+    await add(`${tax ? 'declaraciones' : 'justificantes'}/${expense.id}/${receiptName(attachment)}`, bytes);
   }
   await progress('Creando archivo ZIP');
   const blob = await zip.generateAsync({ type: 'blob', compression: 'STORE', streamFiles: true });

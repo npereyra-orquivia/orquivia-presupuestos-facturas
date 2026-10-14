@@ -469,6 +469,16 @@ export function validateWorkspace(workspace, today = todayISO()) {
       expenseText(expense.supplierTaxId, `${path}.supplierTaxId`, 80);
       expenseText(expense.description, `${path}.description`, 2000, true);
       for (const [key, maximum] of [['category', 100], ['reference', 240], ['notes', 10000]]) expenseText(expense[key], `${path}.${key}`, maximum);
+      if (expense.missingReceiptReason !== undefined) {
+        expenseText(expense.missingReceiptReason, `${path}.missingReceiptReason`, 2000, true);
+        // A note acknowledges missing evidence; it cannot stand in for a VAT
+        // invoice or turn an estimate into a confirmed deductible amount.
+        if (!(expense.attachments || []).length && (expense.vatReviewNeeded !== true
+          || expense.vatAmount !== 0 || (expense.vatDeductibleAmount ?? 0) !== 0
+          || expense.vatRate !== undefined)) {
+          error(`${path}.missingReceiptReason`, 'sin justificante, la base y el IVA deben conservarse sin confirmar.');
+        }
+      }
       for (const key of ['base', 'vatAmount']) requireNumber(expense[key], `${path}.${key}`, moneyLimits);
       if (expense.additionalAmount !== undefined) requireNumber(expense.additionalAmount, `${path}.additionalAmount`, moneyLimits);
       if (expense.cashAmount !== undefined) requireNumber(expense.cashAmount, `${path}.cashAmount`, moneyLimits);
@@ -546,6 +556,83 @@ export function validateWorkspace(workspace, today = todayISO()) {
         if (attachment.mimeType !== mimeByExtension[extension]) error(`${attachmentPath}.mimeType`, 'el tipo de archivo no coincide con el justificante permitido.');
       });
     });
+  }
+  // Filed declarations are evidence of a fiscal period, not supplier costs.
+  // Their payment is independent: a filing can be zero, await confirmation,
+  // be paid separately, or already be included in a recorded supplier payment.
+  if (workspace.taxRecords !== undefined && !Array.isArray(workspace.taxRecords)) error('taxRecords', 'debe ser una lista.');
+  if (Array.isArray(workspace.taxRecords)) {
+    if (workspace.taxRecords.length > 10000) error('taxRecords', 'la lista supera el límite de 10000 registros.');
+    const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+    const storedExpenses = Array.isArray(workspace.expenses) ? workspace.expenses.filter(isRecord) : [];
+    const taxIds = new Set(), expensesById = new Map(storedExpenses.map(e => [e.id, e])), linkedAmounts = new Map();
+    const attachments = storedExpenses.flatMap(e => Array.isArray(e.attachments) ? e.attachments : []);
+    const attachmentIds = new Set(attachments.map(a => a?.id)), attachmentPaths = new Set(attachments.map(a => a?.path));
+    const mimeByExtension = {
+      pdf: 'application/pdf', jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', webp: 'image/webp',
+      gif: 'image/gif', heic: 'image/heic', heif: 'image/heif', doc: 'application/msword',
+      docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      xls: 'application/vnd.ms-excel', xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      odt: 'application/vnd.oasis.opendocument.text', ods: 'application/vnd.oasis.opendocument.spreadsheet', rtf: 'application/rtf',
+    };
+    const text = (value, path, maximum, required = false) => {
+      requireString(value, path, required);
+      if (typeof value === 'string' && value.length > maximum) error(path, `el texto supera ${maximum} caracteres.`);
+    };
+    workspace.taxRecords.forEach((record, index) => {
+      const path = `taxRecords[${index}]`;
+      if (!isRecord(record)) { error(path, 'la declaración debe ser un objeto.'); return; }
+      if (typeof record.id !== 'string' || !uuid.test(record.id)) error(`${path}.id`, 'indica un UUID válido en minúsculas.');
+      if (taxIds.has(record.id) || expensesById.has(record.id)) error(`${path}.id`, 'el identificador está duplicado.');
+      taxIds.add(record.id);
+      if (!validDate(record.date) || (validDate(today) && record.date > today)) error(`${path}.date`, 'indica una fecha real de presentación, sin fechas futuras.');
+      if (!['111', '303'].includes(record.model)) error(`${path}.model`, 'el modelo debe ser 111 o 303.');
+      requireNumber(record.year, `${path}.year`, { minimum: 1000, maximum: 9999, decimals: 0 });
+      requireNumber(record.quarter, `${path}.quarter`, { minimum: 1, maximum: 4, decimals: 0 });
+      if (validDate(record.date) && Number.isInteger(record.year) && Number.isInteger(record.quarter)
+        && (record.year > Number(record.date.slice(0, 4))
+          || (record.year === Number(record.date.slice(0, 4)) && record.quarter > Math.ceil(Number(record.date.slice(5, 7)) / 3)))) {
+        error(`${path}.quarter`, 'el período fiscal no puede ser posterior a la presentación.');
+      }
+      requireNumber(record.amount, `${path}.amount`, { minimum: -Number.MAX_SAFE_INTEGER / 100, maximum: Number.MAX_SAFE_INTEGER / 100 });
+      for (const [key, maximum] of [['reference', 240], ['notes', 10000]]) text(record[key], `${path}.${key}`, maximum);
+      if (!['no-payment', 'unconfirmed', 'pending', 'paid', 'included'].includes(record.paymentStatus)) error(`${path}.paymentStatus`, 'indica un estado válido del pago fiscal.');
+      if ((record.amount === 0) !== (record.paymentStatus === 'no-payment')) error(`${path}.paymentStatus`, 'solo una declaración con resultado cero puede estar sin ingreso.');
+      if (record.paymentStatus === 'pending' && !(record.amount > 0)) error(`${path}.paymentStatus`, 'el pago pendiente debe tener un importe positivo.');
+      if (record.paymentStatus === 'paid') {
+        if (!validDate(record.paidDate) || (validDate(today) && record.paidDate > today)) error(`${path}.paidDate`, 'confirma una fecha real de cargo o devolución, sin fechas futuras.');
+      } else if (record.paidDate !== undefined && record.paidDate !== null && record.paidDate !== '') error(`${path}.paidDate`, 'solo un pago confirmado tiene fecha de cargo.');
+      if (record.paymentStatus === 'included') {
+        const linked = expensesById.get(record.linkedExpenseId);
+        if (!linked || !(record.amount > 0) || !(linked.additionalAmount >= record.amount)) {
+          error(`${path}.linkedExpenseId`, 'vincula el impuesto a un gasto existente que ya incluya ese importe como suplido.');
+        }
+        linkedAmounts.set(record.linkedExpenseId, (linkedAmounts.get(record.linkedExpenseId) || 0n) + signedMoneyCents(record.amount));
+      } else if (record.linkedExpenseId !== undefined && record.linkedExpenseId !== null && record.linkedExpenseId !== '') error(`${path}.linkedExpenseId`, 'la vinculación solo corresponde a un pago incluido en otro gasto.');
+      if (!Array.isArray(record.attachments) || record.attachments.length < 1 || record.attachments.length > 10) {
+        error(`${path}.attachments`, 'una declaración exige entre 1 y 10 documentos.'); return;
+      }
+      record.attachments.forEach((attachment, attachmentIndex) => {
+        const attachmentPath = `${path}.attachments[${attachmentIndex}]`;
+        if (!isRecord(attachment)) { error(attachmentPath, 'el documento debe ser un objeto.'); return; }
+        if (typeof attachment.id !== 'string' || !uuid.test(attachment.id)) error(`${attachmentPath}.id`, 'indica un UUID válido en minúsculas.');
+        if (attachmentIds.has(attachment.id)) error(`${attachmentPath}.id`, 'el identificador del documento está duplicado.');
+        attachmentIds.add(attachment.id);
+        text(attachment.name, `${attachmentPath}.name`, 240, true);
+        if (typeof attachment.name === 'string' && /[\/\\\u0000-\u001f\u007f]/u.test(attachment.name)) error(`${attachmentPath}.name`, 'el nombre contiene caracteres de control.');
+        requireNumber(attachment.size, `${attachmentPath}.size`, { minimum: 1, maximum: 10 * 1024 * 1024, decimals: 0 });
+        const parts = typeof attachment.path === 'string' ? attachment.path.split('/') : [];
+        const filename = parts[2]?.split('.'), extension = filename?.[1];
+        if (parts.length !== 3 || !uuid.test(parts[0]) || parts[1] !== record.id || filename?.length !== 2
+          || filename[0] !== attachment.id || !Object.hasOwn(mimeByExtension, extension ?? '')) error(`${attachmentPath}.path`, 'la ruta privada del documento no corresponde a esta declaración.');
+        if (attachmentPaths.has(attachment.path)) error(`${attachmentPath}.path`, 'la ruta del documento está duplicada.');
+        attachmentPaths.add(attachment.path);
+        if (attachment.mimeType !== mimeByExtension[extension]) error(`${attachmentPath}.mimeType`, 'el tipo de archivo no corresponde al documento permitido.');
+      });
+    });
+    for (const [expenseId, amount] of linkedAmounts) {
+      if (amount > signedMoneyCents(expensesById.get(expenseId)?.additionalAmount ?? 0)) error('taxRecords', 'los pagos vinculados superan el suplido registrado en el gasto.');
+    }
   }
   return errors;
 }

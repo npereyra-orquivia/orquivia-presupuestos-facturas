@@ -14,7 +14,7 @@ export const RECEIPT_FILE_TYPES = Object.freeze({
   rtf: 'application/rtf',
 });
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
-const HISTORY_ENTITY_TYPES = new Set(['document', 'expense', 'client', 'payment', 'company']);
+const HISTORY_ENTITY_TYPES = new Set(['document', 'expense', 'tax', 'client', 'payment', 'company']);
 
 /** Files are private originals; active web formats and extension disguises are rejected. */
 export async function validateReceiptFile(file) {
@@ -518,7 +518,7 @@ export function createBackend({ url, anonKey }) {
     },
     async deleteReceipt(attachment) {
       // Remove the metadata with saveState first. The database denies deletion
-      // while any expense in the current workspace still references this path.
+      // while any expense or tax declaration still references this path.
       await requireUser();
       if (!workspace) throw backendError('Carga primero la empresa.', 'STATE_NOT_LOADED');
       const path = receiptPath(attachment, workspace.organizationId);

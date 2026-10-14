@@ -488,7 +488,7 @@ test('record history binds its member identity and a read-only comparison never 
   const json = (body, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
   const rows = [{ id: 11, actorId: member.id, actorEmail: member.email, event: 'save', action: 'updated',
     entityType: 'expense', entityId: 'receipt-1', workspaceVersion: 2, changedFields: ['reviewNeeded'], createdAt: '2026-10-14T10:00:00Z' }];
-  let signedIn = member, saves = 0, historyRequests = 0, denied = null, delayedHistory = null, releaseHistory;
+  let signedIn = member, saves = 0, historyRequests = 0, denied = null, delayedHistory = null, releaseHistory, expectedType = 'expense';
   const currentState = empty();
   globalThis.fetch = async (input, init = {}) => {
     const url = String(input);
@@ -507,7 +507,7 @@ test('record history binds its member identity and a read-only comparison never 
     }
     if (url.includes('/rest/v1/rpc/load_orquivia_record_history')) {
       historyRequests++;
-      assert.deepEqual(JSON.parse(init.body), { p_organization_id: org, p_entity_type: 'expense', p_entity_id: 'receipt-1', p_limit: 100, p_expected_user_id: member.id });
+      assert.deepEqual(JSON.parse(init.body), { p_organization_id: org, p_entity_type: expectedType, p_entity_id: 'receipt-1', p_limit: 100, p_expected_user_id: member.id });
       if (delayedHistory) { delayedHistory(); await new Promise((resolve) => { releaseHistory = resolve; }); }
       return json(rows);
     }
@@ -523,6 +523,9 @@ test('record history binds its member identity and a read-only comparison never 
     await assert.rejects(backend.recordHistory('expense', 'receipt\u0000'), { code: 'INVALID_HISTORY_RECORD' });
     assert.equal(historyRequests, 0, 'Invalid identifiers must not reach transport');
     assert.deepEqual(await backend.recordHistory('expense', 'receipt-1', 999), rows);
+    expectedType = 'tax';
+    assert.deepEqual(await backend.recordHistory('tax', 'receipt-1', 999), rows, 'Tax history uses the same organization, captured member and bounded RPC');
+    expectedType = 'expense';
     await assert.rejects(backend.saveState(empty()), { code: 'VERSION_CONFLICT' });
     const comparison = await backend.peekState();
     assert.equal(comparison.version, 2);
@@ -531,8 +534,9 @@ test('record history binds its member identity and a read-only comparison never 
     assert.equal(saves, 1, 'Comparison must not advance the local CAS version');
     assert.deepEqual(await backend.recordHistory('expense', 'receipt-1', 999), rows, 'History still works while conflict saving is blocked');
     denied = 'MFA_REQUIRED';
-    await assert.rejects(backend.recordHistory('expense', 'receipt-1'), { code: 'MFA_REQUIRED' });
-    assert.equal(historyRequests, 2, 'MFA loss must block history before its transport');
+    await assert.rejects(backend.recordHistory('tax', 'receipt-1'), { code: 'MFA_REQUIRED' });
+    await assert.rejects(backend.recordHistory('expense', 'receipt-1'), { code: 'STATE_NOT_LOADED' });
+    assert.equal(historyRequests, 3, 'MFA loss must block both expense and tax history before transport');
     denied = null;
     await backend.loadState();
     const started = new Promise((resolve) => { delayedHistory = resolve; });

@@ -103,7 +103,9 @@ export function prepareRestore(input, { today = todayISO(), maxBytes = MAX_BACKU
   const state = Object.hasOwn(cloned, 'state') ? cloned.state : cloned;
   const errors = validateWorkspace(state, today);
   if (errors.length) throw new Error(`La copia no es válida: ${errors.slice(0, 5).join(' ')}`);
-  return { company: state.company, clients: state.clients, documents: state.documents, payments: state.payments, ...(Object.hasOwn(state, 'expenses') ? { expenses: state.expenses } : {}) };
+  return { company: state.company, clients: state.clients, documents: state.documents, payments: state.payments,
+    ...(Object.hasOwn(state, 'expenses') ? { expenses: state.expenses } : {}),
+    ...(Object.hasOwn(state, 'taxRecords') ? { taxRecords: state.taxRecords } : {}) };
 }
 
 /** Invalid or future activity times fail closed; a caller cannot extend the 30-minute cap. */

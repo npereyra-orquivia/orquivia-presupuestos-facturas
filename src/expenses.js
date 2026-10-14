@@ -5,9 +5,13 @@ const MAX_MONEY_CENTS = BigInt(Number.MAX_SAFE_INTEGER);
 /** Reviewing the voucher and confirming its fiscal VAT breakdown are separate. */
 export function expenseNeedsReview(expense) {
   const recordedUnknown = ['included-unitemized', 'not-stated'].includes(expense.vatDocumentStatus);
-  return Boolean(expense.reviewNeeded || (expense.vatReviewNeeded && !recordedUnknown) || !(expense.attachments || []).length);
+  const missingAcknowledged = !(expense.attachments || []).length
+    && typeof expense.missingReceiptReason === 'string' && Boolean(expense.missingReceiptReason.trim());
+  return Boolean(expense.reviewNeeded || (expense.vatReviewNeeded && !recordedUnknown && !missingAcknowledged)
+    || (!(expense.attachments || []).length && !missingAcknowledged));
 }
 export function expenseVATLabel(expense) {
+  if (!(expense.attachments || []).length && typeof expense.missingReceiptReason === 'string' && expense.missingReceiptReason.trim()) return 'Sin justificante · IVA sin confirmar · para el gestor';
   if (expense.vatDocumentStatus === 'included-unitemized') return 'IVA incluido, sin desglose · para el gestor';
   if (expense.vatDocumentStatus === 'not-stated') return 'Justificante sin datos de IVA · para el gestor';
   return expense.vatReviewNeeded ? 'Por revisar: base e IVA sin confirmar' : 'Registrado';
@@ -79,6 +83,12 @@ export function expenseCashMovements(expense) {
   return movements.filter((entry) => validDate(entry.date)).map((entry) => ({ ...entry, expenseId: expense.id }));
 }
 
+/** Filing does not prove a bank payment. Linked supplier payments are counted once. */
+export function taxCashMovements(record) {
+  if (record.paymentStatus !== 'paid' || !validDate(record.paidDate) || !record.amount) return [];
+  return [{ taxRecordId: record.id, date: record.paidDate, amount: record.amount }];
+}
+
 /** A convenience for manual entry; callers may replace this with the VAT printed on a receipt. */
 export function suggestedExpenseVAT(base, rate = 21) {
   const baseCents = positiveCents(base), rateHundredths = positiveCents(rate);
@@ -141,7 +151,9 @@ export function periodRange(state, period = {}) {
   const invoices = issuedInvoices(state), invoiceIds = new Set(invoices.map((entry) => entry.id));
   const dates = [...invoices.map((entry) => entry.date), ...(state?.expenses ?? []).map((entry) => entry.date),
     ...(state?.payments ?? []).filter((entry) => invoiceIds.has(entry.documentId)).map((entry) => entry.date),
-    ...(state?.expenses ?? []).flatMap(expenseCashMovements).map((entry) => entry.date)]
+    ...(state?.expenses ?? []).flatMap(expenseCashMovements).map((entry) => entry.date),
+    ...(state?.taxRecords ?? []).map((entry) => entry.date),
+    ...(state?.taxRecords ?? []).flatMap(taxCashMovements).map((entry) => entry.date)]
     .filter(validDate).sort();
   return { type: 'all', from: dates[0] ?? null, to: dates.at(-1) ?? null, label: 'Todo el histórico' };
 }
@@ -155,8 +167,11 @@ export function periodReport(state, period) {
   }));
   const expenses = (state?.expenses ?? []).filter((expense) => inRange(expense.date, range))
     .map((expense) => ({ ...expense, amounts: expenseTotals(expense) }));
+  const taxRecords = (state?.taxRecords ?? []).filter((record) => range.type === 'all'
+    || (record.year === range.year && (range.type !== 'quarter' || record.quarter === range.quarter)));
   const payments = (state?.payments ?? []).filter((payment) => invoiceIds.has(payment.documentId) && inRange(payment.date, range));
   const expensePayments = (state?.expenses ?? []).flatMap(expenseCashMovements).filter((entry) => inRange(entry.date, range));
+  const taxPayments = (state?.taxRecords ?? []).flatMap(taxCashMovements).filter((entry) => inRange(entry.date, range));
   const paidExpenseIds = new Set(expensePayments.map((entry) => entry.expenseId));
   const paidExpenses = (state?.expenses ?? []).filter((expense) => paidExpenseIds.has(expense.id));
   const sum = (records, value) => euros(records.reduce((total, record) => total + cents(value(record)), 0n));
@@ -169,7 +184,12 @@ export function periodReport(state, period) {
     expenseBase: sum(knownVATExpenses, (entry) => entry.amounts.base), inputVATRecorded: sum(knownVATExpenses, (entry) => entry.amounts.vatAmount),
     inputVATConfirmed: sum(knownVATExpenses, (entry) => entry.amounts.vatDeductibleAmount), expenseTotal: sum(expenses, (entry) => entry.amounts.total),
     additionalTotal: sum(expenses, (entry) => entry.amounts.additionalAmount ?? 0),
-    cashReceived: sum(payments, (entry) => entry.amount), cashPaid: sum(expensePayments, (entry) => entry.amount),
+    cashReceived: sum(payments, (entry) => entry.amount), cashPaidExpenses: sum(expensePayments, (entry) => entry.amount),
+    cashPaidTaxes: sum(taxPayments, (entry) => entry.amount),
+    cashPaid: sum([...expensePayments, ...taxPayments], (entry) => entry.amount),
+    taxRecordCount: taxRecords.length, taxDeclaredTotal: sum(taxRecords, (entry) => entry.amount),
+    taxUnconfirmedCount: taxRecords.filter((entry) => entry.paymentStatus === 'unconfirmed').length,
+    taxAttachmentsCount: taxRecords.reduce((total, entry) => total + (entry.attachments?.length ?? 0), 0),
     reviewCount: invoices.filter((entry) => entry.reviewRequired || entry.paymentReviewNeeded).length
       + expenses.filter(expenseNeedsReview).length,
     vatReviewCount: vatReviewExpenses.length,
@@ -181,7 +201,7 @@ export function periodReport(state, period) {
   // A registered operating comparison, before invoice withholding. Unknown VAT
   // would overstate costs if its provisional gross amount were treated as a base.
   summary.activityDifference = vatReviewExpenses.length ? null : euros(cents(summary.salesBase) - cents(summary.expenseBase));
-  return { ...range, invoices, expenses, payments, paidExpenses, expensePayments, summary };
+  return { ...range, invoices, expenses, taxRecords, payments, paidExpenses, expensePayments, taxPayments, summary };
 }
 
 export function quarterlyReport(state, year, quarter) {
@@ -201,18 +221,23 @@ export function cashSummary(state, asOf = todayISO()) {
   const receivedCents = allPayments.filter((payment) => inCashWindow(payment.date)).reduce((sum, payment) => sum + positiveCents(payment.amount), 0n);
   const paidCents = (state?.expenses ?? []).flatMap(expenseCashMovements).filter((entry) => inCashWindow(entry.date))
     .reduce((sum, entry) => sum + cents(entry.amount), 0n);
+  const taxPaidCents = (state?.taxRecords ?? []).flatMap(taxCashMovements).filter((entry) => inCashWindow(entry.date))
+    .reduce((sum, entry) => sum + cents(entry.amount), 0n);
   const pendingInvoices = invoices.filter((invoice) => invoice.date <= asOf && invoice.paymentReviewNeeded !== true);
   const pendingReceivablesCents = pendingInvoices.reduce((sum, invoice) => sum + cents(outstanding(invoice, allPayments)), 0n);
   const pendingExpensesCents = (state?.expenses ?? []).filter((expense) => expense.date <= asOf)
     .reduce((sum, expense) => sum + (expense.paymentStatus === 'pending' ? cents(expenseCashAmount(expense))
       : expenseCashMovements(expense).filter((entry) => entry.date > asOf).reduce((remaining, entry) => remaining + cents(entry.amount), 0n)), 0n);
   const openingCents = configured ? cents(company.openingBalance) : 0n;
-  const balanceCents = openingCents + receivedCents - paidCents;
+  const pendingTaxCents = (state?.taxRecords ?? []).filter((record) => record.date <= asOf)
+    .reduce((sum, record) => sum + (record.paymentStatus === 'pending' ? positiveCents(record.amount)
+      : taxCashMovements(record).filter(entry => entry.date > asOf).reduce((future, entry) => future + cents(entry.amount), 0n)), 0n);
+  const balanceCents = openingCents + receivedCents - paidCents - taxPaidCents;
   return { asOf, configured, openingBalance: configured ? euros(openingCents) : null,
-    openingBalanceDate: configured ? start : null, received: euros(receivedCents), paidExpenses: euros(paidCents),
-    netMovement: euros(receivedCents - paidCents), balance: configured ? euros(balanceCents) : null,
-    pendingReceivables: euros(pendingReceivablesCents), pendingExpenses: euros(pendingExpensesCents),
-    forecastBalance: configured ? euros(balanceCents + pendingReceivablesCents - pendingExpensesCents) : null,
+    openingBalanceDate: configured ? start : null, received: euros(receivedCents), paidExpenses: euros(paidCents), paidTaxes: euros(taxPaidCents),
+    netMovement: euros(receivedCents - paidCents - taxPaidCents), balance: configured ? euros(balanceCents) : null,
+    pendingReceivables: euros(pendingReceivablesCents), pendingExpenses: euros(pendingExpensesCents), pendingTaxes: euros(pendingTaxCents),
+    forecastBalance: configured ? euros(balanceCents + pendingReceivablesCents - pendingExpensesCents - pendingTaxCents) : null,
     unconfirmedInvoices: invoices.filter((invoice) => invoice.date <= asOf && invoice.paymentReviewNeeded === true).length,
   };
 }
@@ -232,13 +257,14 @@ export function reportCSV(state, period) {
   const headers = ['Tipo', 'Fecha documento', 'Número / referencia', 'Cliente / proveedor', 'NIF', 'Concepto',
     'Base (€)', 'IVA (€)', 'Retención (€)', 'Total (€)', 'IVA soportado confirmado (€)', 'Estado pago actual',
     'Fecha pago gasto', 'Notas', 'Justificantes', 'Revisión pendiente', 'Estado IVA', 'Suplidos / otros importes sin IVA (€)',
-    'Importe de caja del gasto (€)', 'Movimientos de caja del gasto'];
+    'Importe de caja del registro (€)', 'Movimientos de caja del registro', 'Motivo de falta de justificante',
+    'Modelo fiscal', 'Ejercicio fiscal', 'Trimestre fiscal'];
   const rows = report.invoices.map((invoice) => ['Factura emitida', invoice.date, invoice.number,
     invoice.client.name, invoice.client.taxId ?? '', invoice.title || invoice.items.map((entry) => entry.description).join(' | '),
     decimalCSV(invoice.amounts.base), decimalCSV(invoice.amounts.vatAmount), decimalCSV(invoice.amounts.withholdingAmount),
     decimalCSV(invoice.amounts.total), '', ({ review: 'Por confirmar', paid: 'Cobrado', partial: 'Cobro parcial',
       overdue: 'Vencido', issued: 'Pendiente' })[status(invoice, state.payments)] ?? invoice.status, '',
-    invoice.notes ?? '', '', invoice.reviewRequired || invoice.paymentReviewNeeded ? 'Sí' : 'No', 'Registrado', '', '', '']);
+    invoice.notes ?? '', '', invoice.reviewRequired || invoice.paymentReviewNeeded ? 'Sí' : 'No', 'Registrado', '', '', '', '', '', '', '']);
   rows.push(...report.expenses.map((expense) => [expense.kind === 'credit' ? 'Abono de proveedor' : 'Gasto recibido', expense.date, expense.reference ?? '', expense.supplier ?? '',
     expense.supplierTaxId ?? '', expense.description,
     expense.vatReviewNeeded ? '' : decimalCSV(expense.amounts.base), expense.vatReviewNeeded ? '' : decimalCSV(expense.amounts.vatAmount), '0,00',
@@ -248,7 +274,15 @@ export function reportCSV(state, period) {
     (expense.attachments ?? []).map((attachment) => attachment.name).join(' | '), expenseNeedsReview(expense) ? 'Sí' : 'No',
     expenseVATLabel(expense), decimalCSV(expense.amounts.additionalAmount ?? 0),
     decimalCSV(expenseCashAmount(expense)), expenseCashMovements(expense).map((entry) =>
-      `${entry.date}: ${decimalCSV(entry.amount)}${entry.reference ? ` (${entry.reference})` : ''}`).join(' | ')]));
+      `${entry.date}: ${decimalCSV(entry.amount)}${entry.reference ? ` (${entry.reference})` : ''}`).join(' | '), expense.missingReceiptReason ?? '', '', '', '']));
+  rows.push(...report.taxRecords.map((record) => ['Declaración fiscal', record.date, record.reference ?? '', 'Agencia Tributaria', '',
+    `Modelo ${record.model} · ${record.year} T${record.quarter}`, '', '', '', decimalCSV(record.amount), '',
+    ({ 'no-payment': 'Sin ingreso: resultado cero', unconfirmed: 'Pago por confirmar', pending: 'Pendiente de pago',
+      paid: record.amount < 0 ? 'Devolución cobrada' : 'Pagado', included: 'Incluido en otro gasto' })[record.paymentStatus],
+    record.paidDate ?? '', [record.notes, record.linkedExpenseId ? `Pago incluido en gasto ${record.linkedExpenseId}` : ''].filter(Boolean).join(' | '),
+    (record.attachments ?? []).map(attachment => attachment.name).join(' | '), record.paymentStatus === 'unconfirmed' ? 'Sí' : 'No',
+    'Declaración fiscal · fuera del IVA de gastos', '', decimalCSV(record.paymentStatus === 'paid' ? record.amount : 0),
+    taxCashMovements(record).map(entry => `${entry.date}: ${decimalCSV(entry.amount)}`).join(' | '), '', record.model, record.year, record.quarter]));
   return '\uFEFF' + [headers, ...rows].map((row) => row.map(safeCSV).join(';')).join('\r\n') + '\r\n';
 }
 

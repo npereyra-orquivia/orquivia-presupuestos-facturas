@@ -13,6 +13,7 @@
 .expense-quick-form .expense-payment-warning{color:#ad775b;background:#fff8ed;border:1px solid #f1e3ce;padding:10px 12px;border-radius:7px;font-size:10px}
 .expense-review-choice{padding:12px 14px;border-radius:8px;border:1px solid #e3e9db;background:#f5f8f0;font-size:10px;color:#7b8d70;line-height:1.8}.expense-review-choice p{margin-bottom:8px}.expense-review-choice button{font-size:11px}.expense-review-choice [role=status]{display:block;color:#65845a}.expense-list .expense-vat-document-label{font-size:9px;color:#7d8f72;margin-top:6px}
 .expense-filter-help{padding:12px 24px;border-bottom:1px solid #edf0e9;font-size:10px;line-height:1.7;color:#819078;background:#fafcf8}
+.expense-missing-choice{margin-top:14px;padding:13px 14px;border:1px solid #e7e3d8;border-radius:8px;background:#fbfaf5}.expense-missing-choice>.checkbox-label{font-size:11px;color:#746f5c}.expense-missing-choice .field{margin-top:13px}.expense-missing-choice .field>span{font-size:10px}.expense-missing-choice textarea{font-size:12px;line-height:1.6;min-height:78px;resize:vertical}.expense-missing-choice .field-hint{margin:9px 0 0;font-size:10px;line-height:1.7;color:#8b8879}.expense-list .expense-missing-label{font-size:9px;color:#a7825e;margin-top:6px}
 .expense-editor-layout{display:grid;grid-template-columns:minmax(0,.85fr) minmax(0,1.15fr);gap:24px;align-items:start}
 .expense-editor-layout .expense-quick-form{min-width:0}
 .expense-editor-actions .button{font-size:11px}

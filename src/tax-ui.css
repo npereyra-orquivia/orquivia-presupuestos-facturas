@@ -1,0 +1,8 @@
+.tax-register{margin-top:24px}.tax-register .card-header p{max-width:700px}
+.tax-file-list{display:grid;gap:8px;margin:14px 0}.tax-file-list button{padding:10px 12px;border:1px solid var(--border);border-radius:9px;background:#fff;text-align:left;overflow-wrap:anywhere;color:var(--text)}
+.tax-file-list button.is-selected{border-color:var(--primary);background:var(--sage-light,#f1f5ef)}
+.tax-file-row{display:flex;align-items:center;gap:10px}.tax-file-row>button:first-child{flex:1;min-width:0}.tax-file-row .tax-remove-pending{flex:0 0 auto}
+.tax-editor-layout{display:grid;grid-template-columns:minmax(300px,.9fr) minmax(360px,1.1fr);gap:24px;align-items:start}
+.tax-preview{min-width:0;background:#f7f8f5;border:1px solid var(--border);border-radius:12px;padding:14px;position:sticky;top:0}
+.tax-editor-actions{margin-top:22px}.tax-editor .field-hint{line-height:1.6}.tax-link-explanation{border-radius:8px;background:#f5f6f2;padding:12px;font-size:13px;line-height:1.6}
+@media(max-width:900px){.tax-editor-layout{grid-template-columns:1fr}.tax-preview{position:static}.tax-register .card-header{flex-wrap:wrap;gap:14px}}

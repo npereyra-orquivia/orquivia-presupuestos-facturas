@@ -33,6 +33,32 @@ function attachment(overrides = {}) {
     mimeType: 'application/pdf', size: 230, ...overrides };
 }
 
+test('acknowledged missing receipts record real cash without inventing VAT evidence', () => {
+  const e = expense({ base: 13, vatAmount: 0, total: 13, vatRate: undefined, vatDeductibleAmount: 0,
+    vatReviewNeeded: true, vatDocumentStatus: 'not-stated', reviewNeeded: false,
+    missingReceiptReason: 'Bebida de networking; no pedí el ticket.', paymentStatus: 'paid', paidDate: '2026-03-31' });
+  const state = workspace({ expenses: [e], company: { name: 'Orquívia', openingBalance: 100, openingBalanceDate: '2026-03-01' } });
+  assert.deepEqual(validateWorkspace(state, TODAY), []);
+  assert.equal(expenseNeedsReview(e), false);
+  assert.equal(expenseNeedsReview({ ...e, missingReceiptReason: '' }), true);
+  assert.equal(expenseNeedsReview({ ...e, reviewNeeded: true }), true);
+  assert.equal(cashSummary(state, TODAY).balance, 87);
+  const summary = periodReport(state, { type: 'all' }).summary;
+  assert.equal(summary.reviewCount, 0);
+  assert.equal(summary.vatReviewCount, 1);
+  assert.equal(summary.inputVATRecorded, 0);
+  assert.equal(summary.inputVATConfirmed, 0);
+  assert.equal(summary.expenseBase, 0);
+  assert.match(reportCSV(state, { type: 'all' }), /Bebida de networking; no pedí el ticket/);
+  assert.match(reportCSV(state, { type: 'all' }), /Sin justificante · IVA sin confirmar/);
+  assert.equal(prepareRestore(JSON.parse(JSON.stringify(state)), { today: TODAY }).expenses[0].missingReceiptReason, e.missingReceiptReason);
+  for (const change of [{ missingReceiptReason: '' }, { missingReceiptReason: ' ' }, { missingReceiptReason: null },
+    { missingReceiptReason: 'A'.repeat(2001) }, { vatReviewNeeded: false }, { vatRate: 0 },
+    { vatAmount: 1, base: 12 }, { vatDeductibleAmount: 1 }]) {
+    assert.ok(validateWorkspace(workspace({ expenses: [{ ...e, ...change }] }), TODAY).length, JSON.stringify(change));
+  }
+});
+
 test('a reviewed voucher with undisclosed VAT keeps unknown tax amounts and its real cash payment', () => {
   for (const vatDocumentStatus of ['included-unitemized', 'not-stated']) {
     const e = expense({ total: 2.41, base: 2.41, vatAmount: 0, vatRate: undefined, vatReviewNeeded: true,
