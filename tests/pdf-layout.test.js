@@ -34,7 +34,7 @@ test('quote PDF shows a grouped pre-VAT total and note without altering its stor
   const original = structuredClone(doc);
   const { text } = await readPDF(doc);
   assert.match(text, /6\.000,00 €/);
-  assert.match(text, /Base imponible 5\.400,00 €/);
+  assert.match(text, /Importe sin IVA 5\.400,00 €/);
   assert.match(text, /Retención 15% - 810,00 €/);
   assert.match(text, /4\.590,00 €/);
   assert.match(text, /IVA no incluido/);
