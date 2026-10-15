@@ -9,3 +9,8 @@ verify_jwt = false
 # Public GET exposes only the VAPID public key. POST requires the private cron
 # secret, verified by the function against its service-only configuration RPC.
 verify_jwt = false
+
+[functions.document-mail]
+# Authentication is verified with Auth.getUser in the function, then AAL2 and
+# active membership are required. Legacy-secret-only JWT checks are redundant.
+verify_jwt = false

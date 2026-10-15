@@ -1,0 +1,122 @@
+import { PGlite } from '@electric-sql/pglite';
+import { readFile } from 'node:fs/promises';
+import assert from 'node:assert/strict';
+import { emptyState } from '../../src/demo.js';
+
+const db = await PGlite.create();
+const user='10000000-0000-4000-8000-000000000001', editor='10000000-0000-4000-8000-000000000002', org='20000000-0000-4000-8000-000000000001', job='30000000-0000-4000-8000-000000000001';
+let checks=0;
+const query=async(sql,params=[])=>(await db.query(sql,params)).rows;
+const equal=(a,b)=>{assert.deepEqual(a,b);++checks;};
+const deny=async(sql,params=[])=>{await assert.rejects(db.query(sql,params));++checks;};
+const as=async(role,owner=user)=>{await db.exec(`reset role;set role ${role}`);await db.query("select set_config('request.jwt.claims',$1,false)",[JSON.stringify({sub:owner,role,aal:'aal2'})]);};
+try {
+  await db.exec(`create role anon; create role authenticated; create role service_role bypassrls;
+    create schema auth;create table auth.users(id uuid primary key,email text);
+    create table auth.mfa_factors(id uuid primary key default gen_random_uuid(),user_id uuid references auth.users(id),status text);
+    create function auth.jwt() returns jsonb language sql stable as $$select coalesce(nullif(current_setting('request.jwt.claims',true),''),'{}')::jsonb$$;
+    create function auth.uid() returns uuid language sql stable as $$select (auth.jwt()->>'sub')::uuid$$;
+    grant usage on schema auth to anon,authenticated,service_role;
+    grant execute on function auth.uid(),auth.jwt() to anon,authenticated,service_role;
+    grant select on auth.users to service_role;
+    insert into auth.users values('${user}','owner@example.test'),('${editor}','editor@example.test');
+    insert into auth.mfa_factors(user_id,status) values('${user}','verified'),('${editor}','verified');
+    create schema storage;
+    create table storage.buckets(id text primary key,name text not null,public boolean not null default false,file_size_limit bigint,allowed_mime_types text[]);
+    create table storage.objects(id uuid primary key default gen_random_uuid(),bucket_id text references storage.buckets(id),name text not null,metadata jsonb,unique(bucket_id,name));
+    alter table storage.objects enable row level security;
+    grant usage on schema storage to anon,authenticated,service_role;
+    grant select,insert,update,delete on storage.objects to anon,authenticated;
+    grant all on storage.objects,storage.buckets to service_role;
+    -- Synthetic Vault adapter only for this in-memory SQL permissions test.
+    -- Production installs the real encrypted Supabase Vault extension.
+    create schema vault;create table vault.secrets(id uuid primary key default gen_random_uuid(),secret text);
+    create view vault.decrypted_secrets as select id,secret decrypted_secret from vault.secrets;
+    create function vault.create_secret(value text) returns uuid language plpgsql as $$declare result uuid;begin insert into vault.secrets(secret) values(value) returning id into result;return result;end$$;
+    create function vault.update_secret(secret_id uuid,value text) returns void language sql as $$update vault.secrets set secret=value where id=secret_id$$;`);
+  for(const name of ['202610130001_orquivia.sql','202610140002_team_production.sql','202610140003_expenses.sql','202610140004_personal_profiles.sql','202610140006_personal_identity.sql','202610140007_expense_quick_entry.sql','202610140008_vat_document_status.sql','202610140009_record_history.sql','202610140010_tax_records_missing_receipts.sql','202610150011_prepared_quotes.sql']) await db.exec(await readFile(new URL('../migrations/'+name,import.meta.url),'utf8'));
+  const migration=await readFile(new URL('../migrations/202610150012_document_mail.sql',import.meta.url),'utf8');
+  await db.exec(migration.replace('create extension if not exists supabase_vault with schema vault;',''));
+  await db.exec(await readFile(new URL('../migrations/202610150013_mail_recipients.sql',import.meta.url),'utf8'));
+  await as('service_role');await db.query('select public.bootstrap_orquivia_team($1,$2,$3,$4)',[user,editor,'Fixture company',org]);
+  const state=emptyState();state.clients=[{id:'client',name:'Fixture client',email:'client@example.test'}];state.documents=[{id:'quote',kind:'quote',number:'',status:'draft',clientId:'client',date:'2025-05-01',dueDate:'',items:[{description:'Synthetic service',quantity:1,price:100}],vat:21,discount:0,withholding:0}];
+  state.documents.push({...state.documents[0],id:'quote-partial'});
+  await as('authenticated');let workspace=(await query('select public.load_orquivia_workspace() result'))[0].result;
+  let saved=(await query('select public.save_orquivia_team_state($1,$2,$3) result',[org,state,workspace.version]))[0].result;
+  let issued=(await query('select public.issue_orquivia_document($1,$2,$3) result',[org,'quote',saved.version]))[0].result;
+  issued=(await query('select public.issue_orquivia_document($1,$2,$3) result',[org,'quote-partial',issued.version]))[0].result;
+  const profileSQL='select public.orquivia_mail_profile($1,$2,$3) result';
+  await deny(profileSQL,[user,org,true]);await deny('select * from orquivia_private.mail_jobs');await deny('select * from vault.decrypted_secrets');
+  await deny('select public.orquivia_mail_claim($1,$2,$3,$4,$5,$6,$7,$8,$9)',[user,org,job,'quote',issued.version,'hash',['client@example.test'],'Subject',[]]);
+  await deny('select public.orquivia_mail_complete($1,$2,$3,$4,$5)',[user,org,job,'uncertain',null]);
+  await as('anon');await deny(profileSQL,[user,org,false]);
+  await deny('select public.orquivia_mail_claim($1,$2,$3,$4,$5,$6,$7,$8,$9)',[user,org,job,'quote',issued.version,'hash',['client@example.test'],'Subject',[]]);
+  await deny('select public.orquivia_mail_complete($1,$2,$3,$4,$5)',[user,org,job,'uncertain',null]);
+  await as('service_role');
+  equal((await query("select count(*)::int count from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname='public' and p.proname='orquivia_mail_claim'"))[0].count,1);
+  equal((await query("select count(*)::int count from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname='public' and p.proname='orquivia_mail_complete'"))[0].count,1);
+  let profile=(await query(profileSQL,[user,org,false]))[0].result;equal(profile.connected,false);equal(profile.version,0);
+  const signature={name:'Fixture owner',role:'Director',phone:'123456789'};
+  profile=(await query('select public.orquivia_mail_save_profile($1,$2,$3,$4,$5,$6,$7,$8) result',[user,org,0,signature,'serviciodecorreo','synthetic-test-secret','Sent',false]))[0].result;
+  equal(profile.connected,true);equal(profile.version,1);equal(profile.password,undefined);
+  equal((await query(profileSQL,[user,org,true]))[0].result.password,'synthetic-test-secret');
+  await deny('select public.orquivia_mail_save_profile($1,$2,$3,$4)',[user,org,0,signature]);
+  const claimSQL='select public.orquivia_mail_claim($1,$2,$3,$4,$5,$6,$7,$8) result';
+  const claim=[user,org,job,'quote',issued.version,'fixture-hash',['client@example.test'],'Fixture subject'];
+  await deny(claimSQL,[...claim.slice(0,4),999,...claim.slice(5)]);
+  let result=(await query(claimSQL,claim))[0].result;equal(result.existing,false);equal(result.document.status,'ready');
+  equal(result.job.cc,[]);
+  result=(await query(claimSQL,claim))[0].result;equal(result.existing,true);
+  await deny(claimSQL,[editor,...claim.slice(1)]);
+  await deny(claimSQL,[user,org,'30000000-0000-4000-8000-000000000002',...claim.slice(3)]);
+  const raw=Buffer.from('exact synthetic MIME').toString('base64');
+  await query('select public.orquivia_mail_store_message($1,$2,$3,$4,$5,$6)',[user,org,job,raw,'<fixture@example.test>','pdf-sha256']);
+  await deny('select public.orquivia_mail_store_message($1,$2,$3,$4,$5,$6)',[user,org,job,Buffer.from('different MIME').toString('base64'),'<changed@example.test>','changed-hash']);
+  const completeSQL='select public.orquivia_mail_complete($1,$2,$3,$4) result';
+  result=(await query(completeSQL,[user,org,job,'archive_pending']))[0].result;
+  equal(result.job.status,'archive_pending');equal(result.workspace.version,Number(issued.version)+1);equal(result.workspace.state.documents[0].status,'sent');
+  equal((await query('select public.orquivia_mail_archive_claim($1,$2,$3) result',[user,org,job]))[0].result.raw.replace(/\s/g,''),raw);
+  await deny('select public.orquivia_mail_archive_claim($1,$2,$3)',[user,org,job]);
+  result=(await query(completeSQL,[user,org,job,'sent']))[0].result;equal(result.job.status,'sent');
+  await as('authenticated');workspace=(await query('select public.load_orquivia_workspace() result'))[0].result;equal(workspace.version,Number(issued.version)+1);
+  await as('service_role');
+  const audit=await query("select actor_id,event from public.orquivia_audit_log where event='email_sent'");equal(audit.length,1);equal(audit[0].actor_id,user);
+  // A new UUID is an intentional new message for the same already-sent quote.
+  // Replaying either UUID cannot create another job or another state change.
+  const multiSQL='select public.orquivia_mail_claim($1,$2,$3,$4,$5,$6,$7,$8,$9) result';
+  const secondJob='30000000-0000-4000-8000-000000000002',partialJob='30000000-0000-4000-8000-000000000003';
+  const multi=[user,org,secondJob,'quote',workspace.version,'second-hash',['client@example.test','second@example.test'],'Another recipient',['copy@example.test']];
+  result=(await query(multiSQL,multi))[0].result;equal(result.existing,false);equal(result.job.to,multi[6]);equal(result.job.cc,multi[8]);
+  equal((await query(multiSQL,multi))[0].result.existing,true);
+  await deny(multiSQL,[...multi.slice(0,5),'different-hash',...multi.slice(6)]);
+  await query('select public.orquivia_mail_store_message($1,$2,$3,$4,$5,$6)',[user,org,secondJob,raw,'<second@example.test>','second-pdf-hash']);
+  result=(await query(completeSQL,[user,org,secondJob,'archive_pending']))[0].result;equal(result.workspace,undefined);
+  await query(completeSQL,[user,org,secondJob,'sent']);
+  const history=(await query('select public.orquivia_mail_history($1,$2,$3) result',[user,org,'quote']))[0].result.history;
+  equal(history.length,2);equal(history.find(entry=>entry.id===secondJob).cc,['copy@example.test']);
+  equal((await query("select count(*)::int count from public.orquivia_audit_log where event='email_sent'"))[0].count,1);
+  // Database validation remains independent from the Edge parser.
+  const partial=[user,org,partialJob,'quote-partial',workspace.version,'partial-hash',['client@example.test'],'Partial fixture',['copy@example.test']];
+  for(const [to,cc] of [[[],[]],[['client@example.test'],['CLIENT@example.test']],[Array.from({length:20},(_,i)=>`person${i}@example.test`),['extra@example.test']],[['client@example.test\r\nBcc: injected@example.test'],[]]]) {
+    await deny(multiSQL,[...partial.slice(0,6),to,partial[7],cc]);
+  }
+  result=(await query(multiSQL,partial))[0].result;equal(result.document.status,'ready');
+  await query('select public.orquivia_mail_store_message($1,$2,$3,$4,$5,$6)',[user,org,partialJob,raw,'<partial@example.test>','partial-pdf-hash']);
+  const delivery={errorCode:'SMTP_PARTIAL',accepted:['client@example.test'],rejected:['copy@example.test']};
+  await deny('select public.orquivia_mail_complete($1,$2,$3,$4,$5)',[user,org,partialJob,'uncertain',{...delivery,rejected:['unrequested@example.test']}]);
+  result=(await query('select public.orquivia_mail_complete($1,$2,$3,$4,$5) result',[user,org,partialJob,'uncertain',delivery]))[0].result;
+  equal(result.job.status,'uncertain');equal(result.job.errorCode,'SMTP_PARTIAL');equal(result.job.accepted,delivery.accepted);equal(result.job.rejected,delivery.rejected);equal(result.workspace,undefined);
+  await db.exec('reset role');
+  equal((await query('select encode(raw_message,\'base64\') raw from orquivia_private.mail_jobs where id=$1',[partialJob]))[0].raw.replace(/\s/g,''),raw);
+  await as('service_role');
+  equal((await query(multiSQL,partial))[0].result.existing,true);
+  await deny(multiSQL,[user,org,'30000000-0000-4000-8000-000000000004',...partial.slice(3)]);
+  await as('authenticated');
+  const unchanged=(await query('select public.load_orquivia_workspace() result'))[0].result;
+  equal(unchanged.version,workspace.version);equal(unchanged.state.documents.find(document=>document.id==='quote-partial').status,'ready');
+  await as('service_role');
+  await query('update public.orquivia_memberships set active=false where user_id=$1',[editor]);
+  await deny(profileSQL,[editor,org,true]);
+  console.log(`PASS ${checks} SQL mail checks: private credentials, member boundaries, CAS, To/Cc, intentional resend, duplicate claims, immutable copies, partial delivery, archive leases and one audited status update.`);
+} catch(error) { console.error(error.code,error.message,error.where||'',error.position||'');process.exitCode=1; }
+finally {await db.close();}

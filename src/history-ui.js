@@ -1,4 +1,5 @@
 import { escapeHTML as esc, money } from './domain.js';
+import { mailStatus } from './mail-domain.js';
 
 const fields = {
   kind: 'Tipo', number: 'Número', clientId: 'Cliente', date: 'Fecha', dueDate: 'Vencimiento / validez',
@@ -49,9 +50,77 @@ export function renderHistoryEntries(entries) {
   if (!entries.length) return '<p class="record-history-empty">Aún no hay cambios en el historial detallado de este registro. Los cambios anteriores siguen disponibles en el historial general de Configuración.</p>';
   return `<ol class="record-history-list">${entries.map(entry => `<li><strong>${esc(entry.actorEmail || 'Cuenta autorizada')}</strong><span>${esc(historyAction(entry))} · ${esc(dateTime(entry.createdAt))}</span><small>${esc([...new Set(entry.changedFields || [])].map(historyFieldLabel).join(', ') || 'Sin cambios de campos')} · versión ${esc(String(entry.workspaceVersion ?? '—'))}</small></li>`).join('')}</ol>`;
 }
-export function recordHistoryMarkup(entityType, entityId) {
+const text = value => typeof value === 'string' ? value : '';
+const timestamp = value => {
+  if (typeof value !== 'string' || !value.trim()) return null;
+  const date = new Date(value);
+  return Number.isFinite(date.getTime()) ? date.getTime() : null;
+};
+const addressKey = value => text(value).trim().toLowerCase();
+const recipientText = value => Array.isArray(value) ? value.filter(item => typeof item === 'string').join(', ') : text(value);
+
+/** Project only the public history fields; credentials and raw MIME never enter the view model. */
+export function mergeRecordHistory(entries = [], jobs = []) {
+  if (!Array.isArray(entries) || !Array.isArray(jobs)) throw new Error('El historial recibido no es válido.');
+  const changes = entries.map((entry, index) => ({
+    kind: 'change', id: `change:${entry.id ?? `${entry.entityType}:${entry.entityId}:${entry.createdAt}:${index}`}`,
+    historyId: entry.id, entityType: entry.entityType, entityId: entry.entityId, actorEmail: text(entry.actorEmail),
+    action: entry.action, event: entry.event, changedFields: Array.isArray(entry.changedFields) ? [...new Set(entry.changedFields.filter(field => typeof field === 'string'))] : [],
+    workspaceVersion: entry.workspaceVersion, createdAt: entry.createdAt,
+  }));
+  const mailById = new Map();
+  for (const job of jobs) {
+    if (typeof job?.id !== 'string' || !job.id.trim() || job.id.length > 160 || /[\u0000-\u001f\u007f]/.test(job.id)) throw new Error('El historial de envíos recibido no es válido.');
+    if (mailById.has(job.id)) continue;
+    mailById.set(job.id, {
+      kind: 'mail', id: `mail:${job.id}`, jobId: job.id, documentId: text(job.documentId),
+      sender: text(job.sender || job.from), to: recipientText(job.to), cc: recipientText(job.cc), subject: text(job.subject),
+      status: text(job.status), partial: job.errorCode === 'SMTP_PARTIAL', accepted: recipientText(job.accepted), rejected: recipientText(job.rejected),
+      createdAt: timestamp(job.sentAt) !== null ? job.sentAt : job.createdAt, requestedAt: job.createdAt,
+    });
+  }
+  const mail = [...mailById.values()], absorbed = new Set();
+  for (const change of changes) {
+    if (change.event !== 'email_sent' || change.entityType !== 'document' || change.action !== 'updated'
+      || change.changedFields.length !== 1 || change.changedFields[0] !== 'status'
+      || !addressKey(change.actorEmail) || timestamp(change.createdAt) === null) continue;
+    const candidates = mail.filter(entry => !entry.stateChange && !entry.partial && ['sent', 'archive_pending'].includes(entry.status)
+      && addressKey(entry.sender) === addressKey(change.actorEmail)
+      && (!entry.documentId || !change.entityId || entry.documentId === change.entityId)
+      && timestamp(entry.createdAt) !== null && Math.abs(timestamp(entry.createdAt) - timestamp(change.createdAt)) <= 5000)
+      .map(entry => ({ entry, distance: Math.abs(timestamp(entry.createdAt) - timestamp(change.createdAt)) }))
+      .sort((a, b) => a.distance - b.distance);
+    // A tie is ambiguous: keep the audit event rather than guessing a pairing.
+    if (!candidates.length || candidates[1]?.distance === candidates[0].distance) continue;
+    candidates[0].entry.stateChange = { historyId: change.historyId, workspaceVersion: change.workspaceVersion,
+      actorEmail: change.actorEmail, changedFields: change.changedFields, createdAt: change.createdAt };
+    absorbed.add(change);
+  }
+  return [...changes.filter(change => !absorbed.has(change)), ...mail].sort((a, b) => {
+    const difference = (timestamp(b.createdAt) ?? -Infinity) - (timestamp(a.createdAt) ?? -Infinity);
+    return Number.isNaN(difference) || difference === 0 ? a.id.localeCompare(b.id) : difference;
+  });
+}
+
+function mailHistoryEntry(entry) {
+  const status = mailStatus(entry.status), label = entry.partial ? 'Envío parcial · por revisar' : ({
+    sent: 'Correo enviado', archive_pending: 'Correo enviado · copia pendiente', failed: 'Correo no enviado',
+    uncertain: 'Resultado del envío por confirmar', sending: 'Envío en curso',
+  })[entry.status] || status.label;
+  const stateChange = entry.stateChange;
+  return `<li class="record-history-mail" data-history-id="${esc(entry.id)}"><strong>${esc(entry.sender || 'Cuenta autorizada')}</strong><span class="record-history-action">${esc(label)} · ${esc(dateTime(entry.createdAt))}</span><dl class="record-history-mail-fields"><div><dt>Para</dt><dd>${esc(entry.to || 'No disponible')}</dd></div>${entry.cc ? `<div><dt>CC</dt><dd>${esc(entry.cc)}</dd></div>` : ''}<div><dt>Asunto</dt><dd>${esc(entry.subject || 'Sin asunto')}</dd></div>${entry.status !== 'sent' || entry.partial ? `<div><dt>Estado</dt><dd>${esc(entry.partial ? 'El servidor aceptó solo algunos destinatarios. Revisa tu correo antes de repetir el envío.' : status.description)}</dd></div>` : ''}${entry.partial ? `<div><dt>Aceptados</dt><dd>${esc(entry.accepted || 'Por confirmar')}</dd></div><div><dt>Rechazados</dt><dd>${esc(entry.rejected || 'Por confirmar')}</dd></div>` : ''}</dl>${stateChange ? `<small data-history-audit-id="${esc(String(stateChange.historyId ?? ''))}">Estado del documento actualizado · ${esc(stateChange.changedFields.map(historyFieldLabel).join(', '))} · versión ${esc(String(stateChange.workspaceVersion ?? '—'))}</small>` : ''}</li>`;
+}
+
+export function renderUnifiedHistory(entries, jobs) {
+  const timeline = mergeRecordHistory(entries, jobs);
+  if (!timeline.length) return '<p class="record-history-empty">Aún no hay cambios ni envíos en el historial detallado de este registro. Los cambios anteriores siguen disponibles en el historial general de Configuración.</p>';
+  return `<ol class="record-history-list record-history-timeline">${timeline.map(entry => entry.kind === 'mail' ? mailHistoryEntry(entry)
+    : `<li data-history-id="${esc(entry.id)}"><strong>${esc(entry.actorEmail || 'Cuenta autorizada')}</strong><span>${esc(entry.event === 'email_sent' && entry.entityType === 'document' ? 'Estado marcado como enviado por correo' : historyAction(entry))} · ${esc(dateTime(entry.createdAt))}</span><small>${esc(entry.changedFields.map(historyFieldLabel).join(', ') || 'Sin cambios de campos')} · versión ${esc(String(entry.workspaceVersion ?? '—'))}</small></li>`).join('')}</ol>`;
+}
+
+export function recordHistoryMarkup(entityType, entityId, { includeMail = false } = {}) {
   if (!entityId) return '';
-  return `<details class="record-history" data-record-history data-entity-type="${esc(entityType)}" data-entity-id="${esc(entityId)}"><summary>Historial de cambios</summary><div data-history-content><p>Consulta quién ha editado este registro y qué campos cambió.</p></div><button type="button" class="text-button" data-history-refresh>Actualizar historial</button></details>`;
+  return `<details class="record-history" data-record-history data-entity-type="${esc(entityType)}" data-entity-id="${esc(entityId)}"${includeMail ? ' data-include-mail="true"' : ''}><summary>${includeMail ? 'Historial de cambios y envíos' : 'Historial de cambios'}</summary><div data-history-content><p>${includeMail ? 'Consulta quién editó este registro y el resultado de cada envío por correo.' : 'Consulta quién ha editado este registro y qué campos cambió.'}</p></div><button type="button" class="text-button" data-history-refresh>Actualizar historial</button></details>`;
 }
 export function bindRecordHistory(root, ctx) {
   const controllers = [...root.querySelectorAll('[data-record-history]')].map(details => {
@@ -65,9 +134,13 @@ export function bindRecordHistory(root, ctx) {
       if (mode !== 'cloud') { content.innerHTML = '<p>El historial compartido está disponible al trabajar con Supabase.</p>'; return; }
       content.innerHTML = '<p role="status">Cargando historial…</p>'; refresh.disabled = true;
       try {
-        const entries = await backend.recordHistory(details.dataset.entityType, details.dataset.entityId);
+        const includeMail = details.dataset.includeMail === 'true';
+        const [entries, jobs] = includeMail ? await Promise.all([
+          backend.recordHistory(details.dataset.entityType, details.dataset.entityId),
+          backend.mail.history(details.dataset.entityId),
+        ]) : [await backend.recordHistory(details.dataset.entityType, details.dataset.entityId), null];
         if (token !== request || !isActive()) return;
-        content.innerHTML = renderHistoryEntries(entries); loaded = true;
+        content.innerHTML = includeMail ? renderUnifiedHistory(entries, jobs) : renderHistoryEntries(entries); loaded = true;
       } catch (error) {
         if (token === request && isActive()) content.innerHTML = `<p role="alert">${esc(error.message)}</p>`;
       } finally { if (token === request && isActive()) refresh.disabled = false; }

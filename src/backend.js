@@ -1,5 +1,6 @@
 import { createClient } from '@supabase/supabase-js';
 import { createPersonalBackend } from './personal-backend.js';
+import { createDocumentMailBackend } from './document-mail-backend.js';
 import { validateWorkspace } from './domain.js';
 
 const MAX_STATE_BYTES = 5_000_000;
@@ -291,6 +292,13 @@ export function createBackend({ url, anonKey }) {
   }
 
   return {
+    mail: createDocumentMailBackend({ client, requireUser, getWorkspace: () => workspace, getVersion: () => version, enqueue,
+      adoptWorkspace(result) {
+        validateCloudState(result.state);
+        if (!Number.isSafeInteger(Number(result.version)) || Number(result.version) < version) throw backendError('Recarga los datos después del envío.', 'VERSION_CONFLICT');
+        version = Number(result.version);
+      },
+    }),
     personal: createPersonalBackend({ client, requireUser, getWorkspace: () => workspace, url }),
     async signIn(email, password) {
       ++authGeneration;

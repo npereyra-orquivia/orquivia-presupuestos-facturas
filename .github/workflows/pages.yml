@@ -1,4 +1,4 @@
-name: Publicar Orquívia estable y pruebas 1.1
+name: Publicar Orquívia en GitHub Pages
 on:
   push:
     branches: [main]
@@ -13,41 +13,35 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
+    env:
+      VITE_APP_MODE: production
+      VITE_DOCUMENT_MAIL: 'true'
+      VITE_SUPABASE_URL: ${{ vars.VITE_SUPABASE_URL }}
+      VITE_SUPABASE_PUBLISHABLE_KEY: ${{ vars.VITE_SUPABASE_PUBLISHABLE_KEY }}
     steps:
       - uses: actions/checkout@v4
-        with:
-          ref: v1.0.0
-          path: stable
       - uses: actions/checkout@v4
         with:
-          ref: codex/email-v1-1
-          path: beta
+          ref: 087ed89525e2f6d5ccc08ad7d334cc92a7f761a2
+          path: legacy-mail
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - run: npm ci && npm test && npm run build:production
-        working-directory: stable
-        env:
-          VITE_APP_MODE: production
-          VITE_SUPABASE_URL: ${{ vars.VITE_SUPABASE_URL }}
-          VITE_SUPABASE_PUBLISHABLE_KEY: ${{ vars.VITE_SUPABASE_PUBLISHABLE_KEY }}
-      - run: npm ci && npm test && npm run build:production
-        working-directory: beta
-        env:
-          VITE_APP_MODE: production
-          VITE_DOCUMENT_MAIL: 'true'
-          VITE_SUPABASE_URL: ${{ vars.VITE_SUPABASE_URL }}
-          VITE_SUPABASE_PUBLISHABLE_KEY: ${{ vars.VITE_SUPABASE_PUBLISHABLE_KEY }}
+      - run: npm ci
+      - run: npm test
       - run: node supabase/tests/document-mail-postgres.mjs
-        working-directory: beta
-      - name: Mantener la 1.0 y añadir la 1.1 en otra dirección
-        run: |
-          mkdir -p stable/dist/pruebas-v1-1
-          cp -a beta/dist/. stable/dist/pruebas-v1-1/
+      - run: npm run build:production
+      - name: Conservar los recursos de las pestañas de pruebas abiertas
+        run: npm ci && npm run build:production
+        working-directory: legacy-mail
+      - name: Redirigir la dirección de pruebas al portal oficial
+        run: node scripts/prepare-release.mjs --legacy-dist legacy-mail/dist
+      - name: Revisar el artefacto público completo
+        run: node scripts/check-public-build.mjs
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:
-          path: stable/dist
+          path: dist
   deploy:
     environment:
       name: github-pages
