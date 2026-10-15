@@ -35,10 +35,9 @@ export function renderDocumentPreview(d = {}, { company = {}, client = {}, logoU
     ${invoice && d.po ? `<p class="paper-note">PO: ${esc(d.po)}</p>` : ''}
     <div class="paper-totals">
       ${amounts.discountAmount ? `<div><span>Subtotal</span><span>${money(amounts.subtotal)}</span></div><div><span>Descuento ${esc(d.discount || 0)} %</span><span>−${money(amounts.discountAmount)}</span></div>` : ''}
-      <div><span>${invoice ? 'Base imponible' : 'Importe sin IVA'}</span><span>${money(amounts.base)}</span></div>
-      ${invoice ? `<div><span>IVA ${esc(d.vat || 0)} %</span><span>${money(amounts.vatAmount)}</span></div>` : ''}
+      ${invoice ? `<div><span>Base imponible</span><span>${money(amounts.base)}</span></div><div><span>IVA ${esc(d.vat || 0)} %</span><span>${money(amounts.vatAmount)}</span></div>` : ''}
       ${amounts.withholdingAmount ? `<div><span>Retención ${esc(d.withholding || 0)} %</span><span>−${money(amounts.withholdingAmount)}</span></div>` : ''}
-      <strong class="paper-grand-total"><span class="paper-total-label">Total${invoice ? '' : ' sin IVA'}</span><span>${money(amounts.total)}</span></strong>
+      <strong class="paper-grand-total">${invoice ? '<span class="paper-total-label">Total</span>' : ''}<span>${money(amounts.total)}</span></strong>
       ${invoice ? '' : '<p class="paper-vat-note">IVA no incluido</p>'}
     </div>
     ${d.notes ? `<p class="paper-note">${esc(d.notes)}</p>` : ''}

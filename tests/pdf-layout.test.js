@@ -34,12 +34,19 @@ test('quote PDF shows a grouped pre-VAT total and note without altering its stor
   const original = structuredClone(doc);
   const { text } = await readPDF(doc);
   assert.match(text, /6\.000,00 €/);
-  assert.match(text, /Importe sin IVA 5\.400,00 €/);
+  assert.match(text, /Descuento 10% - 600,00 €/);
   assert.match(text, /Retención 15% - 810,00 €/);
   assert.match(text, /4\.590,00 €/);
   assert.match(text, /IVA no incluido/);
-  assert.doesNotMatch(text, /IVA 21%|1\.134,00|5\.724,00/);
+  assert.doesNotMatch(text, /Importe sin IVA|Total sin IVA|Base imponible|IVA 21%|1\.134,00|5\.724,00/);
   assert.deepEqual(doc, original, 'Presentation must not change the stored VAT settings or line values');
+});
+
+test('a simple quote only repeats its amount for the line price, line subtotal and final total', async () => {
+  const { text } = await readPDF(document());
+  assert.equal((text.match(/6\.000,00 €/g) || []).length, 3);
+  assert.equal((text.match(/IVA no incluido/g) || []).length, 1);
+  assert.doesNotMatch(text, /Importe sin IVA|Total sin IVA|Base imponible/);
 });
 
 test('invoice PDF continues to disclose VAT and the full payable total', async () => {

@@ -87,7 +87,7 @@ export function createPDF(document, company, client, { logoData, demo = false } 
     const imageWidth = Math.min(ratio >= 2 ? 62 : 15, 20 * ratio);
     pdf.addImage(logoData, 'PNG', 25, ratio >= 2 ? 14 : 12, imageWidth, imageWidth / ratio);
   } else fit(company.name || 'Orquívia', left, 24, 68, 18);
-  text(kind.toUpperCase(), right, 26, 19, { align: 'right' });
+  text(kind.toUpperCase(), right, 26, 16, { align: 'right' });
   fit(`Número: ${number}`, right, 34, 87, 9, { align: 'right' });
   text(`Fecha: ${date(document.date)}`, right, 39, 9, { color: muted, align: 'right' });
 
@@ -147,7 +147,7 @@ export function createPDF(document, company, client, { logoData, demo = false } 
 
   const t = documentAmounts(document), rows = [];
   if (t.discountAmount) rows.push(['Subtotal', money(t.subtotal)], [`Descuento ${document.discount}%`, '- ' + money(t.discountAmount)]);
-  rows.push([t.vatIncluded ? 'Base imponible' : 'Importe sin IVA', money(t.base)]);
+  if (t.vatIncluded) rows.push(['Base imponible', money(t.base)]);
   if (t.vatIncluded) rows.push([`IVA ${document.vat}%`, money(t.vatAmount)]);
   if (t.withholdingAmount) rows.push([`Retención ${document.withholding}%`, '- ' + money(t.withholdingAmount)]);
   const totalHeight = rows.length * 6 + 23;
@@ -175,7 +175,7 @@ export function createPDF(document, company, client, { logoData, demo = false } 
     fit(label, 107, totalY + 8 + index * 6, 42, 10);
     fit(value, 183, totalY + 8 + index * 6, 32, 10, { align: 'right' });
   });
-  fit(money(t.total), 183, totalY + totalHeight - 6, 76, 17, { align: 'right' });
+  fit(money(t.total), 183, totalY + totalHeight - 6, 76, 16, { align: 'right' });
   if (!t.vatIncluded) text('IVA no incluido', 183, totalY + totalHeight + 5, 8, { color: muted, align: 'right' });
   y = totalY + totalHeight + 12;
   flowLines(validityLines, { size: 8, color: muted, step: 4, gap: 1 });
