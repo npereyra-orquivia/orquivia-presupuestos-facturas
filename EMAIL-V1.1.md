@@ -27,6 +27,14 @@ destinatarios y enviar de nuevo con un identificador independiente; cada envío
 queda en el historial. Un resultado parcial o incierto requiere revisar antes
 de intentar otro envío para evitar duplicados.
 
+La apertura consulta perfil e historial juntos y los conserva solo en memoria
+durante 30 segundos por cuenta y documento. **Actualizar estado** fuerza una
+lectura del servidor. Preparar otro envío reutiliza el contexto abierto y crea
+un identificador nuevo sin otra espera; el resultado del envío actualiza la
+confirmación y el historial directamente. Al cerrar sesión se descarta la caché.
+Las comprobaciones de acceso y la validación del envío en el servidor permanecen
+activas, también cuando la pantalla reutiliza datos recientes.
+
 El envío registra remitente, destinatario, fecha, estado, identificador y huella
 del PDF. Se conserva el cambio manual de estado para correos enviados fuera
 del portal. Los cambios simultáneos siguen usando las versiones de la empresa.

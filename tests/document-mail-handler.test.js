@@ -22,8 +22,47 @@ function fixture({smtpError,archiveError,existing=false}={}) {
   return {handler,calls,count:()=>({smtp,append})};
 }
 test('AAL1 and a switched identity cannot access profile, credentials or jobs',async()=>{
-  for(const req of [request('profile',{},'aal1'),request('profile',{expectedUserId:org})]){
+  for(const req of [request('profile',{},'aal1'),request('profile',{expectedUserId:org}),request('composer',{documentId:'quote'},'aal1'),request('composer',{documentId:'quote',expectedUserId:org})]){
     const f=fixture(),r=await f.handler(req);assert.equal(r.status,403);assert.equal(f.calls.length,0);
+  }
+});
+
+test('composer starts the independent public profile and history reads in parallel without credentials',async()=>{
+  const calls=[];let release;
+  const gate=new Promise(resolve=>release=resolve);
+  const publicProfile={email:'sender@example.test',signature,connected:true,version:1,provider:'serviciodecorreo'};
+  const history=[{id,status:'sent',to:['client@example.test'],cc:[]}];
+  const handler=createDocumentMailHandler({db:{rpc:async(name,p)=>{
+    calls.push({name,p});await gate;
+    return {data:name.endsWith('_profile')?publicProfile:{history},error:null};
+  }},auth:{getUser:async()=>({data:{user:{id:user,email:publicProfile.email}}})},mail:{},renderDocumentPdf:()=>{throw Error('read cannot render or send');}});
+  const pending=handler(request('composer',{documentId:'quote'}));await new Promise(resolve=>setImmediate(resolve));
+  const started=calls.map(call=>call.name);release();
+  const response=await pending,result=await response.json();
+  assert.equal(response.status,200);assert.deepEqual(started,['orquivia_mail_profile','orquivia_mail_history']);
+  assert.deepEqual(calls,[{name:'orquivia_mail_profile',p:{p_user:user,p_org:org,p_secrets:false}},
+    {name:'orquivia_mail_history',p:{p_user:user,p_org:org,p_document:'quote'}}]);
+  assert.deepEqual(result,{profile:publicProfile,history});assert.equal(result.profile.password,undefined);assert.equal(result.profile.sentFolder,undefined);
+});
+
+test('history performs only its membership-checked history RPC and malformed composer documents perform no RPC',async()=>{
+  const calls=[];
+  const handler=createDocumentMailHandler({db:{rpc:async(name,p)=>{calls.push({name,p});return {data:{history:[]},error:null};}},
+    auth:{getUser:async()=>({data:{user:{id:user,email:'sender@example.test'}}})},mail:{}});
+  const historyResponse=await handler(request('history',{documentId:'quote'}));
+  assert.equal(historyResponse.status,200);assert.deepEqual(await historyResponse.json(),{history:[]});
+  assert.deepEqual(calls,[{name:'orquivia_mail_history',p:{p_user:user,p_org:org,p_document:'quote'}}]);
+  calls.length=0;
+  const invalid=await handler(request('composer',{documentId:{forged:'quote'}}));assert.equal(invalid.status,400);assert.deepEqual(calls,[]);
+});
+
+test('composer fails closed if either independent membership or MFA check denies access',async()=>{
+  for(const [denied,errorCode] of [['orquivia_mail_profile','MEMBERSHIP_REQUIRED'],['orquivia_mail_history','MFA_REQUIRED']]) {
+    const handler=createDocumentMailHandler({db:{rpc:async name=>name===denied?{data:null,error:{message:errorCode}}:
+      {data:name.endsWith('_profile')?{email:'sender@example.test',signature}:{history:[{id:'private-job'}]},error:null}},
+      auth:{getUser:async()=>({data:{user:{id:user,email:'sender@example.test'}}})},mail:{}});
+    const response=await handler(request('composer',{documentId:'quote'}));
+    assert.equal(response.status,403);assert.deepEqual(await response.json(),{error:errorCode});
   }
 });
 test('confirmed SMTP acceptance precedes archival and carries the canonical workspace result',async()=>{

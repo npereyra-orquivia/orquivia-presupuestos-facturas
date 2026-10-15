@@ -44,13 +44,21 @@ export function createDocumentMailHandler({ db, auth, mail, renderDocumentPdf, l
       const body = await bodyJSON(request);
       if (body.expectedUserId !== user.id || !uuid(body.organizationId)) throw fail('AUTH_CHANGED');
       const parameters = { p_user: user.id, p_org: body.organizationId };
-      const profile = await rpc('profile', { ...parameters, p_secrets: false });
       const publicProfile = value => ({ ...value, signature: Object.keys(value.signature || {}).length ? value.signature : defaultMailSignature(user) });
-      if (body.action === 'profile') return response(publicProfile(profile));
-      if (body.action === 'history') {
+      if (['history', 'composer'].includes(body.action)) {
         if (typeof body.documentId !== 'string' || body.documentId.length > 100) throw fail('INVALID_DOCUMENT');
-        return response(await rpc('history', { ...parameters, p_document: body.documentId }));
+        const historyParameters = { ...parameters, p_document: body.documentId };
+        // Each RPC independently verifies active membership and MFA. Neither
+        // read requests a credential, and they do not depend on each other.
+        if (body.action === 'history') return response(await rpc('history', historyParameters));
+        const [profile, history] = await Promise.all([
+          rpc('profile', { ...parameters, p_secrets: false }),
+          rpc('history', historyParameters),
+        ]);
+        return response({ profile: publicProfile(profile), history: Array.isArray(history) ? history : history?.history || [] });
       }
+      const profile = await rpc('profile', { ...parameters, p_secrets: false });
+      if (body.action === 'profile') return response(publicProfile(profile));
       if (['signature', 'configure', 'disconnect'].includes(body.action)) {
         const signature = validateMailSignature(body.signature || publicProfile(profile).signature);
         if (!signature.ok || !Number.isSafeInteger(body.expectedVersion)) throw fail('INVALID_SIGNATURE');

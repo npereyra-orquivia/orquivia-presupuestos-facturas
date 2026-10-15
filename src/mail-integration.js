@@ -1,10 +1,22 @@
-import { renderMailSettings, bindMailSettings, renderMailComposer, bindMailComposer } from './mail-ui.js';
+import { renderMailSettings, bindMailSettings, renderMailComposer, bindMailComposer, renderMailLoading, renderMailResult, bindMailResult } from './mail-ui.js';
 import { defaultMailProfile, normalizeMailProfile, defaultMailDraft } from './mail-domain.js';
+import { createMailContextCache, mergeMailJob } from './mail-context-cache.js';
 
 export function createMailFeature(ctx) {
-  let profile = null, identity = null, cleanup = null, mountRequest = 0;
+  let profile = null, identity = null, cleanup = null, mountRequest = 0, composerRequest = 0;
   const drafts = new Map();
-  function reset() { cleanup?.(); cleanup = null; profile = null; identity = null; drafts.clear(); ++mountRequest; }
+  const contexts = createMailContextCache({
+    getIdentity: () => `${ctx.getMode()}:${ctx.getUser()?.id || ''}`,
+    async load(documentId) {
+      const isCurrent = ctx.scope();
+      const result = ctx.getMode() === 'cloud' ? await ctx.getBackend().mail.composer(documentId) : { profile: current(), history: [] };
+      if (!isCurrent()) throw new Error('La sesión cambió. Vuelve a entrar.');
+      return { profile: normalizeMailProfile(result.profile, ctx.getUser() || {}), history: Array.isArray(result.history) ? result.history : [] };
+    },
+  });
+  function reset() {
+    cleanup?.(); cleanup = null; profile = null; identity = null; drafts.clear(); contexts.clear(); ++mountRequest; ++composerRequest;
+  }
   function current() {
     const owner = ctx.getUser()?.id || ctx.getMode();
     if (identity !== owner) { reset(); identity = owner; }
@@ -32,7 +44,7 @@ export function createMailFeature(ctx) {
         saveSignature: fields => ctx.getMode() === 'cloud' ? ctx.getBackend().mail.signature(fields) : Promise.resolve({ ...current(), signature: fields.signature }),
         onResult: (result, action) => {
           if (!valid()) return;
-          profile = normalizeMailProfile(result, ctx.getUser() || {});
+          profile = normalizeMailProfile(result, ctx.getUser() || {}); contexts.clear();
           const message = action === 'configure' ? 'Correo conectado y comprobado. La copia se guardará en Enviados.' : action === 'disconnect' ? 'Correo desconectado.' : 'Firma guardada.';
           cleanup?.(); draw(message); ctx.toast(message);
         },
@@ -41,49 +53,84 @@ export function createMailFeature(ctx) {
     draw('', refresh);
     if (refresh) try { await loadProfile(); draw(); } catch (error) { draw(error.message); }
   }
-  async function openComposer(document, { draft, job } = {}) {
-    const isCurrent = ctx.scope(); const backend = ctx.getBackend(); const cloud = ctx.getMode() === 'cloud';
+  async function openComposer(document) {
+    current();
+    const isCurrent = ctx.scope(), backend = ctx.getBackend(), cloud = ctx.getMode() === 'cloud';
     if (ctx.isBusy() || ctx.isConflict()) return ctx.toast('Termina de revisar los cambios antes de enviar.', true);
-    ctx.openModal(ctx.header('Enviar presupuesto', document.number) + '<p>Cargando tu correo y el historial…</p>', true);
+    const request = ++composerRequest;
+    ctx.openModal(ctx.header('Enviar presupuesto') + renderMailLoading());
     const modal = ctx.root.querySelector('.modal');
-    const valid = () => isCurrent() && modal.isConnected;
-    try {
-      const p = await loadProfile();
-      const history = cloud ? await backend.mail.history(document.id) : [];
+    const valid = () => request === composerRequest && isCurrent() && modal.isConnected;
+    let data, draft, job, dispose;
+    const documentNow = () => ctx.documentFor(document.id) || document;
+    const remember = () => contexts.remember(document.id, data);
+    const chooseJob = () => data.history.find(entry => entry.id === draft?.idempotencyKey);
+    const bindClose = () => modal.querySelectorAll('[data-close]').forEach(button => { button.onclick = () => ctx.closeModal(); });
+    function newMail() {
+      if (!valid() || ctx.isBusy() || ctx.isConflict()) return;
+      draft = { ...draft, idempotencyKey: crypto.randomUUID() };
+      drafts.set(document.id, draft); job = null; draw();
+    }
+    async function reloadHistory() {
+      if (!valid() || ctx.isBusy()) return;
+      const fresh = await contexts.get(document.id, { force: true });
       if (!valid()) return;
-      const savedDraft = draft || drafts.get(document.id) || { ...defaultMailDraft(document, ctx.clientFor(document)), idempotencyKey: crypto.randomUUID() };
-      drafts.set(document.id, savedDraft);
-      const known = job || history.find(entry => entry.id === savedDraft.idempotencyKey);
-      modal.innerHTML = ctx.header('Enviar presupuesto', document.number) + renderMailComposer({ document, client: ctx.clientFor(document), profile: p, history, preview: ctx.preview(document), draft: savedDraft, job: known, logoUrl: ctx.logoUrl });
-      modal.querySelectorAll('[data-close]').forEach(button => button.onclick = () => ctx.closeModal());
-      const send = async fields => {
-        if (!valid() || !cloud || ctx.isConflict() || ctx.isBusy()) throw new Error('Entra de nuevo y revisa el presupuesto antes de enviar.');
-        ctx.setBusy(true);
-        try { return await backend.mail.send(document.id, fields); }
-        finally { if (isCurrent()) ctx.setBusy(false); }
-      };
-      const dispose = bindMailComposer(modal, {
-        draft: savedDraft, profile: p, logoUrl: ctx.logoUrl, send,
-        onDraftChange: value => { if (valid()) drafts.set(document.id, value); },
+      data = fresh; profile = fresh.profile;
+      job = chooseJob() || (job ? fresh.history.find(entry => entry.id === job.id) || job : null);
+      draw();
+    }
+    function onResult(result) {
+      if (!valid()) return;
+      if (result.workspace) ctx.adopt(result.workspace);
+      job = result.job;
+      data = { ...data, history: mergeMailJob(data.history, job) }; remember();
+      draw();
+    }
+    async function send(fields) {
+      if (!valid() || !cloud || ctx.isConflict() || ctx.isBusy()) throw new Error('Entra de nuevo y revisa el presupuesto antes de enviar.');
+      ctx.setBusy(true);
+      try { return await backend.mail.send(document.id, fields); }
+      finally { if (isCurrent()) ctx.setBusy(false); }
+    }
+    async function retryArchive(fields) {
+      if (!valid() || !cloud || ctx.isBusy()) throw new Error('Espera a que termine la operación actual.');
+      ctx.setBusy(true);
+      try { return await backend.mail.retryArchive(fields); }
+      finally { if (isCurrent()) ctx.setBusy(false); }
+    }
+    function draw() {
+      if (!valid()) return;
+      dispose?.();
+      modal.classList.toggle('wide', !job);
+      const title = job ? 'Envío del presupuesto' : 'Enviar presupuesto';
+      modal.innerHTML = ctx.header(title, document.number) + (job
+        ? renderMailResult({ job, document: documentNow(), history: data.history })
+        : renderMailComposer({ document: documentNow(), client: ctx.clientFor(documentNow()), profile: data.profile, history: data.history, preview: ctx.preview(documentNow()), draft, logoUrl: ctx.logoUrl }));
+      bindClose();
+      const bindings = {
+        draft, profile: data.profile, logoUrl: ctx.logoUrl, send, onResult, retryArchive, reloadHistory, onNewMail: newMail,
+        onDraftChange: value => { if (valid()) { draft = value; drafts.set(document.id, value); } },
         configure: () => { ctx.closeModal(true); ctx.navigate('personal'); },
-        retryArchive: fields => backend.mail.retryArchive(fields),
-        reloadHistory: value => { if (valid()) openComposer(ctx.documentFor(document.id) || document, { draft: value }); },
-        onResult: result => {
-          if (!valid()) return;
-          if (result.workspace) ctx.adopt(result.workspace);
-          openComposer(ctx.documentFor(document.id) || document, { draft: drafts.get(document.id), job: result.job });
-        },
-      });
-      ctx.cleanup(dispose);
-      if (known && ['sent', 'archive_pending', 'failed'].includes(known.status)) {
-        const button = ctx.root.ownerDocument.createElement('button');
-        button.type = 'button'; button.className = 'button secondary'; button.textContent = 'Preparar otro envío';
-        button.onclick = () => { const next = { ...drafts.get(document.id), idempotencyKey: crypto.randomUUID() }; drafts.set(document.id, next); openComposer(ctx.documentFor(document.id) || document, { draft: next }); };
-        modal.querySelector('.mail-actions').prepend(button);
-      }
-      if (known) modal.querySelectorAll('#mail-compose-form input,#mail-compose-form textarea').forEach(input => { input.readOnly = true; });
-    } catch (error) { if (valid()) modal.innerHTML = ctx.header('Correo no disponible') + `<p class="mail-job-error"></p><button class="button secondary" data-return-mail>Cerrar</button>`;
-      if (valid()) { modal.querySelector('.mail-job-error').textContent = error.message; modal.querySelector('[data-return-mail]').onclick = () => ctx.closeModal(); modal.querySelector('[data-close]').onclick = () => ctx.closeModal(); }
+      };
+      dispose = job ? bindMailResult(modal, bindings) : bindMailComposer(modal, bindings);
+      modal.scrollTop = 0;
+      modal.querySelector(job ? '[data-new-mail], [data-close]' : 'input[name="to"]')?.focus({ preventScroll: true });
+    }
+    ctx.cleanup(() => dispose?.());
+    try {
+      data = await contexts.get(document.id);
+      if (!valid()) return;
+      profile = data.profile;
+      const saved = drafts.get(document.id);
+      job = saved ? data.history.find(entry => entry.id === saved.idempotencyKey) : data.history[0];
+      draft = saved || { ...defaultMailDraft(document, ctx.clientFor(document)), ...(job ? { to: job.to, cc: job.cc || [], subject: job.subject } : {}), idempotencyKey: job?.id || crypto.randomUUID() };
+      drafts.set(document.id, draft);
+      draw();
+    } catch (error) {
+      if (!valid()) return;
+      modal.classList.remove('wide');
+      modal.innerHTML = ctx.header('Correo no disponible') + '<p class="mail-job-error"></p><button class="button secondary" data-close>Cerrar</button>';
+      modal.querySelector('.mail-job-error').textContent = error.message; bindClose();
     }
   }
   return { reset, mountSettings, openComposer };

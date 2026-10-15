@@ -22,3 +22,34 @@ test('server/provider errors cannot disclose credential details through frontend
   const mail=createDocumentMailBackend({client:{functions:{invoke:async()=>({data:{error:{code:'PRIVATE_PROVIDER_ERROR',message:'password=secret'}},error:null})}},requireUser:async()=>({id:'owner'}),getWorkspace:()=>({organizationId:'org'}),getVersion:()=>1,enqueue:fn=>fn(),adoptWorkspace:()=>{}});
   await assert.rejects(mail.profile(),error=>!error.message.includes('password')&&!error.message.includes('secret'));
 });
+
+test('composer loads profile and history in one request with authenticated context guards',async()=>{
+  const calls=[];let checks=0;
+  const profile={email:'owner@example.test',connected:true,signature:{name:'Owner',role:'',phone:''},version:1};
+  const history=[{id:'job',status:'sent',to:['client@example.test']}];
+  const mail=createDocumentMailBackend({client:{functions:{invoke:async(name,args)=>{calls.push({name,...args});return {data:{profile,history},error:null};}}},
+    requireUser:async()=>{++checks;return {id:'owner'};},getWorkspace:()=>({organizationId:'org'}),getVersion:()=>1,enqueue:fn=>fn(),adoptWorkspace:()=>{throw Error('read must not adopt a workspace');}});
+  assert.deepEqual(await mail.composer('quote'),{profile,history});
+  assert.equal(calls.length,1);assert.equal(checks,2);
+  assert.deepEqual(calls[0],{name:'document-mail',body:{documentId:'quote',action:'composer',expectedUserId:'owner',organizationId:'org'}});
+});
+
+test('composer never returns an old identity or organization response after switching sessions',async()=>{
+  for(const change of ['user','organization','mfa']) {
+    let user={id:'owner'},organizationId='org',mfa=true,release;
+    const response=new Promise(resolve=>release=resolve);
+    const mail=createDocumentMailBackend({client:{functions:{invoke:async()=>response}},
+      requireUser:async()=>{if(!mfa)throw Object.assign(Error('MFA required'),{code:'MFA_REQUIRED'});return user;},getWorkspace:()=>({organizationId}),getVersion:()=>1,enqueue:fn=>fn(),adoptWorkspace:()=>{throw Error('read must not adopt a workspace');}});
+    const pending=mail.composer('quote');await new Promise(resolve=>setImmediate(resolve));
+    if(change==='user')user={id:'other'};else if(change==='organization')organizationId='other-org';else mfa=false;
+    release({data:{profile:{email:'old@example.test'},history:[{id:'private-job'}]},error:null});
+    await assert.rejects(pending,error=>error.code===(change==='mfa'?'MFA_REQUIRED':'AUTH_CHANGED'));
+  }
+});
+
+test('composer cannot invoke the function before MFA verification',async()=>{
+  let calls=0;
+  const mail=createDocumentMailBackend({client:{functions:{invoke:async()=>{++calls;return {data:{},error:null};}}},
+    requireUser:async()=>{throw Object.assign(Error('MFA required'),{code:'MFA_REQUIRED'});},getWorkspace:()=>({organizationId:'org'}),getVersion:()=>1,enqueue:fn=>fn(),adoptWorkspace:()=>{}});
+  await assert.rejects(mail.composer('quote'),error=>error.code==='MFA_REQUIRED');assert.equal(calls,0);
+});

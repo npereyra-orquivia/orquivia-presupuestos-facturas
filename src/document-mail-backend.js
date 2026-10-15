@@ -40,6 +40,10 @@ export function createDocumentMailBackend({ client, requireUser, getWorkspace, g
     configure: fields => request('configure', fields),
     signature: fields => request('signature', fields),
     disconnect: fields => request('disconnect', fields),
+    async composer(documentId) {
+      const result = await request('composer', { documentId });
+      return { profile: result?.profile, history: Array.isArray(result?.history) ? result.history : [] };
+    },
     async history(documentId) {
       const result = await request('history', { documentId });
       return Array.isArray(result) ? result : result?.history || [];

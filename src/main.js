@@ -1,6 +1,7 @@
 import './style.css';
 import './controls.css';
 import './history-ui.css';
+import './mail.css';
 import { recordHistoryMarkup, bindRecordHistory, compareWorkspaceEdits, renderConflictComparison, captureFormDraft, captureOperationScope, runScopedOperation } from './history-ui.js';
 import { enhanceControls } from './controls.js';
 import { cashCard, expensesPage, bindExpenses, expenseModal, openingBalanceModal } from './expense-ui.js';
