@@ -150,7 +150,10 @@ export function createPDF(document, company, client, { logoData, demo = false } 
   if (t.vatIncluded) rows.push(['Base imponible', money(t.base)]);
   if (t.vatIncluded) rows.push([`IVA ${document.vat}%`, money(t.vatAmount)]);
   if (t.withholdingAmount) rows.push([`Retención ${document.withholding}%`, '- ' + money(t.withholdingAmount)]);
-  const totalHeight = rows.length * 6 + 23;
+  pdf.setFont('helvetica', 'normal'); pdf.setFontSize(16);
+  const totalWidth = !t.vatIncluded && !rows.length
+    ? Math.min(width, Math.max(40, pdf.getTextWidth(clean(money(t.total))) + 8)) : 82;
+  const totalHeight = rows.length * 6 + (t.vatIncluded ? 23 : 14);
   const validity = document.kind === 'invoice'
     ? (document.dueDate ? `Vencimiento de pago: ${date(document.dueDate)}` : 'Vencimiento de pago pendiente de confirmar')
     : (document.dueDate ? `Este presupuesto es válido hasta: ${date(document.dueDate)}` : 'Validez pendiente de confirmar');
@@ -170,12 +173,12 @@ export function createPDF(document, company, client, { logoData, demo = false } 
   if (totalY + totalHeight + reservePayment + 12 > bodyBottom) {
     continuation(false); totalY = y + 7;
   }
-  pdf.setFillColor(...pale); pdf.rect(104, totalY, 82, totalHeight, 'F');
+  pdf.setFillColor(...pale); pdf.rect(right - totalWidth, totalY, totalWidth, totalHeight, 'F');
   rows.forEach(([label, value], index) => {
     fit(label, 107, totalY + 8 + index * 6, 42, 10);
     fit(value, 183, totalY + 8 + index * 6, 32, 10, { align: 'right' });
   });
-  fit(money(t.total), 183, totalY + totalHeight - 6, 76, 16, { align: 'right' });
+  fit(money(t.total), 183, totalY + totalHeight - (t.vatIncluded ? 6 : 4), totalWidth - 6, 16, { align: 'right' });
   if (!t.vatIncluded) text('IVA no incluido', 183, totalY + totalHeight + 5, 8, { color: muted, align: 'right' });
   y = totalY + totalHeight + 12;
   flowLines(validityLines, { size: 8, color: muted, step: 4, gap: 1 });
