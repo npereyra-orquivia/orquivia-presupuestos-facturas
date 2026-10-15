@@ -79,6 +79,7 @@ export function bindMailComposer(root, ctx) {
   let active = true, pending = false, uncertain = false, token = ctx.draft?.idempotencyKey || crypto.randomUUID();
   const feedback = message => { if (active) form.querySelector('.mail-job-status').textContent = message; };
   const draft = () => ({ to: [form.elements.to.value], subject: form.elements.subject.value, message: form.elements.message.value, idempotencyKey: token });
+  form.addEventListener('keydown', event => { if (event.key === 'Enter' && event.target.tagName === 'INPUT') event.preventDefault(); });
   form.oninput = () => ctx.onDraftChange?.(draft());
   form.onsubmit = async event => {
     event.preventDefault(); if (pending || uncertain) return;

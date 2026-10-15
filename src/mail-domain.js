@@ -107,6 +107,7 @@ export function mailRecipientSuggestions(history = [], limit = 8) {
 function signatureLogoUrl(value) {
   if (typeof value !== 'string') return '';
   if (/^cid:orquivia-logo$/.test(value)) return value;
+  if (value === './orquivia-logo-wordmark.png') return value;
   if (/^\/(?!\/)[A-Za-z0-9_./% -]+$/.test(value) && !value.includes('..')) return value;
   try { const url = new URL(value); return url.protocol === 'https:' && !url.username && !url.password ? url.href : ''; }
   catch { return ''; }
