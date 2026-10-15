@@ -84,10 +84,10 @@ export function createPDF(document, company, client, { logoData, demo = false } 
   if (logoData) {
     const image = pdf.getImageProperties(logoData);
     const ratio = image.width / image.height;
-    const imageWidth = Math.min(ratio >= 2 ? 62 : 15, 20 * ratio);
+    const imageWidth = Math.min(ratio >= 2 ? 52 : 13, 17 * ratio);
     pdf.addImage(logoData, 'PNG', 25, ratio >= 2 ? 14 : 12, imageWidth, imageWidth / ratio);
-  } else fit(company.name || 'Orquívia', left, 24, 68, 18);
-  text(kind.toUpperCase(), right, 26, 16, { align: 'right' });
+  } else fit(company.name || 'Orquívia', left, 24, 68, 15);
+  text(kind.toUpperCase(), right, 26, 14, { align: 'right' });
   fit(`Número: ${number}`, right, 34, 87, 9, { align: 'right' });
   text(`Fecha: ${date(document.date)}`, right, 39, 9, { color: muted, align: 'right' });
 
@@ -150,10 +150,10 @@ export function createPDF(document, company, client, { logoData, demo = false } 
   if (t.vatIncluded) rows.push(['Base imponible', money(t.base)]);
   if (t.vatIncluded) rows.push([`IVA ${document.vat}%`, money(t.vatAmount)]);
   if (t.withholdingAmount) rows.push([`Retención ${document.withholding}%`, '- ' + money(t.withholdingAmount)]);
-  pdf.setFont('helvetica', 'normal'); pdf.setFontSize(16);
+  pdf.setFont('helvetica', 'normal'); pdf.setFontSize(14);
   const totalWidth = !t.vatIncluded && !rows.length
-    ? Math.min(width, Math.max(40, pdf.getTextWidth(clean(money(t.total))) + 8)) : 82;
-  const totalHeight = rows.length * 6 + (t.vatIncluded ? 23 : 14);
+    ? Math.min(width, Math.max(36, pdf.getTextWidth(clean(money(t.total))) + 8)) : 82;
+  const totalHeight = rows.length * 6 + (t.vatIncluded ? 23 : 17);
   const validity = document.kind === 'invoice'
     ? (document.dueDate ? `Vencimiento de pago: ${date(document.dueDate)}` : 'Vencimiento de pago pendiente de confirmar')
     : (document.dueDate ? `Este presupuesto es válido hasta: ${date(document.dueDate)}` : 'Validez pendiente de confirmar');
@@ -178,8 +178,8 @@ export function createPDF(document, company, client, { logoData, demo = false } 
     fit(label, 107, totalY + 8 + index * 6, 42, 10);
     fit(value, 183, totalY + 8 + index * 6, 32, 10, { align: 'right' });
   });
-  fit(money(t.total), 183, totalY + totalHeight - (t.vatIncluded ? 6 : 4), totalWidth - 6, 16, { align: 'right' });
-  if (!t.vatIncluded) text('IVA no incluido', 183, totalY + totalHeight + 5, 8, { color: muted, align: 'right' });
+  fit(money(t.total), 183, totalY + totalHeight - (t.vatIncluded ? 6 : 9), totalWidth - 6, 14, { align: 'right' });
+  if (!t.vatIncluded) text('IVA no incluido', 183, totalY + totalHeight - 3.5, 8, { color: muted, align: 'right' });
   y = totalY + totalHeight + 12;
   flowLines(validityLines, { size: 8, color: muted, step: 4, gap: 1 });
   let paymentIndex = 0;

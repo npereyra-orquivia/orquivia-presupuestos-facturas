@@ -1,5 +1,5 @@
 .paper.doc-preview{
-  --document-font:9px;--document-small:8px;--document-heading:16px;--document-total:16px;
+  --document-font:9px;--document-small:8px;--document-heading:14px;--document-total:14px;
   container-type:inline-size;width:100%;max-width:100%;min-width:0;min-height:590px;
   padding:26px 22px;font-family:Arial,sans-serif;line-height:1.6;
 }
@@ -11,9 +11,9 @@
 .paper.doc-preview .paper-header{display:flex;align-items:flex-start;justify-content:space-between;gap:22px;margin-bottom:30px;min-width:0}
 .paper.doc-preview .paper-header img.document-brand,
 .detail-paper .paper.doc-preview .paper-header img.document-brand{
-  display:block;width:145px;height:auto;max-width:42%;object-fit:contain;flex:0 1 145px;margin:2px 0 0;
+  display:block;width:125px;height:auto;max-width:42%;object-fit:contain;flex:0 1 125px;margin:2px 0 0;
 }
-.detail-paper .paper.doc-preview .paper-header img.document-brand{width:180px;flex-basis:180px}
+.detail-paper .paper.doc-preview .paper-header img.document-brand{width:150px;flex-basis:150px}
 .paper.doc-preview .paper-document-meta{min-width:0;max-width:58%;text-align:right}
 .paper.doc-preview .paper-header h2{
   font-family:Arial,sans-serif;font-size:var(--document-heading);font-weight:400;
@@ -55,7 +55,7 @@
 @container (max-width:430px){
   .paper.doc-preview .paper-header{flex-wrap:wrap;gap:18px;margin-bottom:24px}
   .paper.doc-preview .paper-header img.document-brand,
-  .detail-paper .paper.doc-preview .paper-header img.document-brand{width:155px;max-width:70%;flex-basis:155px;margin:0}
+  .detail-paper .paper.doc-preview .paper-header img.document-brand{width:130px;max-width:70%;flex-basis:130px;margin:0}
   .paper.doc-preview .paper-document-meta{flex:1 0 100%;max-width:100%;text-align:left}
   .paper.doc-preview .paper-header h2{letter-spacing:.55px}
   .paper.doc-preview .paper-header p{text-align:left}
