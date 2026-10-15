@@ -93,3 +93,44 @@ test('wrapped concepts continue across pages without losing their end or payment
     assert.ok(pages[index].items.some(item => item.str === `Página ${index + 1} de ${pages.length}`));
   }
 });
+
+test('quotes and invoices keep the complete closing block at the same bottom position on one or two pages', async () => {
+  const issuer = { ...company, privacyText: 'Aviso de privacidad del ejemplo.' };
+  const items = Array.from({ length: 9 }, (_, index) => ({
+    description: `Servicio ${index + 1}: planificación y ejecución`, quantity: 1, price: 125,
+    detail: 'Preparación de materiales, coordinación de los trabajos y revisión del servicio realizado.',
+  }));
+  for (const kind of ['quote', 'invoice']) {
+    const short = await readPDF(document({ kind }), issuer);
+    const long = await readPDF(document({ kind, items }), issuer);
+    assert.equal(short.pages.length, 1);
+    assert.equal(long.pages.length, 2);
+    const firstPayment = short.pages[0].items.find(item => item.str === 'Método de pago');
+    const lastPage = long.pages.at(-1);
+    const lastPayment = lastPage.items.find(item => item.str === 'Método de pago');
+    assert.ok(firstPayment && lastPayment);
+    assert.ok(firstPayment.transform[5] < short.pages[0].height / 4, 'Payment information belongs to the bottom quarter');
+    assert.ok(Math.abs(firstPayment.transform[5] - lastPayment.transform[5]) < 0.1, 'Closing position stays fixed when concepts span two pages');
+    assert.ok(long.pages.slice(0, -1).every(page => !page.items.some(item => item.str === 'Método de pago' || item.str === 'IVA no incluido')));
+    assert.match(long.text, /Servicio 9:/i);
+    assert.match(lastPage.items.map(item => item.str).join(' '), /Cuenta bancaria/);
+  }
+});
+
+test('long legal and payment text remains complete before a final closing block without off-page text', async () => {
+  const issuer = {
+    ...company,
+    privacyText: Array.from({ length: 80 }, (_, index) => `Aviso legal ${index + 1}`).join('\n'),
+    iban: Array.from({ length: 110 }, (_, index) => `Dato de cuenta ${index + 1}`).join('\n'),
+  };
+  const { pages, text } = await readPDF(document(), issuer);
+  assert.match(text, /Aviso legal 1 /);
+  assert.match(text, /Aviso legal 80 /);
+  assert.match(text, /Dato de cuenta 1 /);
+  assert.match(text, /Dato de cuenta 110 /);
+  assert.ok(pages.at(-1).items.some(item => item.str === 'IVA no incluido'));
+  assert.ok(pages.slice(0, -1).every(page => !page.items.some(item => item.str === 'IVA no incluido')));
+  for (const page of pages) for (const item of page.items) {
+    assert.ok(item.transform[5] >= 0 && item.transform[5] <= page.height, `Text must stay inside the page: ${item.str}`);
+  }
+});

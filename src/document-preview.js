@@ -33,6 +33,8 @@ export function renderDocumentPreview(d = {}, { company = {}, client = {}, logoU
       <tbody>${items.map(item => `<tr><td class="paper-concept"><strong>${esc(item.description || 'Tu concepto')}</strong>${item.detail ? `<p>${esc(item.detail)}</p>` : ''}</td><td class="paper-quantity" data-column="Cant."><span>${esc(formatNumber(item.quantity || 0))}</span></td><td class="paper-price" data-column="Precio"><span>${money(item.price || 0)}</span></td><td class="paper-line-total" data-column="Subtotal"><span>${money(totals({ items: [item] }).subtotal)}</span></td></tr>`).join('')}</tbody>
     </table>
     ${invoice && d.po ? `<p class="paper-note">PO: ${esc(d.po)}</p>` : ''}
+    ${d.notes ? `<p class="paper-note">${esc(d.notes)}</p>` : ''}
+    <div class="paper-closing">
     <div class="paper-totals">
       ${amounts.discountAmount ? `<div><span>Subtotal</span><span>${money(amounts.subtotal)}</span></div><div><span>Descuento ${esc(d.discount || 0)} %</span><span>−${money(amounts.discountAmount)}</span></div>` : ''}
       ${invoice ? `<div><span>Base imponible</span><span>${money(amounts.base)}</span></div><div><span>IVA ${esc(d.vat || 0)} %</span><span>${money(amounts.vatAmount)}</span></div>` : ''}
@@ -40,9 +42,9 @@ export function renderDocumentPreview(d = {}, { company = {}, client = {}, logoU
       <strong class="paper-grand-total">${invoice ? '<span class="paper-total-label">Total</span>' : ''}<span>${money(amounts.total)}</span></strong>
       ${invoice ? '' : '<p class="paper-vat-note">IVA no incluido</p>'}
     </div>
-    ${d.notes ? `<p class="paper-note">${esc(d.notes)}</p>` : ''}
     <p class="paper-valid">${invoice ? 'Vencimiento de pago' : 'Válido hasta'}: ${esc(displayDate(d.dueDate))}</p>
     <footer class="paper-footer"><div><strong>Método de pago</strong><span>${esc(d.paymentMethod || 'Transferencia bancaria')}</span></div><div><strong>Cuenta bancaria</strong><span>${esc(company.iban || 'IBAN por completar')}</span></div></footer>
+    </div>
     ${demo ? '<div class="paper-demo">DOCUMENTO DE PRUEBA</div>' : ''}
   </article>`;
 }

@@ -144,6 +144,9 @@ export function createPDF(document, company, client, { logoData, demo = false } 
   }
   if (document.po) flowLines(wrapped(`PO / Orden de pedido: ${document.po}`, width, 9));
   if (document.notes) flowLines(wrapped(document.notes, width, 9), { color: muted });
+  // A long legal notice belongs to the flowing body: placing it after the
+  // closing block could otherwise create another page after the final amount.
+  if (privacyLines.length && !privacyInFooter) flowLines(privacyLines, { size: 7, color: muted, step: 3.1, gap: 0 });
 
   const t = documentAmounts(document), rows = [];
   if (t.discountAmount) rows.push(['Subtotal', money(t.subtotal)], [`Descuento ${document.discount}%`, '- ' + money(t.discountAmount)]);
@@ -164,15 +167,32 @@ export function createPDF(document, company, client, { logoData, demo = false } 
     { title: 'Cuenta bancaria', x: 111, width: 73, lines: [...wrapped(company.iban || 'IBAN por completar', 73, 8), ...(company.bic ? wrapped(`BIC: ${company.bic}`, 73, 8) : [])] },
   ];
   const paymentRows = Math.max(...paymentColumns.map(column => column.lines.length));
-  const paymentHeight = validityLines.length * 4 + 14 + paymentRows * 4;
-  const normalTotalY = Math.min(185, bodyBottom - totalHeight - paymentHeight - 12);
-  let totalY = Math.max(pdf.getNumberOfPages() === 1 ? normalTotalY : 40, y + 10);
-  // Keep the usual totals and payment block together. Unusually long bank or
-  // payment text then flows through continuation pages, just like addresses.
-  const reservePayment = Math.min(paymentHeight, 50);
-  if (totalY + totalHeight + reservePayment + 12 > bodyBottom) {
-    continuation(false); totalY = y + 7;
+  // Measure the complete closing block, including the final text baseline and
+  // its descent allowance. Anchor it above the reserved legal/page footer on
+  // the last page, creating that page only when it no longer fits after items.
+  const closingFixedHeight = totalHeight + 27 + validityLines.length * 4;
+  const finalPaymentRows = Math.min(paymentRows,
+    Math.max(1, Math.floor((bodyBottom - 35 - closingFixedHeight) / 4)));
+  function paymentSection(start, count) {
+    pdf.setDrawColor(...ink); pdf.setLineWidth(.2); pdf.line(left, y, right, y);
+    paymentColumns.forEach(column => text(column.title, column.x, y + 8, 9, { style: 'bold' }));
+    paymentColumns.forEach(column => column.lines.slice(start, start + count)
+      .forEach((line, index) => text(line, column.x, y + 14 + index * 4, 8, { color: muted })));
+    y += 14 + count * 4 + 8;
   }
+  // Extraordinary payment text can exceed a whole page. Flow its earlier
+  // rows first, retaining the last rows with the amount on the final page.
+  let paymentIndex = 0;
+  while (paymentIndex < paymentRows - finalPaymentRows) {
+    if (y + 18 > bodyBottom) continuation(false);
+    const available = Math.max(1, Math.floor((bodyBottom - y - 14) / 4));
+    const count = Math.min(available, paymentRows - finalPaymentRows - paymentIndex);
+    paymentSection(paymentIndex, count);
+    paymentIndex += count;
+  }
+  const closingHeight = closingFixedHeight + finalPaymentRows * 4;
+  const totalY = bodyBottom - closingHeight;
+  if (y + 10 > totalY) continuation(false);
   pdf.setFillColor(...pale); pdf.rect(right - totalWidth, totalY, totalWidth, totalHeight, 'F');
   rows.forEach(([label, value], index) => {
     fit(label, 107, totalY + 8 + index * 6, 42, 10);
@@ -182,19 +202,7 @@ export function createPDF(document, company, client, { logoData, demo = false } 
   if (!t.vatIncluded) text('IVA no incluido', 183, totalY + totalHeight - 3.5, 8, { color: muted, align: 'right' });
   y = totalY + totalHeight + 12;
   flowLines(validityLines, { size: 8, color: muted, step: 4, gap: 1 });
-  let paymentIndex = 0;
-  while (paymentIndex < paymentRows) {
-    if (y + 18 > bodyBottom) continuation(false);
-    pdf.setDrawColor(...ink); pdf.setLineWidth(.2); pdf.line(left, y, right, y);
-    paymentColumns.forEach(column => text(column.title, column.x, y + 8, 9, { style: 'bold' }));
-    const available = Math.max(1, Math.floor((bodyBottom - y - 14) / 4) + 1);
-    const count = Math.min(available, paymentRows - paymentIndex);
-    paymentColumns.forEach(column => column.lines.slice(paymentIndex, paymentIndex + count)
-      .forEach((line, index) => text(line, column.x, y + 14 + index * 4, 8, { color: muted })));
-    y += 14 + count * 4 + 8; paymentIndex += count;
-    if (paymentIndex < paymentRows) continuation(false);
-  }
-  if (privacyLines.length && !privacyInFooter) flowLines(privacyLines, { size: 7, color: muted, step: 3.1, gap: 0 });
+  paymentSection(paymentIndex, finalPaymentRows);
 
   const pages = pdf.getNumberOfPages();
   for (let page = 1; page <= pages; page++) {
