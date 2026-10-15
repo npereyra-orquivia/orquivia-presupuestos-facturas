@@ -1,5 +1,5 @@
 import './cash-chart.css';
-import { money, escapeHTML as esc } from './domain.js';
+import { money, formatNumber, escapeHTML as esc } from './domain.js';
 
 const COST_COLORS = ['#b8624f', '#c97e5b', '#a76f7a', '#d8a171', '#967687', '#be8e83', '#a58d67'];
 const CUSTOMER_COLOR = '#285d48';
@@ -7,7 +7,7 @@ const REFUND_COLOR = '#8bad83';
 const TAX_COLOR = '#b59748';
 const monthFormatter = new Intl.DateTimeFormat('es-ES', { month: 'short', timeZone: 'UTC' });
 const longMonthFormatter = new Intl.DateTimeFormat('es-ES', { month: 'long', year: 'numeric', timeZone: 'UTC' });
-const numberFormatter = new Intl.NumberFormat('es-ES', { maximumFractionDigits: 0 });
+const numberFormatter = { format: amount => formatNumber(amount, { maximumFractionDigits: 0 }) };
 const value = amount => Number.isFinite(Number(amount)) ? Math.max(0, Number(amount)) : 0;
 
 function monthLabel(month, full = false) {

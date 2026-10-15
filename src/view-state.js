@@ -5,7 +5,7 @@ const ROUTES = Object.freeze({
   reports: 'informes', clients: 'clientes', reminders: 'recordatorios', settings: 'configuracion', personal: 'mi-espacio',
 });
 const DOCUMENT_FILTERS = Object.freeze({
-  quotes: ['all', 'draft', 'sent', 'accepted', 'rejected'],
+  quotes: ['all', 'draft', 'ready', 'sent', 'accepted', 'rejected'],
   invoices: ['all', 'draft', 'review', 'issued', 'partial', 'overdue', 'paid'],
   expenses: ['all', 'paid', 'pending', 'review'],
 });

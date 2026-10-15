@@ -1,5 +1,5 @@
 import { jsPDF } from 'jspdf';
-import { totals, money } from './domain.js';
+import { totals, documentAmounts, money, formatNumber } from './domain.js';
 
 const clean = value => String(value ?? '').replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, '').replace(/[\u2010-\u2015\u2212]/g, '-');
 const date = value => value ? String(value).split('-').reverse().join('/') : '';
@@ -29,6 +29,28 @@ export function createPDF(document, company, client, { logoData, demo = false } 
     text(value, x, y, measured > maxWidth ? size * maxWidth / measured : size, options);
   }
 
+  // Reserve space for the actual numbers before wrapping the concept. Prices
+  // remain readable when a document has wider amounts than the usual columns.
+  const quantity = value => formatNumber(value, { maximumFractionDigits: 6 });
+  const itemAmounts = (document.items || []).map(item => ({
+    quantity: quantity(item.quantity), price: money(item.price), subtotal: money(totals({ items: [item] }).subtotal),
+  }));
+  pdf.setFont('helvetica', 'normal'); pdf.setFontSize(9);
+  const desiredColumns = [
+    Math.max(14, ...itemAmounts.map(item => pdf.getTextWidth(item.quantity) + 2)),
+    Math.max(24, ...itemAmounts.map(item => pdf.getTextWidth(item.price) + 2)),
+    Math.max(26, ...itemAmounts.map(item => pdf.getTextWidth(item.subtotal) + 2)),
+  ];
+  const columnGaps = 13, minimumConcept = 42;
+  const numericBudget = width - columnGaps - minimumConcept;
+  const columnScale = Math.min(1, numericBudget / desiredColumns.reduce((sum, size) => sum + size, 0));
+  const [quantityWidth, priceWidth, subtotalWidth] = desiredColumns.map(size => size * columnScale);
+  const conceptWidth = width - columnGaps - quantityWidth - priceWidth - subtotalWidth;
+  const quantityLeft = left + conceptWidth + 5;
+  const quantityCenter = quantityLeft + quantityWidth / 2;
+  const priceRight = quantityLeft + quantityWidth + 4 + priceWidth;
+  const amountSize = Math.min(9, Math.max(6.5, 9 * columnScale));
+
   // Ordinary privacy notices repeat within a reserved footer. Longer notices
   // are paginated as a final section instead of shrinking or discarding text.
   const privacyLines = company.privacyText ? wrapped(company.privacyText, width, 7) : [];
@@ -38,8 +60,8 @@ export function createPDF(document, company, client, { logoData, demo = false } 
   let y = 0;
   function tableHeader() {
     if (y + 12 > bodyBottom) continuation(false);
-    text('CONCEPTO', left, y, 8); text('CANTIDAD', 136, y, 7, { align: 'right' });
-    text('PRECIO', 160, y, 7, { align: 'right' }); text('SUBTOTAL', right, y, 7, { align: 'right' });
+    text('CONCEPTO', left, y, 8); text('CANT.', quantityCenter, y, 7, { align: 'center' });
+    text('PRECIO', priceRight, y, 7, { align: 'right' }); text('SUBTOTAL', right, y, 7, { align: 'right' });
     pdf.setDrawColor(...ink); pdf.setLineWidth(.2); pdf.line(left, y + 3, right, y + 3); y += 10;
   }
   function continuation(withTable = true) {
@@ -65,7 +87,7 @@ export function createPDF(document, company, client, { logoData, demo = false } 
     const imageWidth = Math.min(ratio >= 2 ? 62 : 15, 20 * ratio);
     pdf.addImage(logoData, 'PNG', 25, ratio >= 2 ? 14 : 12, imageWidth, imageWidth / ratio);
   } else fit(company.name || 'Orquívia', left, 24, 68, 18);
-  text(kind.toUpperCase(), right, 26, 26, { align: 'right' });
+  text(kind.toUpperCase(), right, 26, 19, { align: 'right' });
   fit(`Número: ${number}`, right, 34, 87, 9, { align: 'right' });
   text(`Fecha: ${date(document.date)}`, right, 39, 9, { color: muted, align: 'right' });
 
@@ -92,16 +114,16 @@ export function createPDF(document, company, client, { logoData, demo = false } 
   } while (partyIndex < Math.max(issuer.length, recipient.length));
   const firstItem = document.items?.[0];
   if (firstItem) {
-    const lineCount = wrapped(clean(firstItem.description).toUpperCase(), 89, 9).length
-      + (firstItem.detail ? 1 + wrapped(firstItem.detail, 89, 9).length : 0);
+    const lineCount = wrapped(clean(firstItem.description).toUpperCase(), conceptWidth, 9).length
+      + (firstItem.detail ? 1 + wrapped(firstItem.detail, conceptWidth, 9).length : 0);
     const firstRowHeight = Math.max(lineCount * 4.5, 5) + 9;
     const reserve = firstRowHeight < bodyBottom - 45 ? firstRowHeight : 17;
     if (y + 10 + reserve > bodyBottom) continuation(false);
   }
   tableHeader();
 
-  for (const item of document.items || []) {
-    const lines = [...wrapped(clean(item.description).toUpperCase(), 89, 9), ...(item.detail ? ['', ...wrapped(item.detail, 89, 9)] : [])];
+  for (const [itemIndex, item] of (document.items || []).entries()) {
+    const lines = [...wrapped(clean(item.description).toUpperCase(), conceptWidth, 9), ...(item.detail ? ['', ...wrapped(item.detail, conceptWidth, 9)] : [])];
     const wholeHeight = Math.max(lines.length * 4.5, 5) + 9;
     if (y + wholeHeight > bodyBottom && wholeHeight < bodyBottom - 45) continuation();
     let consumed = 0, first = true;
@@ -110,9 +132,9 @@ export function createPDF(document, company, client, { logoData, demo = false } 
       if (available < 2) { continuation(); continue; }
       const chunk = lines.slice(consumed, consumed + available);
       if (first) {
-        fit(Number(item.quantity).toLocaleString('es-ES'), 136, y, 20, 9, { align: 'right' });
-        fit(money(item.price), 160, y, 22, 9, { align: 'right' });
-        fit(money(totals({ items: [item] }).subtotal), right, y, 24, 9, { align: 'right' });
+        fit(itemAmounts[itemIndex].quantity, quantityCenter, y, quantityWidth, amountSize, { align: 'center' });
+        fit(itemAmounts[itemIndex].price, priceRight, y, priceWidth, amountSize, { align: 'right' });
+        fit(itemAmounts[itemIndex].subtotal, right, y, subtotalWidth, amountSize, { align: 'right' });
       }
       chunk.forEach((line, index) => text(line, left, y + index * 4.5, 9));
       y += Math.max(chunk.length * 4.5, 5) + 9; consumed += chunk.length; first = false;
@@ -123,9 +145,10 @@ export function createPDF(document, company, client, { logoData, demo = false } 
   if (document.po) flowLines(wrapped(`PO / Orden de pedido: ${document.po}`, width, 9));
   if (document.notes) flowLines(wrapped(document.notes, width, 9), { color: muted });
 
-  const t = totals(document), rows = [];
+  const t = documentAmounts(document), rows = [];
   if (t.discountAmount) rows.push(['Subtotal', money(t.subtotal)], [`Descuento ${document.discount}%`, '- ' + money(t.discountAmount)]);
-  rows.push(['Base imponible', money(t.base)], [`IVA ${document.vat}%`, money(t.vatAmount)]);
+  rows.push([t.vatIncluded ? 'Base imponible' : 'Importe sin IVA', money(t.base)]);
+  if (t.vatIncluded) rows.push([`IVA ${document.vat}%`, money(t.vatAmount)]);
   if (t.withholdingAmount) rows.push([`Retención ${document.withholding}%`, '- ' + money(t.withholdingAmount)]);
   const totalHeight = rows.length * 6 + 23;
   const validity = document.kind === 'invoice'
@@ -152,7 +175,8 @@ export function createPDF(document, company, client, { logoData, demo = false } 
     fit(label, 107, totalY + 8 + index * 6, 42, 10);
     fit(value, 183, totalY + 8 + index * 6, 32, 10, { align: 'right' });
   });
-  fit(money(t.total), 183, totalY + totalHeight - 6, 76, 21, { align: 'right' });
+  fit(money(t.total), 183, totalY + totalHeight - 6, 76, 17, { align: 'right' });
+  if (!t.vatIncluded) text('IVA no incluido', 183, totalY + totalHeight + 5, 8, { color: muted, align: 'right' });
   y = totalY + totalHeight + 12;
   flowLines(validityLines, { size: 8, color: muted, step: 4, gap: 1 });
   let paymentIndex = 0;

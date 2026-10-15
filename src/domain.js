@@ -1,5 +1,5 @@
-const EUR = new Intl.NumberFormat('es-ES', { style: 'currency', currency: 'EUR' });
-const QUOTE_STATUSES = new Set(['draft', 'sent', 'accepted', 'rejected']);
+const EUR = new Intl.NumberFormat('es-ES', { style: 'currency', currency: 'EUR', useGrouping: false });
+const QUOTE_STATUSES = new Set(['draft', 'ready', 'sent', 'accepted', 'rejected']);
 const INVOICE_STATUSES = new Set(['issued', 'paid', 'partial', 'overdue']);
 const MAX_CENTS = BigInt(Number.MAX_SAFE_INTEGER);
 
@@ -13,7 +13,19 @@ export function todayISO(now = new Date()) {
 }
 
 export function money(value) {
-  return EUR.format(Number.isFinite(Number(value)) ? Number(value) : 0);
+  return groupedNumber(EUR, value);
+}
+
+// Spanish Intl defaults omit grouping for four digits. Group the integer part
+// explicitly so 1.000 and 15.000 remain consistent, including older iPhones.
+function groupedNumber(formatter, value) {
+  const number = Number.isFinite(Number(value)) ? Number(value) : 0;
+  return formatter.formatToParts(number).map(part => part.type === 'integer'
+    ? part.value.replace(/\B(?=(\d{3})+(?!\d))/g, '.') : part.value).join('');
+}
+
+export function formatNumber(value, options = {}) {
+  return groupedNumber(new Intl.NumberFormat('es-ES', { maximumFractionDigits: 3, ...options, useGrouping: false }), value);
 }
 
 export function escapeHTML(value) {
@@ -91,6 +103,13 @@ export function totals(doc = {}) {
   return Object.fromEntries(Object.entries(totalCents(doc)).map(([key, value]) => [key, Number(value) / 100]));
 }
 
+/** Quote prices exclude VAT; the stored tax rate is retained for invoicing. */
+export function documentAmounts(doc = {}) {
+  const amounts = totalCents(doc), vatIncluded = doc?.kind === 'invoice';
+  if (doc?.kind === 'quote') amounts.total -= amounts.vatAmount;
+  return { ...Object.fromEntries(Object.entries(amounts).map(([key, value]) => [key, Number(value) / 100])), vatIncluded };
+}
+
 function paymentCents(doc, payments = []) {
   if (!doc?.id || !Array.isArray(payments)) return 0n;
   return payments.reduce((sum, payment) => {
@@ -140,7 +159,7 @@ export function alerts(documents = [], payments = [], today = todayISO()) {
   const result = [];
   for (const doc of documents) {
     const currentStatus = status(doc, payments, today);
-    if (currentStatus === 'draft' || currentStatus === 'rejected') continue;
+    if (currentStatus === 'draft' || currentStatus === 'ready' || currentStatus === 'rejected') continue;
     if (currentStatus === 'review' && validDate(doc.date)) {
       result.push({
         id: `review-${doc.id}`, documentId: doc.id, type: 'review',
