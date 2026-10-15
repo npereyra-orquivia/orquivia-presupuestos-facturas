@@ -35,6 +35,15 @@ confirmación y el historial directamente. Al cerrar sesión se descarta la cach
 Las comprobaciones de acceso y la validación del envío en el servidor permanecen
 activas, también cuando la pantalla reutiliza datos recientes.
 
+El historial del presupuesto combina cambios y envíos por fecha, conservando
+actor, destinatarios, asunto y resultado. El cambio automático de estado se
+integra en su correo correspondiente cuando la coincidencia es inequívoca;
+los cambios manuales permanecen como entradas independientes. El botón
+**Volver a enviar por correo** abre directamente un borrador editable con un
+identificador nuevo. Los borradores pendientes conservan su contenido e
+identificador; un resultado incierto o parcial sigue bloqueando otro intento.
+La confirmación de éxito aparece al completar el envío, sin repetirse al reabrir.
+
 El envío registra remitente, destinatario, fecha, estado, identificador y huella
 del PDF. Se conserva el cambio manual de estado para correos enviados fuera
 del portal. Los cambios simultáneos siguen usando las versiones de la empresa.

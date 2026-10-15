@@ -31,6 +31,7 @@ test('only a confirmed sent-and-archived job displays the success confirmation',
   const partial = renderMailResult({ document, job: { status: 'uncertain', errorCode: 'SMTP_PARTIAL' } });
   assert.match(partial, /Envío parcial · por revisar/);
   assert.ok(!partial.includes('data-new-mail'));
+  assert.ok(!renderMailResult({ document, job: { status: 'sent', errorCode: 'SMTP_PARTIAL' } }).includes('data-new-mail'));
 });
 
 test('loading is accessible and result metadata cannot inject executable markup', () => {

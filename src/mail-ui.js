@@ -58,7 +58,7 @@ function historyMarkup(history, { currentArchiveId } = {}) {
 }
 
 const recipientText = value => Array.isArray(value) ? value.join(', ') : typeof value === 'string' ? value : '';
-const allowsNewMail = job => ['sent', 'archive_pending', 'failed'].includes(job?.status);
+const allowsNewMail = job => job?.errorCode !== 'SMTP_PARTIAL' && ['sent', 'archive_pending', 'failed'].includes(job?.status);
 const refreshIcon = '<svg aria-hidden="true" focusable="false" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20 7v5h-5M4 17v-5h5"/><path d="M6.1 7a7 7 0 0 1 11.6-1L20 9M4 15l2.3 3a7 7 0 0 0 11.6-1"/></svg>';
 
 function historySection(document, history, options) {

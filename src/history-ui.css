@@ -6,6 +6,15 @@
 .record-history-list li{border-bottom:1px solid var(--border);padding-bottom:12px;display:grid;gap:3px}
 .record-history-list li:last-child{border-bottom:0}.record-history-list small,.record-history-list span{color:var(--muted)}
 .record-history [data-history-refresh]{margin-top:12px}
+.record-history-timeline{gap:0;border-left:1px solid var(--border);margin:5px 0 0 5px;padding-left:19px}
+.record-history-timeline>li{position:relative;padding:0 0 17px;margin-bottom:17px}
+.record-history-timeline>li:before{content:"";position:absolute;left:-24px;top:6px;width:8px;height:8px;border:2px solid var(--surface,#fff);border-radius:50%;background:#80968a;box-shadow:0 0 0 1px var(--border)}
+.record-history-timeline>li:last-child{margin-bottom:0;padding-bottom:0}
+.record-history-timeline>.record-history-mail:before{background:#285743}
+.record-history-mail-fields{display:grid;gap:5px;margin:6px 0;font-size:12px;line-height:1.6}
+.record-history-mail-fields>div{display:grid;grid-template-columns:76px minmax(0,1fr);gap:9px}
+.record-history-mail-fields dt{font-weight:600;color:var(--muted)}
+.record-history-mail-fields dd{margin:0;color:var(--text);white-space:pre-wrap;overflow-wrap:anywhere}
 .edit-conflict{border:1px solid #c39443;border-radius:12px;padding:18px 20px;margin:0 0 24px;background:#fff8e9;color:#4b3920}
 .modal>.edit-conflict{margin:0 0 22px}.edit-conflict h3{margin:0 0 8px;font-size:17px}.edit-conflict p{margin:7px 0;font-size:13px;line-height:1.6}
 .edit-conflict-actions{display:flex;align-items:center;flex-wrap:wrap;gap:10px;margin-top:13px}.edit-conflict .button{padding:10px 13px;min-height:42px;font-size:13px}

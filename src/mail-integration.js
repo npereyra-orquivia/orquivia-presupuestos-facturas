@@ -1,6 +1,7 @@
 import { renderMailSettings, bindMailSettings, renderMailComposer, bindMailComposer, renderMailLoading, renderMailResult, bindMailResult } from './mail-ui.js';
 import { defaultMailProfile, normalizeMailProfile, defaultMailDraft } from './mail-domain.js';
 import { createMailContextCache, mergeMailJob } from './mail-context-cache.js';
+import { resolveMailComposeEntry } from './mail-compose-entry.js';
 
 export function createMailFeature(ctx) {
   let profile = null, identity = null, cleanup = null, mountRequest = 0, composerRequest = 0;
@@ -122,8 +123,7 @@ export function createMailFeature(ctx) {
       if (!valid()) return;
       profile = data.profile;
       const saved = drafts.get(document.id);
-      job = saved ? data.history.find(entry => entry.id === saved.idempotencyKey) : data.history[0];
-      draft = saved || { ...defaultMailDraft(document, ctx.clientFor(document)), ...(job ? { to: job.to, cc: job.cc || [], subject: job.subject } : {}), idempotencyKey: job?.id || crypto.randomUUID() };
+      ({ draft, job } = resolveMailComposeEntry({ savedDraft: saved, history: data.history, defaultDraft: defaultMailDraft(document, ctx.clientFor(document)) }));
       drafts.set(document.id, draft);
       draw();
     } catch (error) {
