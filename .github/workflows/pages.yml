@@ -1,7 +1,7 @@
-name: Publicar Orquívia en GitHub Pages
+name: Publicar Orquívia estable y pruebas 1.1
 on:
   push:
-    branches: [main]
+    branches: [codex/email-v1-1]
   workflow_dispatch:
 permissions:
   contents: read
@@ -15,21 +15,38 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: v1.0.0
+          path: stable
+      - uses: actions/checkout@v4
+        with:
+          path: beta
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-          cache: npm
-      - run: npm ci
-      - run: npm test
-      - run: npm run build:production
+      - run: npm ci && npm test && npm run build:production
+        working-directory: stable
         env:
           VITE_APP_MODE: production
           VITE_SUPABASE_URL: ${{ vars.VITE_SUPABASE_URL }}
           VITE_SUPABASE_PUBLISHABLE_KEY: ${{ vars.VITE_SUPABASE_PUBLISHABLE_KEY }}
+      - run: npm ci && npm test && npm run build:production
+        working-directory: beta
+        env:
+          VITE_APP_MODE: production
+          VITE_DOCUMENT_MAIL: 'true'
+          VITE_SUPABASE_URL: ${{ vars.VITE_SUPABASE_URL }}
+          VITE_SUPABASE_PUBLISHABLE_KEY: ${{ vars.VITE_SUPABASE_PUBLISHABLE_KEY }}
+      - run: node supabase/tests/document-mail-postgres.mjs
+        working-directory: beta
+      - name: Mantener la 1.0 y añadir la 1.1 en otra dirección
+        run: |
+          mkdir -p stable/dist/pruebas-v1-1
+          cp -a beta/dist/. stable/dist/pruebas-v1-1/
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:
-          path: dist
+          path: stable/dist
   deploy:
     environment:
       name: github-pages

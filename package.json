@@ -1,6 +1,6 @@
 {
   "name": "orquivia-presupuestos",
-  "version": "1.0.0",
+  "version": "1.1.0-beta.1",
   "private": true,
   "type": "module",
   "scripts": {
@@ -17,6 +17,9 @@
     "pdfjs-dist": "^6.4.299"
   },
   "devDependencies": {
+    "@electric-sql/pglite": "0.5.9",
+    "imapflow": "2.4.3",
+    "nodemailer": "10.1.1",
     "vite": "^7.0.0"
   }
 }
