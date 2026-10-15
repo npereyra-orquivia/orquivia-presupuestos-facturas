@@ -1,8 +1,8 @@
 # Orquívia 1.1 en pruebas
 
 La versión estable permanece en la raíz de GitHub Pages y está etiquetada como
-`v1.0.0` (commit `d5ad784`). La rama `codex/email-v1-1` publica la misma 1.0 en
-la raíz y la nueva interfaz en `/pruebas-v1-1/`. Comparten la empresa privada
+`v1.0.0` (commit `d5ad784`). El flujo protegido de `main` publica la misma 1.0 en
+la raíz y toma la rama `codex/email-v1-1` para `/pruebas-v1-1/`. Comparten la empresa privada
 de Supabase: la 1.1 no crea una segunda contabilidad.
 
 Cada usuaria configura su propio correo y firma en **Mi espacio**. La contraseña
