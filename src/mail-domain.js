@@ -26,6 +26,27 @@ export function isMailAddress(value) {
   return parts[1].length <= 253 && parts[1].includes('.') && parts[1].split('.').every(label => /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?$/.test(label));
 }
 
+const HEADER_CONTROLS = /[\u0000-\u001f\u007f-\u009f\u2028\u2029]/u;
+
+/** Plain addresses only: reject the whole field if any recipient is malformed. */
+export function parseMailRecipients(value) {
+  if (value === undefined || value === null || value === '') return [];
+  const entries = Array.isArray(value) ? value : [value];
+  const result = [], seen = new Set();
+  for (const entry of entries) {
+    if (typeof entry !== 'string' || HEADER_CONTROLS.test(entry)) throw new Error('Escribe direcciones de correo válidas, separadas por comas o punto y coma.');
+    // A blank optional field is allowed; an empty member of a submitted list
+    // cannot conceal an invalid or accidentally omitted recipient.
+    if (!Array.isArray(value) && !entry.trim()) return [];
+    for (const part of entry.split(/[,;]/)) {
+      const address = part.trim(), key = address.toLowerCase();
+      if (!isMailAddress(address)) throw new Error('Escribe direcciones de correo válidas, separadas por comas o punto y coma.');
+      if (!seen.has(key)) { result.push(address); seen.add(key); }
+    }
+  }
+  return result;
+}
+
 export function defaultMailSignature(user = {}) {
   const email = String(user.email || '').trim().toLowerCase();
   return { name: String(user.user_metadata?.name || user.email?.split('@')[0] || '').slice(0, 100), role: '', phone: '' };
@@ -59,16 +80,23 @@ export function validateMailSignature(signature = {}) {
 }
 
 export function validateMailDraft(draft = {}) {
-  const to = Array.isArray(draft.to) ? draft.to : [draft.to];
+  if (!draft || typeof draft !== 'object' || Array.isArray(draft)) draft = {};
+  const errors = {};
+  let to = [], cc = [];
+  try { to = parseMailRecipients(draft.to); }
+  catch { errors.to = 'Revisa todas las direcciones de los destinatarios.'; }
+  try { cc = parseMailRecipients(draft.cc); }
+  catch { errors.cc = 'Revisa todas las direcciones de copia (CC).'; }
+  const primary = new Set(to.map(address => address.toLowerCase()));
+  cc = cc.filter(address => !primary.has(address.toLowerCase()));
   const value = {
-    to: to.map(address => typeof address === 'string' ? address.trim() : ''),
+    to, cc,
     subject: typeof draft.subject === 'string' ? draft.subject.trim() : '',
     message: typeof draft.message === 'string' ? draft.message.replace(/\r\n?/g, '\n') : '',
   };
-  const errors = {};
-  // This version presents one recipient. The API can evolve independently.
-  if (value.to.length !== 1 || !isMailAddress(value.to[0])) errors.to = 'Escribe una dirección de correo válida para el destinatario.';
-  if (!value.subject || value.subject.length > 200 || /[\u0000-\u001f\u007f]/.test(value.subject)) errors.subject = 'Escribe un asunto de hasta 200 caracteres, en una sola línea.';
+  if (!errors.to && (to.length < 1 || to.length > 20)) errors.to = 'Escribe entre 1 y 20 direcciones de correo para los destinatarios.';
+  if (to.length + cc.length > 20) errors.cc = 'Puedes enviar a un máximo de 20 direcciones distintas entre Para y CC.';
+  if (!value.subject || value.subject.length > 200 || HEADER_CONTROLS.test(draft.subject || '')) errors.subject = 'Escribe un asunto de hasta 200 caracteres, en una sola línea.';
   if (!value.message.trim() || value.message.length > 20_000 || /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/.test(value.message)) errors.message = 'Escribe un mensaje de hasta 20.000 caracteres.';
   return { ok: Object.keys(errors).length === 0, value, errors };
 }
@@ -79,6 +107,7 @@ export function defaultMailDraft(document = {}, client = {}) {
   const recipient = typeof client.email === 'string' ? client.email.trim() : '';
   return {
     to: isMailAddress(recipient) ? [recipient] : [''],
+    cc: [],
     subject: `${kind === 'factura' ? 'Factura' : 'Presupuesto'}${reference ? ` ${reference}` : ''} · Orquívia`.slice(0, 200),
     message: `Hola,\n\nTe adjunto el ${kind}${reference ? ` ${reference}` : ''} para que puedas revisarlo.\n\nQuedo a tu disposición para cualquier consulta.\n\nUn saludo,`,
   };
@@ -92,13 +121,16 @@ export function mailAttachmentName(document = {}) {
 export function mailRecipientSuggestions(history = [], limit = 8) {
   const values = [], seen = new Set();
   for (const entry of [...history].sort((a, b) => String(b.createdAt || b.created_at || '').localeCompare(String(a.createdAt || a.created_at || '')))) {
-    const addresses = Array.isArray(entry.to) ? entry.to : [entry.to];
-    for (const address of addresses) {
-      if (typeof address !== 'string') continue;
-      const clean = address.trim(), key = clean.toLowerCase();
-      if (!isMailAddress(clean) || seen.has(key)) continue;
-      values.push(clean); seen.add(key);
-      if (values.length >= Math.max(1, Math.min(limit, 20))) return values;
+    for (const field of [entry.to, entry.cc]) {
+      let addresses;
+      try { addresses = parseMailRecipients(field); }
+      catch { continue; }
+      for (const address of addresses) {
+        const key = address.toLowerCase();
+        if (seen.has(key)) continue;
+        values.push(address); seen.add(key);
+        if (values.length >= Math.max(1, Math.min(limit, 20))) return values;
+      }
     }
   }
   return values;

@@ -12,11 +12,11 @@ function fixture({smtpError,archiveError,existing=false}={}) {
   const db={rpc:async(name,p)=>{calls.push({name,p});let data;
     if(name.endsWith('_profile'))data={email:'sender@example.test',connected:true,signature,version:1,provider:'serviciodecorreo',...(p.p_secrets?{password:'test-password',sentFolder:'Sent'}:{})};
     if(name.endsWith('_claim')&&!name.endsWith('archive_claim'))data={existing,job:{id,status,createdAt:'2026-10-15T09:00:00Z'},document:{id:'quote',kind:'quote',status:'ready',number:'PR-001'},company:{},client:{}};
-    if(name.endsWith('_complete')){status=p.p_status;data={job:{id,status},...(status==='archive_pending'?{workspace:{state:{},version:8}}:{})};}
+    if(name.endsWith('_complete')){status=p.p_status;data={job:{id,status,...(p.p_delivery?{errorCode:p.p_delivery.errorCode,accepted:p.p_delivery.accepted,rejected:p.p_delivery.rejected}:{})},...(status==='archive_pending'?{workspace:{state:{},version:8}}:{})};}
     if(name.endsWith('_archive_claim'))data={raw:btoa('exact-mime'),messageId:'<fixture@example.test>'};
     return {data,error:null};}};
   const mail={buildMessage:async()=>({raw:new TextEncoder().encode('exact-mime'),messageId:'<fixture@example.test>',envelope:{from:'sender@example.test',to:fields.to}}),
-    sendRaw:async()=>{++smtp;if(smtpError)throw Object.assign(new Error('raw secret detail'),{code:smtpError});},
+    sendRaw:async()=>{++smtp;if(smtpError)throw Object.assign(new Error('raw secret detail'),typeof smtpError==='string'?{code:smtpError}:smtpError);},
     appendSent:async(_c,folder,raw)=>{++append;assert.equal(folder,'Sent');assert.equal(new TextDecoder().decode(raw),'exact-mime');if(archiveError)throw Error('private detail');}};
   const handler=createDocumentMailHandler({db,auth:{getUser:async()=>({data:{user:{id:user,email:'sender@example.test'}}})},mail,renderDocumentPdf:async()=>new Uint8Array([1,2]),logoBytes:new Uint8Array([3])});
   return {handler,calls,count:()=>({smtp,append})};
@@ -39,4 +39,22 @@ test('archive failure preserves sent status and retryArchive never submits SMTP'
 test('an ambiguous SMTP failure is never archived or retried, and idempotent requests never send again',async()=>{
   const f=fixture({smtpError:'SMTP_UNCERTAIN'}),r=await(await f.handler(request('send',fields))).json();assert.equal(r.job.status,'uncertain');assert.deepEqual(f.count(),{smtp:1,append:0});
   const replay=fixture({existing:true});await replay.handler(request('send',fields));assert.deepEqual(replay.count(),{smtp:0,append:0});
+});
+
+test('To/Cc are normalized into the claim and the request hash changes when Cc changes',async()=>{
+  const first=fixture(),second=fixture();
+  await first.handler(request('send',{...fields,to:['client@example.test','other@example.test'],cc:['copy@example.test','CLIENT@example.test']}));
+  await second.handler(request('send',{...fields,to:['client@example.test','other@example.test'],cc:['different@example.test']}));
+  const claim=f=>f.calls.find(call=>call.name==='orquivia_mail_claim').p;
+  assert.deepEqual(claim(first).p_to,['client@example.test','other@example.test']);assert.deepEqual(claim(first).p_cc,['copy@example.test']);
+  assert.notEqual(claim(first).p_hash,claim(second).p_hash);
+});
+
+test('a partially accepted message records recipients without archiving, marking sent or returning a workspace change',async()=>{
+  const f=fixture({smtpError:{code:'SMTP_PARTIAL',accepted:fields.to,rejected:['copy@example.test']}});
+  const result=await(await f.handler(request('send',{...fields,cc:['copy@example.test']}))).json();
+  assert.equal(result.job.status,'uncertain');assert.equal(result.job.errorCode,'SMTP_PARTIAL');assert.deepEqual(result.job.accepted,fields.to);assert.deepEqual(result.job.rejected,['copy@example.test']);
+  assert.equal(result.workspace,undefined);assert.deepEqual(f.count(),{smtp:1,append:0});
+  assert.ok(f.calls.some(call=>call.name==='orquivia_mail_store_message'));
+  assert.ok(!f.calls.some(call=>call.p.p_status==='archive_pending'||call.name==='orquivia_mail_archive_claim'));
 });

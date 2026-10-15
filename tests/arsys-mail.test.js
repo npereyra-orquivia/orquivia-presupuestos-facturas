@@ -21,6 +21,17 @@ test('MIME contains one PDF, embedded logo, fixed sender/message ID and escaped 
   assert.ok(!raw.includes(account.password));
 });
 
+test('all To and Cc recipients appear in MIME and the SMTP envelope without cross-list duplicates', async () => {
+  const transport = createArsysMail({ createTransport: options => nodemailer.createTransport(options) });
+  const result = await transport.buildMessage({ email: account.email, to: ['one@example.test', 'two@example.test'], cc: ['copy@example.test','ONE@example.test'],
+    subject: 'Presupuesto de prueba', message: 'Mensaje', signature: {name:'Persona',role:'',phone:''}, pdfBytes:new Uint8Array([1]),logoBytes:new Uint8Array([2]),
+    filename:'presupuesto-PR-001.pdf',jobId:'10000000-0000-4000-8000-000000000001',date:'2026-10-15T09:00:00Z' });
+  const raw = new TextDecoder().decode(result.raw);
+  assert.match(raw,/To: one@example.test, two@example.test\r?\n/i);
+  assert.match(raw,/Cc: copy@example.test\r?\n/i);
+  assert.deepEqual(result.envelope.to,['one@example.test','two@example.test','copy@example.test']);
+});
+
 test('mail verification uses only approved TLS hosts and discovers Sent without sending', async () => {
   let sent = 0; const options = [];
   const mail = createArsysMail({ createTransport: value => { options.push(value); return { verify: async () => true, sendMail: () => ++sent, close() {} }; },
@@ -51,6 +62,23 @@ test('SMTP timeout remains uncertain while an explicit rejection is safe to repo
     const mail = createArsysMail({ createTransport: () => ({ sendMail: async () => { throw error; }, close() {} }) });
     await assert.rejects(mail.sendRaw(account, new Uint8Array(),{from:account.email,to:['client@example.test']}), failure => failure.code === code);
   }
+});
+
+test('partial SMTP acceptance retains requested accepted and rejected recipients and is never fully sent', async () => {
+  const envelope={from:account.email,to:['client@example.test','copy@example.test']};
+  for(const result of [{accepted:['client@example.test'],rejected:['copy@example.test']},
+    {accepted:[{address:'CLIENT@example.test'}],rejected:['copy@example.test','unrequested@example.test']}]) {
+    const mail=createArsysMail({createTransport:()=>({sendMail:async()=>result,close(){}})});
+    await assert.rejects(mail.sendRaw(account,new Uint8Array(),envelope),error=>{
+      assert.equal(error.code,'SMTP_PARTIAL');assert.deepEqual(error.accepted,['client@example.test']);assert.deepEqual(error.rejected,['copy@example.test']);return true;
+    });
+  }
+  const allRejected=createArsysMail({createTransport:()=>({sendMail:async()=>({accepted:[],rejected:envelope.to}),close(){}})});
+  await assert.rejects(allRejected.sendRaw(account,new Uint8Array(),envelope),error=>error.code==='SMTP_REJECTED');
+  const mixedError=createArsysMail({createTransport:()=>({sendMail:async()=>{throw {responseCode:550,accepted:['client@example.test'],rejected:['copy@example.test']};},close(){}})});
+  await assert.rejects(mixedError.sendRaw(account,new Uint8Array(),envelope),error=>error.code==='SMTP_PARTIAL');
+  const accepted=createArsysMail({createTransport:()=>({sendMail:async()=>({accepted:envelope.to,rejected:[]}),close(){}})});
+  assert.deepEqual(await accepted.sendRaw(account,new Uint8Array(),envelope),{accepted:true});
 });
 
 test('address/header injection and user HTML do not become executable mail content', () => {

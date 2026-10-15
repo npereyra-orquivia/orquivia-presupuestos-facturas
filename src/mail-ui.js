@@ -40,7 +40,7 @@ export function bindMailSettings(root, ctx) {
       const result = action === 'signature' ? await ctx.saveSignature({ signature: s.value, expectedVersion: version })
         : action === 'disconnect' ? await ctx.disconnect({ expectedVersion: version })
           : await ctx.configure({ signature: s.value, password: password || undefined, provider: form.elements.provider.value, expectedVersion: version });
-      if (active) ctx.onResult?.(result);
+      if (active) ctx.onResult?.(result, action);
     } catch (error) { feedback(error.message); }
     finally { pending = false; if (active) { form.querySelector('fieldset').disabled = false; form.elements.mailPassword.value = ''; } }
   }
@@ -54,8 +54,14 @@ export function bindMailSettings(root, ctx) {
 function historyMarkup(history) {
   return history.length ? history.map(job => {
     const s = mailStatus(job.status), date = new Date(job.createdAt);
-    return `<li><div><strong>${esc(s.label)}</strong><span>${esc(job.to?.join(', ') || '')}</span><small>${esc(job.sender || job.from || '')} · ${Number.isFinite(date.valueOf()) ? esc(date.toLocaleString('es-ES', { timeZone: 'Europe/Madrid' })) : 'Fecha por comprobar'}</small></div>${job.status === 'archive_pending' ? `<button type="button" class="text-button" data-retry-archive="${esc(job.id)}">Guardar solo la copia</button>` : ''}</li>`;
+    return `<li><div><strong>${esc(job.errorCode === 'SMTP_PARTIAL' ? 'Envío parcial · por revisar' : s.label)}</strong><span>Para: ${esc(recipientText(job.to))}</span>${job.cc?.length ? `<span>CC: ${esc(recipientText(job.cc))}</span>` : ''}${job.errorCode === 'SMTP_PARTIAL' ? `<span>Aceptados por el servidor: ${esc(recipientText(job.accepted) || 'Por confirmar')}</span><span>Rechazados: ${esc(recipientText(job.rejected) || 'Por confirmar')}</span>` : ''}<small>${esc(job.sender || job.from || '')} · ${Number.isFinite(date.valueOf()) ? esc(date.toLocaleString('es-ES', { timeZone: 'Europe/Madrid' })) : 'Fecha por comprobar'}</small></div>${job.status === 'archive_pending' ? `<button type="button" class="text-button" data-retry-archive="${esc(job.id)}">Guardar solo la copia</button>` : ''}</li>`;
   }).join('') : '<li>Todavía no hay envíos registrados desde la aplicación.</li>';
+}
+
+const recipientText = value => Array.isArray(value) ? value.join(', ') : typeof value === 'string' ? value : '';
+
+function messagePreview(draft, profile, logoUrl) {
+  return `<div class="mail-message-headers"><div><strong>Para</strong><span>${esc(recipientText(draft.to))}</span></div>${recipientText(draft.cc) ? `<div><strong>CC</strong><span>${esc(recipientText(draft.cc))}</span></div>` : ''}<div><strong>Asunto</strong><span>${esc(draft.subject || '')}</span></div></div><div class="mail-message-body">${esc(draft.message || '').replaceAll('\r\n', '\n').replaceAll('\n', '<br>')}</div><div class="mail-signature-preview">${renderMailSignature(profile.signature, { email: profile.email, logoUrl })}</div>`;
 }
 
 export function renderMailComposer({ document, client, profile, history = [], preview, draft, job, error = '', logoUrl = '' }) {
@@ -63,14 +69,16 @@ export function renderMailComposer({ document, client, profile, history = [], pr
   const suggestions = mailRecipientSuggestions(history);
   return `<div class="mail-compose-layout"><section class="mail-compose"><form id="mail-compose-form">
     <label class="field"><span>De</span><input value="${esc(p.email)}" readonly></label>
-    <label class="field"><span>Para</span><input name="to" type="email" required maxlength="254" list="mail-recipients" value="${esc(value.to?.[0] || '')}" autocomplete="email"></label><datalist id="mail-recipients">${suggestions.map(address => `<option value="${esc(address)}"></option>`).join('')}</datalist>
+    <label class="field"><span>Para</span><input name="to" type="text" inputmode="email" required maxlength="5200" list="mail-recipients" value="${esc(recipientText(value.to))}" autocomplete="off" aria-describedby="mail-recipients-hint"></label>
+    <label class="field"><span>CC · en copia (opcional)</span><input name="cc" type="text" inputmode="email" maxlength="5200" list="mail-recipients" value="${esc(recipientText(value.cc))}" autocomplete="off" aria-describedby="mail-recipients-hint"></label>
+    <p class="field-hint" id="mail-recipients-hint">Puedes añadir varias direcciones separadas por comas o punto y coma. Hasta 20 personas entre Para y CC; todas verán estas direcciones.</p><datalist id="mail-recipients">${suggestions.map(address => `<option value="${esc(address)}"></option>`).join('')}</datalist>
     <label class="field"><span>Asunto</span><input name="subject" required maxlength="200" value="${esc(value.subject)}"></label>
     <label class="field"><span>Mensaje</span><textarea name="message" rows="9" maxlength="20000" required>${esc(value.message)}</textarea></label>
-    <div class="mail-signature-preview">${renderMailSignature(p.signature, { email: p.email, logoUrl })}</div>
+    <section class="mail-message-preview" aria-label="Vista previa del correo"><h3>Así llegará tu mensaje</h3><div data-mail-message-preview>${messagePreview(value, p, logoUrl)}</div></section>
     <div class="mail-attachment">PDF adjunto · <strong>${esc(mailAttachmentName(document))}</strong></div>
     ${!p.connected ? '<p class="note-banner">Conecta primero tu correo en Mi espacio.</p><button type="button" class="button secondary" data-configure-mail>Configurar mi correo</button>' : ''}
-    <div class="mail-job-status" role="status">${esc(error || (job ? s.description : 'Revisa el destinatario, el mensaje y el PDF antes de enviar.'))}</div>
-    <div class="mail-actions"><button class="button primary" data-send-mail ${!p.connected || job && job.status !== 'failed' ? 'disabled' : ''}>Enviar correo con el PDF</button><button class="button secondary" type="button" data-close>Cancelar</button></div>
+    <div class="mail-job-status" role="status">${esc(error || (job?.errorCode === 'SMTP_PARTIAL' ? 'El servidor aceptó solo algunos destinatarios. Revisa el detalle del historial y tu correo antes de volver a enviar a las personas rechazadas.' : job ? s.description : 'Revisa los destinatarios, el mensaje completo con tu firma y el PDF antes de enviar.'))}</div>
+    <div class="mail-actions"><button class="button primary" data-send-mail ${!p.connected || job ? 'disabled' : ''}>Enviar correo con el PDF</button><button class="button secondary" type="button" data-close>Cancelar</button></div>
     </form><section class="mail-history"><h3>Envíos de este presupuesto</h3><button type="button" class="text-button" data-refresh-mail>Actualizar estado</button><ul>${historyMarkup(history)}</ul></section></section><aside class="mail-document-preview"><h3>PDF que se adjuntará</h3>${preview}</aside></div>`;
 }
 
@@ -78,9 +86,9 @@ export function bindMailComposer(root, ctx) {
   const form = root.querySelector('#mail-compose-form'); if (!form) return () => {};
   let active = true, pending = false, uncertain = false, token = ctx.draft?.idempotencyKey || crypto.randomUUID();
   const feedback = message => { if (active) form.querySelector('.mail-job-status').textContent = message; };
-  const draft = () => ({ to: [form.elements.to.value], subject: form.elements.subject.value, message: form.elements.message.value, idempotencyKey: token });
+  const draft = () => ({ to: form.elements.to.value, cc: form.elements.cc.value, subject: form.elements.subject.value, message: form.elements.message.value, idempotencyKey: token });
   form.addEventListener('keydown', event => { if (event.key === 'Enter' && event.target.tagName === 'INPUT') event.preventDefault(); });
-  form.oninput = () => ctx.onDraftChange?.(draft());
+  form.oninput = () => { const value = draft(); ctx.onDraftChange?.(value); form.querySelector('[data-mail-message-preview]').innerHTML = messagePreview(value, ctx.profile, ctx.logoUrl); };
   form.onsubmit = async event => {
     event.preventDefault(); if (pending || uncertain) return;
     const validated = validateMailDraft(draft());

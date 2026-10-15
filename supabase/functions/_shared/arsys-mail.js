@@ -44,15 +44,15 @@ export function createArsysMail({ createTransport, createImapClient }) {
       } catch (error) { throw fail(error?.code === 'SENT_FOLDER_NOT_FOUND' ? error.code : 'MAIL_CONNECTION_FAILED'); }
       finally { smtp.close?.(); }
     },
-    async buildMessage({ email, to, subject, message, signature, pdfBytes, filename, jobId, date, logoBytes }) {
-      const draft = validateMailDraft({ to, subject, message });
+    async buildMessage({ email, to, cc, subject, message, signature, pdfBytes, filename, jobId, date, logoBytes }) {
+      const draft = validateMailDraft({ to, cc, subject, message });
       if (!draft.ok || !isMailAddress(email) || !validateMailSignature(signature).ok || !/^[0-9a-f-]{36}$/i.test(jobId)
         || !(pdfBytes instanceof Uint8Array) || pdfBytes.length > 3 * 1024 * 1024 || !/^[A-Za-z0-9_-]+\.pdf$/.test(filename)) throw fail('INVALID_MESSAGE');
       const messageId = `<${jobId}@orquivia.com>`;
       const transport = createTransport({ streamTransport: true, buffer: true, newline: 'windows', disableFileAccess: true, disableUrlAccess: true });
       try {
         const result = await transport.sendMail({
-          from: { name: signature.name, address: email }, to, replyTo: email, subject,
+          from: { name: signature.name, address: email }, to: draft.value.to, cc: draft.value.cc, replyTo: email, subject: draft.value.subject,
           date: new Date(date), messageId,
           text: `${message}\n\n--\n${[signature.name, signature.role, signature.phone, email].filter(Boolean).join('\n')}`,
           html: `<div style="font-family:Arial,sans-serif;font-size:14px;line-height:1.6">${escape(message).replaceAll('\n', '<br>')}</div><br>${renderMailSignature(signature, { email, logoUrl: 'cid:orquivia-logo' })}`,
@@ -61,16 +61,28 @@ export function createArsysMail({ createTransport, createImapClient }) {
             { filename: 'orquivia.png', content: logoBytes, contentType: 'image/png', cid: 'orquivia-logo', contentDisposition: 'inline' },
           ],
         });
-        return { raw: new Uint8Array(result.message), messageId, envelope: { from: email, to } };
+        return { raw: new Uint8Array(result.message), messageId, envelope: { from: email, to: [...draft.value.to, ...draft.value.cc] } };
       } finally { transport.close?.(); }
     },
     async sendRaw(credentials, raw, envelope) {
       const transport = createTransport(settings(credentials, 'smtp'));
+      // Only retain addresses that were actually requested. Do not expose raw
+      // SMTP errors or accidentally trust arbitrary server-returned strings.
+      const requested = new Map(envelope.to.map(address => [address.toLowerCase(), address]));
+      const recipients = values => [...new Set((Array.isArray(values) ? values : []).map(value => typeof value === 'string' ? value : value?.address)
+        .filter(value => typeof value === 'string').map(value => requested.get(value.toLowerCase())).filter(Boolean))];
+      const partial = value => Object.assign(fail('SMTP_PARTIAL'), { accepted: recipients(value.accepted), rejected: recipients(value.rejected) });
       try {
         const result = await transport.sendMail({ envelope, raw, disableFileAccess: true, disableUrlAccess: true });
-        if (result.rejected?.length || result.accepted?.length !== envelope.to.length) throw fail('SMTP_UNCERTAIN');
+        const accepted = recipients(result.accepted), rejected = recipients(result.rejected);
+        if (accepted.length && (rejected.length || accepted.length !== requested.size)) throw partial(result);
+        if (!accepted.length && rejected.length === requested.size) throw fail('SMTP_REJECTED');
+        if (accepted.length !== requested.size || result.rejected?.length) throw fail('SMTP_UNCERTAIN');
         return { accepted: true };
       } catch (error) {
+        if (error?.code === 'SMTP_PARTIAL') throw error;
+        if (recipients(error?.accepted).length) throw partial(error);
+        if (error?.code === 'SMTP_REJECTED') throw error;
         // A missing final DATA acknowledgement is ambiguous: never retry SMTP.
         const definite = ['EAUTH', 'EDNS', 'ETLS'].includes(error?.code)
           || (error?.code === 'ECONNECTION' && error?.command === 'CONN')

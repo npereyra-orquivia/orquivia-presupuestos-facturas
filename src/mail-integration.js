@@ -30,7 +30,12 @@ export function createMailFeature(ctx) {
         configure: fields => ctx.getBackend().mail.configure(fields),
         disconnect: fields => ctx.getBackend().mail.disconnect(fields),
         saveSignature: fields => ctx.getMode() === 'cloud' ? ctx.getBackend().mail.signature(fields) : Promise.resolve({ ...current(), signature: fields.signature }),
-        onResult: result => { if (!valid()) return; profile = normalizeMailProfile(result, ctx.getUser() || {}); cleanup?.(); draw('Configuración guardada.'); },
+        onResult: (result, action) => {
+          if (!valid()) return;
+          profile = normalizeMailProfile(result, ctx.getUser() || {});
+          const message = action === 'configure' ? 'Correo conectado y comprobado. La copia se guardará en Enviados.' : action === 'disconnect' ? 'Correo desconectado.' : 'Firma guardada.';
+          cleanup?.(); draw(message); ctx.toast(message);
+        },
       });
     }
     draw('', refresh);
@@ -58,7 +63,7 @@ export function createMailFeature(ctx) {
         finally { if (isCurrent()) ctx.setBusy(false); }
       };
       const dispose = bindMailComposer(modal, {
-        draft: savedDraft, send,
+        draft: savedDraft, profile: p, logoUrl: ctx.logoUrl, send,
         onDraftChange: value => { if (valid()) drafts.set(document.id, value); },
         configure: () => { ctx.closeModal(true); ctx.navigate('personal'); },
         retryArchive: fields => backend.mail.retryArchive(fields),
@@ -72,10 +77,11 @@ export function createMailFeature(ctx) {
       ctx.cleanup(dispose);
       if (known && ['sent', 'archive_pending', 'failed'].includes(known.status)) {
         const button = ctx.root.ownerDocument.createElement('button');
-        button.type = 'button'; button.className = 'text-button'; button.textContent = 'Preparar otro correo';
-        button.onclick = () => { drafts.delete(document.id); openComposer(ctx.documentFor(document.id) || document); };
-        modal.querySelector('.mail-history').append(button);
+        button.type = 'button'; button.className = 'button secondary'; button.textContent = 'Preparar otro envío';
+        button.onclick = () => { const next = { ...drafts.get(document.id), idempotencyKey: crypto.randomUUID() }; drafts.set(document.id, next); openComposer(ctx.documentFor(document.id) || document, { draft: next }); };
+        modal.querySelector('.mail-actions').prepend(button);
       }
+      if (known) modal.querySelectorAll('#mail-compose-form input,#mail-compose-form textarea').forEach(input => { input.readOnly = true; });
     } catch (error) { if (valid()) modal.innerHTML = ctx.header('Correo no disponible') + `<p class="mail-job-error"></p><button class="button secondary" data-return-mail>Cerrar</button>`;
       if (valid()) { modal.querySelector('.mail-job-error').textContent = error.message; modal.querySelector('[data-return-mail]').onclick = () => ctx.closeModal(); modal.querySelector('[data-close]').onclick = () => ctx.closeModal(); }
     }

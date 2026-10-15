@@ -79,13 +79,13 @@ export function createDocumentMailHandler({ db, auth, mail, renderDocumentPdf, l
         return response(await archive(body.jobId));
       }
       if (body.action !== 'send') throw fail('INVALID_ACTION');
-      const draft = validateMailDraft({ to: body.to, subject: body.subject, message: body.message });
+      const draft = validateMailDraft({ to: body.to, cc: body.cc, subject: body.subject, message: body.message });
       if (!draft.ok || !uuid(body.idempotencyKey) || typeof body.documentId !== 'string' || body.documentId.length > 100 || !Number.isSafeInteger(body.expectedWorkspaceVersion)) throw fail('INVALID_MESSAGE');
       if (!profile.connected) throw fail('MAIL_NOT_CONFIGURED');
       const signature = validateMailSignature(publicProfile(profile).signature);
       if (!signature.ok) throw fail('INVALID_SIGNATURE');
       const requestHash = await hash(JSON.stringify({ ...draft.value, documentId: body.documentId, signature: signature.value }));
-      const claimed = await rpc('claim', { ...parameters, p_id: body.idempotencyKey, p_document: body.documentId, p_version: body.expectedWorkspaceVersion, p_hash: requestHash, p_to: draft.value.to, p_subject: draft.value.subject });
+      const claimed = await rpc('claim', { ...parameters, p_id: body.idempotencyKey, p_document: body.documentId, p_version: body.expectedWorkspaceVersion, p_hash: requestHash, p_to: draft.value.to, p_cc: draft.value.cc, p_subject: draft.value.subject });
       if (claimed.existing) return response({ job: claimed.job });
       const jobId = claimed.job.id;
       let mime, connection;
@@ -99,7 +99,13 @@ export function createDocumentMailHandler({ db, auth, mail, renderDocumentPdf, l
         return response(await rpc('complete', { ...parameters, p_id: jobId, p_status: 'failed' }));
       }
       try { await mail.sendRaw(connection, mime.raw, mime.envelope); }
-      catch (error) { return response(await rpc('complete', { ...parameters, p_id: jobId, p_status: error.code === 'SMTP_REJECTED' ? 'failed' : 'uncertain' })); }
+      catch (error) {
+        // Some RCPT recipients can be accepted while others are rejected. That
+        // message must never be treated as fully sent or blindly resubmitted.
+        const partial = error.code === 'SMTP_PARTIAL';
+        return response(await rpc('complete', { ...parameters, p_id: jobId, p_status: error.code === 'SMTP_REJECTED' ? 'failed' : 'uncertain',
+          ...(partial ? { p_delivery: { errorCode: 'SMTP_PARTIAL', accepted: error.accepted, rejected: error.rejected } } : {}) }));
+      }
       // Commit SMTP acceptance before archiving. A retry may only append its
       // immutable MIME copy, never submit the message to SMTP a second time.
       const accepted = await rpc('complete', { ...parameters, p_id: jobId, p_status: 'archive_pending' });

@@ -19,13 +19,22 @@ SMTP permite marcar como enviado. Después se añade la misma copia a Enviados.
 Si falla ese guardado, **Guardar solo la copia** no vuelve a enviar el correo.
 Si el resultado SMTP es incierto, no se repite automáticamente.
 
+Los campos **Para** y **CC** admiten varias direcciones separadas por comas o
+punto y coma, hasta 20 personas distintas en total. Las direcciones duplicadas
+se unifican. El mensaje completo y la firma se previsualizan mientras se edita.
+Después de un intento terminado, **Preparar otro envío** permite revisar otros
+destinatarios y enviar de nuevo con un identificador independiente; cada envío
+queda en el historial. Un resultado parcial o incierto requiere revisar antes
+de intentar otro envío para evitar duplicados.
+
 El envío registra remitente, destinatario, fecha, estado, identificador y huella
 del PDF. Se conserva el cambio manual de estado para correos enviados fuera
 del portal. Los cambios simultáneos siguen usando las versiones de la empresa.
 Si alguien modifica el presupuesto durante el envío, se conserva el documento
 realmente enviado y no se sobrescribe el presupuesto actual.
 
-Despliegue: aplicar la migración `202610150012_document_mail.sql`, ejecutar
+Despliegue: aplicar las migraciones `202610150012_document_mail.sql` y
+`202610150013_mail_recipients.sql`, ejecutar
 `node scripts/bundle-mail-function.mjs` y publicar el resultado como función
 `document-mail`. La función valida el JWT con Supabase Auth, exige AAL2 y
 comprueba membresía activa. Ninguna RPC de correo puede ejecutarse con las
