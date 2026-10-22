@@ -2,7 +2,7 @@
 // this tab's sessionStorage and are scoped to an authenticated account.
 const ROUTES = Object.freeze({
   dashboard: 'resumen', quotes: 'presupuestos', invoices: 'facturas', expenses: 'gastos',
-  reports: 'informes', clients: 'clientes', reminders: 'recordatorios', settings: 'configuracion', personal: 'mi-espacio',
+  reports: 'informes', statements: 'estados-financieros', clients: 'clientes', reminders: 'recordatorios', settings: 'configuracion', personal: 'mi-espacio',
 });
 const DOCUMENT_FILTERS = Object.freeze({
   quotes: ['all', 'draft', 'ready', 'sent', 'accepted', 'rejected'],
@@ -17,11 +17,15 @@ const integer = (value, minimum, maximum, fallback) => {
   return Number.isSafeInteger(parsed) && parsed >= minimum && parsed <= maximum ? parsed : fallback;
 };
 const term = value => typeof value === 'string' ? value.replace(/[\u0000-\u001f\u007f]/g, '').slice(0, 200) : '';
+const reportDate = value => typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value)
+  && value >= '1900-01-01' && value <= '2200-12-31' && Number.isFinite(new Date(value + 'T00:00:00Z').valueOf())
+  && new Date(value + 'T00:00:00Z').toISOString().slice(0, 10) === value;
 
 export function defaultViewState(today = new Date().toISOString().slice(0, 10)) {
   const year = integer(today.slice(0, 4), 1900, 2200, 2026), month = integer(today.slice(5, 7), 1, 12, 1);
   return { page: 'dashboard', quotes: { filter: 'all', query: '' }, invoices: { filter: 'all', query: '' },
-    expenses: { filter: 'all', query: '' }, reports: { type: 'quarter', year, quarter: Math.ceil(month / 3) } };
+    expenses: { filter: 'all', query: '' }, reports: { type: 'quarter', year, quarter: Math.ceil(month / 3) },
+    statements: { from: `${year}-01-01`, to: reportDate(today) ? today : `${year}-12-31` } };
 }
 
 export function sanitizeViewState(value, { today } = {}) {
@@ -34,6 +38,10 @@ export function sanitizeViewState(value, { today } = {}) {
   const period = own(value, 'reports');
   result.reports = { type: member(own(period, 'type'), ['quarter', 'year', 'all'], result.reports.type),
     year: integer(own(period, 'year'), 1900, 2200, result.reports.year), quarter: integer(own(period, 'quarter'), 1, 4, result.reports.quarter) };
+  const statementPeriod = own(value, 'statements'), cutoff = result.statements.to;
+  const to = own(statementPeriod, 'to'), from = own(statementPeriod, 'from');
+  if (reportDate(to) && to <= cutoff) result.statements.to = to;
+  result.statements.from = reportDate(from) && from <= result.statements.to ? from : `${result.statements.to.slice(0, 4)}-01-01`;
   return result;
 }
 
@@ -55,6 +63,11 @@ export function parseViewRoute({ hash = '', search = '' } = {}) {
     if (quarter !== null) period.quarter = quarter;
     route.reports = period;
   }
+  if (page === 'statements') {
+    route.statements = {};
+    if (reportDate(query.get('desde'))) route.statements.from = query.get('desde');
+    if (reportDate(query.get('hasta'))) route.statements.to = query.get('hasta');
+  }
   return route;
 }
 
@@ -64,6 +77,7 @@ export function applyViewRoute(value, route, options) {
   view.page = route.page;
   if (DOCUMENT_FILTERS[route.page] && own(route, route.page)) view[route.page] = { ...view[route.page], ...route[route.page], query: view[route.page].query };
   if (route.page === 'reports') view.reports = { ...view.reports, ...own(route, 'reports') };
+  if (route.page === 'statements') view.statements = { ...view.statements, ...own(route, 'statements') };
   return sanitizeViewState(view, options);
 }
 
@@ -74,6 +88,10 @@ export function viewRouteHash(value, options) {
     parameters.set('periodo', view.reports.type);
     if (view.reports.type !== 'all') parameters.set('ano', view.reports.year);
     if (view.reports.type === 'quarter') parameters.set('trimestre', view.reports.quarter);
+  }
+  if (view.page === 'statements') {
+    parameters.set('desde', view.statements.from);
+    parameters.set('hasta', view.statements.to);
   }
   return '#' + ROUTES[view.page] + (parameters.size ? '?' + parameters : '');
 }

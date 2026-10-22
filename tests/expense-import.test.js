@@ -37,3 +37,23 @@ test('successful import appends receipts with no deletion and refuses a concurre
   await assert.rejects(executeExpenseImport(prepared,{backend,commit:async change=>{change(current);return true}}),/ya se ha importado/);
   assert.equal(current.expenses.length,1);
 });
+
+async function pendingPack(change=()=>{}){
+  const manifest={format:'orquivia-expenses-v1',expenses:[{expense:{id,supplier:'Proveedor',description:'Cargo del extracto',date:'2026-03-01',base:121,vatAmount:0,total:121,paymentStatus:'paid',paidDate:'2026-03-01',vatReviewNeeded:true,vatDeductibleAmount:0,reviewNeeded:true,missingReceiptReason:'Pendiente de subir la factura; importe acreditado por el banco.'},receipts:[]}]};
+  change(manifest);const zip=new JSZip();zip.file('manifest.json',JSON.stringify(manifest));return new File([await zip.generateAsync({type:'uint8array'})],'Pending.zip');
+}
+test('bank import without a receipt keeps paid amount, unknown VAT and missing evidence separately, with no uploads',async()=>{
+  const prepared=await prepareExpenseImport(await pendingPack(),state(),org),current=state();
+  assert.equal(prepared.incoming.length,1);assert.equal(prepared.totalBytes,0);
+  const result=await executeExpenseImport(prepared,{backend:{uploadReceipt:()=>assert.fail('No original was supplied'),deleteReceipt:()=>assert.fail('Nothing to delete')},commit:async change=>{change(current);return true}});
+  assert.deepEqual(result,{count:1,attachments:0});
+  assert.equal(current.expenses[0].paymentStatus,'paid');assert.equal(current.expenses[0].vatReviewNeeded,true);
+  assert.equal(current.expenses[0].reviewNeeded,true);assert.match(current.expenses[0].missingReceiptReason,/Pendiente/);
+  const repeat=await prepareExpenseImport(await pendingPack(),current,org);
+  assert.equal(repeat.incoming.length,0);assert.equal(repeat.skipped.length,1);
+});
+test('a missing receipt cannot be imported without a reason and pending review or with invented confirmed VAT',async()=>{
+  for(const change of [e=>delete e.missingReceiptReason,e=>e.reviewNeeded=false,e=>e.vatReviewNeeded=false,e=>{e.base=100;e.vatAmount=21;}]){
+    await assert.rejects(prepareExpenseImport(await pendingPack(m=>change(m.expenses[0].expense)),state(),org),/nota|IVA|paquete/);
+  }
+});

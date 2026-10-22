@@ -34,6 +34,20 @@ test('report year, quarter and whole-history URLs restore the chosen period', ()
   }
 });
 
+test('financial statement dates survive refresh and account storage without persisting financial input data',()=>{
+  const tab=storage(),view={...defaultViewState(today),page:'statements',statements:{from:'2026-03-01',to:'2026-10-13',capital:3000,source:'private'}};
+  writeViewState(tab,nicole,view,options);
+  const hash=viewRouteHash(view,options);assert.equal(hash,'#estados-financieros?desde=2026-03-01&hasta=2026-10-13');
+  const restored=applyViewRoute(readViewState(tab,nicole,options),parseViewRoute({hash}),options);
+  assert.equal(restored.page,'statements');assert.deepEqual(restored.statements,{from:'2026-03-01',to:'2026-10-13'});
+  assert.ok(!tab.getItem(viewStorageKey(nicole)).includes('private'));
+});
+test('financial statement routes reject impossible dates, future cutoffs and reversed periods',()=>{
+  const route=parseViewRoute({hash:'#estados-financieros?desde=2026-02-30&hasta=2027-01-01'});
+  assert.deepEqual(applyViewRoute(defaultViewState(today),route,options).statements,{from:'2026-01-01',to:today});
+  assert.deepEqual(sanitizeViewState({statements:{from:'2026-10-14',to:'2026-09-30'}},options).statements,{from:'2026-01-01',to:'2026-09-30'});
+});
+
 test('back and forward routes recover separate document filters without crossing sections', () => {
   const saved = sanitizeViewState({ quotes: { filter: 'accepted', query: 'Proyecto' }, invoices: { filter: 'paid', query: 'Cliente' } }, options);
   const invoice = applyViewRoute(saved, parseViewRoute({ hash: '#facturas?estado=overdue' }), options);

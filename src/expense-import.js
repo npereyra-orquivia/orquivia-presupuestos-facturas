@@ -5,7 +5,7 @@ import { validateWorkspace, todayISO, escapeHTML as esc, money } from './domain.
 const MAX_PACK_BYTES=150*1024*1024, MAX_TOTAL_BYTES=100*1024*1024, MAX_EXPENSES=500;
 const UUID=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const HASH=/^[0-9a-f]{64}$/;
-const fields=['id','kind','supplier','supplierTaxId','description','date','reference','category','base','vatAmount','additionalAmount','total','vatRate','vatReviewNeeded','vatDeductibleAmount','reviewNeeded','paymentStatus','paidDate','cashAmount','cashMovements','notes'];
+const fields=['id','kind','supplier','supplierTaxId','description','date','reference','category','base','vatAmount','additionalAmount','total','vatRate','vatReviewNeeded','vatDeductibleAmount','reviewNeeded','paymentStatus','paidDate','cashAmount','cashMovements','notes','missingReceiptReason','vatDocumentStatus'];
 const safePath=value=>typeof value==='string' && !value.includes('\\') && !value.startsWith('/') && value.split('/').every(part=>part&&part!=='.'&&part!=='..') && !/[\u0000-\u001f\u007f]/u.test(value);
 const signature=e=>e.reference?.trim()?`${e.supplierTaxId?.trim().toUpperCase()||e.supplier.trim().toUpperCase()}|${e.reference.trim().toUpperCase()}|${e.date}|${e.total}`:null;
 
@@ -32,7 +32,9 @@ export async function prepareExpenseImport(pack,state,organizationId){
   const usedFiles=new Set(['manifest.json']),ids=new Set(),keys=new Set(),existingIds=new Set((state.expenses||[]).map(e=>e.id)),existingKeys=new Set((state.expenses||[]).map(signature).filter(Boolean));
   const incoming=[],skipped=[],allExpenses=[],fileCache=new Map();let totalBytes=0;
   for(const row of manifest.expenses){
-    if(!row?.expense||!Array.isArray(row.receipts)||row.receipts.length<1||row.receipts.length>10)throw new Error('Cada gasto necesita entre uno y diez justificantes.');
+    if(!row?.expense||!Array.isArray(row.receipts)||row.receipts.length>10)throw new Error('Cada gasto admite hasta diez justificantes.');
+    if(!row.receipts.length&&(!(typeof row.expense.missingReceiptReason==='string'&&row.expense.missingReceiptReason.trim())
+      ||row.expense.reviewNeeded!==true||row.expense.vatReviewNeeded!==true))throw new Error('Los gastos sin archivo necesitan una nota, IVA sin confirmar y revisión pendiente.');
     const expense=Object.fromEntries(fields.filter(key=>Object.hasOwn(row.expense,key)).map(key=>[key,row.expense[key]]));
     expense.supplier??='';expense.attachments=[];
     if(!UUID.test(expense.id)||ids.has(expense.id))throw new Error('Hay identificadores de gasto repetidos o no válidos.');ids.add(expense.id);
@@ -90,7 +92,7 @@ export async function executeExpenseImport(prepared,{backend,commit,getState,onP
 
 export function expenseImportModal(ctx){
   if(ctx.getMode()!=='cloud'){ctx.toast('La importación de originales se realiza en la empresa conectada a Supabase.',true);return}
-  ctx.openModal(ctx.modalHeader('Importar gastos revisados','Selecciona un paquete con los datos revisados y sus justificantes originales.')+`<p class="field-hint">El paquete se comprueba antes de subir archivos. Los gastos que ya existan se omiten automáticamente.</p><label class="button secondary import-picker">Seleccionar paquete ZIP<input type="file" id="expense-import-pack" accept=".zip,application/zip"></label><div id="import-preview"></div><p class="import-status" aria-live="polite"></p><div class="form-footer"><button class="button secondary" data-close>Cancelar</button><button class="button primary" id="expense-import-save" disabled>Importar gastos</button></div>`,true);
+  ctx.openModal(ctx.modalHeader('Importar gastos revisados','Selecciona un paquete con sus datos y justificantes, o con una nota de archivo pendiente.')+`<p class="field-hint">El paquete se comprueba antes de guardar. Los gastos que ya existan se omiten automáticamente. Los registros sin archivo conservan el IVA y el justificante pendientes de revisión.</p><label class="button secondary import-picker">Seleccionar paquete ZIP<input type="file" id="expense-import-pack" accept=".zip,application/zip"></label><div id="import-preview"></div><p class="import-status" aria-live="polite"></p><div class="form-footer"><button class="button secondary" data-close>Cancelar</button><button class="button primary" id="expense-import-save" disabled>Importar gastos</button></div>`,true);
   const root=ctx.modalRoot,input=root.querySelector('#expense-import-pack'),button=root.querySelector('#expense-import-save'),status=root.querySelector('.import-status'),preview=root.querySelector('#import-preview');
   let prepared=null;
   input.onchange=async()=>{
@@ -99,15 +101,15 @@ export function expenseImportModal(ctx){
       const backend=ctx.getBackend(),organizationId=backend.workspaceInfo()?.id||backend.workspaceInfo()?.organizationId;
       prepared=await prepareExpenseImport(input.files[0],ctx.getState(),organizationId);
       const sum=prepared.incoming.reduce((v,row)=>v+row.expense.total,0),reviews=prepared.incoming.filter(row=>row.expense.reviewNeeded||row.expense.vatReviewNeeded).length;
-      preview.innerHTML=`<div class="import-summary"><div><strong>${prepared.incoming.length}</strong><span>Gastos nuevos</span></div><div><strong>${money(sum)}</strong><span>Total de documentos</span></div><div><strong>${prepared.skipped.length}</strong><span>Duplicados omitidos</span></div><div><strong>${reviews}</strong><span>Para revisar</span></div></div><div class="import-list">${prepared.incoming.map(({expense:e})=>`<p><strong>${esc(e.description)}</strong> · ${money(e.total)}<small>${esc(e.date)} · ${esc(e.supplier||'Proveedor sin indicar')} · ${e.paymentStatus==='paid'?'Pago documentado':'Pago por confirmar'}${e.vatReviewNeeded?' · IVA por revisar':''}</small></p>`).join('')}</div>`;
-      status.textContent=prepared.incoming.length?'Paquete comprobado. Los originales se guardarán en el espacio privado de la empresa.':'Todos los gastos del paquete ya están registrados.';button.disabled=!prepared.incoming.length;
+      preview.innerHTML=`<div class="import-summary"><div><strong>${prepared.incoming.length}</strong><span>Gastos nuevos</span></div><div><strong>${money(sum)}</strong><span>Total de documentos</span></div><div><strong>${prepared.skipped.length}</strong><span>Duplicados omitidos</span></div><div><strong>${reviews}</strong><span>Para revisar</span></div></div><div class="import-list">${prepared.incoming.map(({expense:e})=>`<p><strong>${esc(e.description)}</strong> · ${money(e.total)}<small>${esc(e.date)} · ${esc(e.supplier||'Proveedor sin indicar')} · ${e.paymentStatus==='paid'?'Pago documentado':'Pago por confirmar'}${e.vatReviewNeeded?' · IVA por revisar':''}${!e.attachments?.length&&e.missingReceiptReason?' · Justificante pendiente':''}</small></p>`).join('')}</div>`;
+      status.textContent=prepared.incoming.length?'Paquete comprobado. Los registros y los adjuntos disponibles se guardarán en el espacio privado de la empresa.':'Todos los gastos del paquete ya están registrados.';button.disabled=!prepared.incoming.length;
     }catch(error){prepared=null;status.textContent=error.message;ctx.toast(error.message,true)}finally{input.disabled=false;ctx.setBusy(false)}
   };
   button.onclick=async()=>{
     if(!prepared||ctx.isBusy())return;
     const backend=ctx.getBackend();ctx.setBusy(true);root.querySelectorAll('button,input').forEach(control=>control.disabled=true);
     try{
-      const result=await executeExpenseImport(prepared,{backend,getState:ctx.getState,checkAccess:()=>{if(ctx.getMode()!=='cloud'||ctx.getBackend()!==backend)throw new Error('La sesión ha cambiado. Inicia sesión de nuevo antes de importar.')},onProgress:(done,total)=>{status.textContent=`Guardando justificantes: ${done} / ${total} gastos…`},commit:async change=>{ctx.setBusy(false);return ctx.commit(change)}});
+      const result=await executeExpenseImport(prepared,{backend,getState:ctx.getState,checkAccess:()=>{if(ctx.getMode()!=='cloud'||ctx.getBackend()!==backend)throw new Error('La sesión ha cambiado. Inicia sesión de nuevo antes de importar.')},onProgress:(done,total)=>{status.textContent=`Guardando registros: ${done} / ${total} gastos…`},commit:async change=>{ctx.setBusy(false);return ctx.commit(change)}});
       ctx.toast(`${result.count} gastos importados con ${result.attachments} justificantes privados.`);ctx.closeModal();
     }catch(error){ctx.toast(error.message,true);status.textContent=error.message;root.querySelectorAll('button,input').forEach(control=>control.disabled=false)}finally{ctx.setBusy(false)}
   };

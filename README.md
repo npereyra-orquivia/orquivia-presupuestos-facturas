@@ -2,7 +2,15 @@
 
 Portal en español para **GitHub Pages + Supabase**. Nicole y Liliana trabajan con los mismos clientes, presupuestos, facturas, cobros y gastos, cada una con su cuenta. Nicole administra la empresa y el saldo inicial; Liliana puede editar documentos, registrar cobros y gestionar gastos y justificantes. La página pública contiene la interfaz y la pantalla de acceso; los datos y los archivos privados de la empresa se cargan desde Supabase después de verificar la cuenta y el segundo factor.
 
-La versión operativa es **1.1.0**. Incluye envío de presupuestos desde el correo de cada usuaria, firma personal, destinatarios en copia e historial combinado de cambios y envíos. Consulta [el despliegue y el respaldo de la 1.0](EMAIL-V1.1.md).
+La versión operativa es **1.2.0**. Incluye envío de presupuestos desde el correo de cada usuaria, firma personal, destinatarios en copia e historial combinado de cambios y envíos. Consulta [el despliegue y el respaldo de la 1.0](EMAIL-V1.1.md).
+
+## Estados financieros
+
+La pestaña **Estados financieros** permite elegir el período de pérdidas y ganancias y la fecha de corte del balance, descargar ambos en un PDF y exportar el detalle en CSV. Las ventas se reconocen por fecha de factura, sin IVA y aunque todavía no se hayan cobrado. Los presupuestos y los cobros no duplican los ingresos. El banco, los clientes pendientes de cobro y los proveedores pendientes de pago se muestran por separado.
+
+El informe es provisional: las bases y cuotas de IVA desconocidas, constitución, suplidos y ajustes contables no se estiman para aparentar un resultado cerrado. El resultado parcial se distingue del resultado contable completo, que permanece por completar. El balance no añade capital ni beneficio para forzar su igualdad. Administración puede aportar capital declarado, financiación y saldo del extracto para una fecha concreta, indicando su fuente y si falta acreditar el desembolso del capital. Estos datos no modifican la caja ni generan movimientos bancarios. Las diferencias entre saldo aportado y calculado quedan pendientes de conciliación. El gestor debe completar existencias, amortizaciones, saldos fiscales y demás ajustes antes de considerar cerrados los estados.
+
+Los paquetes de gastos revisados admiten movimientos sin archivo únicamente si incluyen una nota de justificante pendiente y mantienen la revisión del registro y del IVA. La importación conserva los identificadores y omite los duplicados; los registros y adjuntos siguen siendo privados. No se infiere IVA de un cargo bancario. Las retenciones bancarias temporales compensadas se separan del gasto corriente.
 
 ## Probar en el ordenador
 
