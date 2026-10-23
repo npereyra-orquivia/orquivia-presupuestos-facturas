@@ -2,7 +2,7 @@
 
 Portal en español para **GitHub Pages + Supabase**. Nicole y Liliana trabajan con los mismos clientes, presupuestos, facturas, cobros y gastos, cada una con su cuenta. Nicole administra la empresa y el saldo inicial; Liliana puede editar documentos, registrar cobros y gestionar gastos y justificantes. La página pública contiene la interfaz y la pantalla de acceso; los datos y los archivos privados de la empresa se cargan desde Supabase después de verificar la cuenta y el segundo factor.
 
-La versión operativa es **1.2.0**. Incluye envío de presupuestos desde el correo de cada usuaria, firma personal, destinatarios en copia e historial combinado de cambios y envíos. Consulta [el despliegue y el respaldo de la 1.0](EMAIL-V1.1.md).
+La versión operativa es **1.2.1**. Incluye envío de presupuestos desde el correo de cada usuaria, firma personal, destinatarios en copia e historial combinado de cambios y envíos. Consulta [el despliegue y el respaldo de la 1.0](EMAIL-V1.1.md).
 
 ## Estados financieros
 
@@ -36,6 +36,8 @@ Consulta [supabase/README.md](supabase/README.md) para el procedimiento completo
 3. Desde un entorno de operador, ejecuta `supabase/scripts/bootstrap-team.mjs` con su configuración por stdin. El script valida por defecto sin crear nada; `apply:true` provisiona las dos cuentas, asigna los roles y exige MFA. Las contraseñas iniciales tienen al menos 16 caracteres. La clave de servidor y las contraseñas se mantienen fuera del navegador y del repositorio.
 4. Para importar el histórico, indica al script el archivo privado validado en `statePath`. La importación conserva números originales y advertencias; solo procede sobre un espacio nuevo o reconoce una importación idéntica ya realizada. Los cambios posteriores no se sobrescriben en un reintento.
 5. Comprueba el acceso de las dos titulares, el alta y la verificación del autenticador, el rechazo de una cuenta ajena y los conflictos entre dos sesiones antes de dar por finalizado el despliegue.
+
+El acceso distingue los fallos temporales de red/servicio y el exceso de intentos de los rechazos de credenciales. Los estados particulares de una cuenta comparten un mensaje genérico para evitar revelar si una dirección existe. La contraseña del portal es independiente de la del buzón de Arsys.
 
 La pertenencia a la empresa requiere una membresía explícita. Las políticas RLS y las funciones del servidor comprueban esa membresía y el nivel MFA antes de permitir leer o guardar datos. El navegador guarda la sesión en `sessionStorage`; la interfaz se bloquea al cerrar sesión, perder acceso o alcanzar 30 minutos de inactividad. El cambio de contraseña exige la contraseña actual y vuelve a pedir inicio de sesión. Las modificaciones se registran en una auditoría que las cuentas de la aplicación no pueden borrar.
 

@@ -144,6 +144,64 @@ test('backend refuses privileged or insecure browser configuration', () => {
   assert.throws(() => createBackend({ url: 'http://example.com', anonKey: 'sb_publishable_test' }), { code: 'INVALID_CONFIG' });
 });
 
+test('sign-in distinguishes temporary service and rate errors without disclosing account state', async () => {
+  const originalFetch = globalThis.fetch;
+  const generic = 'No se pudo iniciar sesión. Revisa el correo y la contraseña.';
+  const temporary = 'El servicio de acceso no está disponible temporalmente. Comprueba tu conexión y vuelve a intentarlo en unos minutos.';
+  const limited = 'Se han realizado demasiados intentos. Espera unos minutos y vuelve a intentarlo.';
+  const scenarios = [
+    { status: 400, code: 'invalid_credentials', message: generic },
+    { status: 404, code: 'user_not_found', message: generic },
+    { status: 400, code: 'email_not_confirmed', message: generic },
+    { status: 403, code: 'user_banned', message: generic },
+    { status: 422, code: 'unexpected_rejection', message: generic },
+    { status: 429, code: 'over_request_rate_limit', message: limited },
+    { status: 429, code: 'unexpected_rate_code', message: limited },
+    { status: 400, code: 'over_request_rate_limit', message: limited },
+    { status: 500, code: 'unexpected_failure', message: temporary },
+    { status: 503, html: true, message: temporary },
+    { status: 507, code: 'unexpected_failure', message: temporary },
+    { transport: new TypeError('private transport detail'), message: temporary },
+    { transport: new DOMException('private abort detail', 'AbortError'), message: temporary },
+  ];
+  let backend;
+  try {
+    for (const scenario of scenarios) {
+      const requests = [];
+      globalThis.fetch = async (input, init = {}) => {
+        const url = new URL(String(input)); requests.push({ path: url.pathname, method: init.method });
+        assert.equal(url.pathname, '/auth/v1/token');
+        assert.equal(url.searchParams.get('grant_type'), 'password');
+        assert.equal(init.method, 'POST');
+        if (scenario.transport) throw scenario.transport;
+        return new Response(scenario.html ? '<html>private gateway detail</html>' : JSON.stringify({ code: scenario.code, msg: 'private account detail' }), {
+          status: scenario.status, headers: { 'Content-Type': scenario.html ? 'text/html' : 'application/json', 'X-Supabase-Api-Version': '2024-01-01' },
+        });
+      };
+      backend = createBackend({ url: 'https://example.supabase.co', anonKey: 'sb_publishable_test' });
+      await assert.rejects(backend.signIn('member@example.test', 'fictional-password'), error => {
+        assert.equal(error.code, 'AUTH_ERROR');
+        assert.equal(error.message, scenario.message);
+        assert.ok(error.cause, 'The original Auth error remains available to controlled diagnostics');
+        if (scenario.transport || scenario.html || scenario.status === 500) {
+          assert.equal(error.cause.name, 'AuthRetryableFetchError');
+        } else {
+          assert.equal(error.cause.code, scenario.code, 'The mock must preserve the server error code');
+        }
+        assert.equal(error.cause.status, scenario.transport ? 0 : scenario.status);
+        assert.doesNotMatch(error.message, /private|member@example|user_not_found|email_not_confirmed|user_banned/);
+        return true;
+      });
+      assert.equal(await backend.currentUser(), null);
+      assert.equal(backend.workspaceInfo(), null);
+      assert.deepEqual(requests, [{ path: '/auth/v1/token', method: 'POST' }], 'A rejected login must not request private data or MFA');
+      backend.dispose(); backend = null;
+    }
+  } finally {
+    backend?.dispose(); globalThis.fetch = originalFetch;
+  }
+});
+
 test('versioned cloud writes are serialized and a conflict blocks further saving', async () => {
   const originalFetch = globalThis.fetch;
   const user = { id: 'b1000000-0000-4000-8000-000000000001', aud: 'authenticated', email: 'owner@example.test' };

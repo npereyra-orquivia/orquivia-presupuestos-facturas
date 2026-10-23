@@ -67,6 +67,21 @@ function backendError(message, code, cause) {
   return Object.assign(new Error(message, { cause }), { code });
 }
 
+function signInError(error) {
+  let message = 'No se pudo iniciar sesión. Revisa el correo y la contraseña.';
+  // Account-specific rejections share one message so the login cannot disclose
+  // whether an address exists, is confirmed or has been disabled.
+  const accountCodes = ['invalid_credentials', 'user_not_found', 'email_not_confirmed', 'user_banned'];
+  if (!accountCodes.includes(error?.code)) {
+    if (error?.status === 429 || error?.code === 'over_request_rate_limit') {
+      message = 'Se han realizado demasiados intentos. Espera unos minutos y vuelve a intentarlo.';
+    } else if (error?.name === 'AuthRetryableFetchError' || (error?.status >= 500 && error?.status <= 599)) {
+      message = 'El servicio de acceso no está disponible temporalmente. Comprueba tu conexión y vuelve a intentarlo en unos minutos.';
+    }
+  }
+  return backendError(message, 'AUTH_ERROR', error);
+}
+
 function isObject(value) {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) return false;
   const prototype = Object.getPrototypeOf(value);
@@ -305,7 +320,7 @@ export function createBackend({ url, anonKey }) {
       version = null;
       workspace = null;
       const { data, error } = await client.auth.signInWithPassword({ email: email.trim(), password });
-      if (error) throw backendError('No se pudo iniciar sesión. Revisa el correo y la contraseña.', 'AUTH_ERROR', error);
+      if (error) throw signInError(error);
       resetForUser(data.user);
       return data.user;
     },
