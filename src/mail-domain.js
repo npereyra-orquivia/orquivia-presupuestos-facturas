@@ -1,4 +1,7 @@
 import { escapeHTML as esc } from './domain.js';
+import { isMailAddress } from './mail-address.js';
+
+export { isMailAddress } from './mail-address.js';
 
 export const MAIL_PROVIDERS = Object.freeze([
   Object.freeze({ value: 'serviciodecorreo', label: 'Arsys · serviciodecorreo.es' }),
@@ -16,14 +19,6 @@ export const MAIL_STATUS = Object.freeze({
 
 export function mailStatus(status) {
   return MAIL_STATUS[status] || { label: 'Estado por comprobar', description: 'Actualiza el historial para comprobar el resultado.', tone: 'neutral' };
-}
-
-export function isMailAddress(value) {
-  if (typeof value !== 'string' || value.length > 254 || /[\s\u0000-\u001f\u007f<>]/.test(value)) return false;
-  const parts = value.split('@');
-  if (parts.length !== 2 || !parts[0] || parts[0].length > 64 || parts[0].startsWith('.') || parts[0].endsWith('.') || parts[0].includes('..')) return false;
-  if (!/^[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+$/.test(parts[0])) return false;
-  return parts[1].length <= 253 && parts[1].includes('.') && parts[1].split('.').every(label => /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?$/.test(label));
 }
 
 const HEADER_CONTROLS = /[\u0000-\u001f\u007f-\u009f\u2028\u2029]/u;
@@ -102,14 +97,17 @@ export function validateMailDraft(draft = {}) {
 }
 
 export function defaultMailDraft(document = {}, client = {}) {
-  const kind = document.kind === 'invoice' ? 'factura' : 'presupuesto';
+  const invoice = document.kind === 'invoice';
+  const kind = invoice ? 'factura' : 'presupuesto';
   const reference = String(document.number || '').trim();
-  const recipient = typeof client.email === 'string' ? client.email.trim() : '';
+  const recipient = (invoice ? [document.billingEmail, client.billingEmail, client.email] : [client.email])
+    .filter(value => typeof value === 'string').map(value => value.trim()).find(isMailAddress);
+  const po = invoice && typeof document.po === 'string' ? document.po.trim() : '';
   return {
-    to: isMailAddress(recipient) ? [recipient] : [''],
+    to: recipient ? [recipient] : [''],
     cc: [],
     subject: `${kind === 'factura' ? 'Factura' : 'Presupuesto'}${reference ? ` ${reference}` : ''} · Orquívia`.slice(0, 200),
-    message: `Hola,\n\nTe adjunto el ${kind}${reference ? ` ${reference}` : ''} para que puedas revisarlo.\n\nQuedo a tu disposición para cualquier consulta.\n\nUn saludo,`,
+    message: `Hola,\n\nTe adjunto ${invoice ? 'la' : 'el'} ${kind}${reference ? ` ${reference}` : ''} para que puedas ${invoice ? 'tramitarla' : 'revisarlo'}.${po ? `\n\nOrden de pedido (PO): ${po}` : ''}\n\nQuedo a tu disposición para cualquier consulta.\n\nUn saludo,`,
   };
 }
 

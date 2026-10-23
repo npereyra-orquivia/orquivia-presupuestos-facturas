@@ -1,0 +1,9 @@
+.invoice-delivery-filter{margin:0;min-width:185px;max-width:235px;flex:0 1 235px}
+.invoice-delivery-filter>span{font-size:11px;letter-spacing:.02em;color:var(--muted,#718373)}
+.invoice-delivery-panel .field{margin:14px 0 10px}
+.invoice-delivery-panel .field-hint{font-size:12px;line-height:1.6;margin:8px 0 14px}
+.invoice-delivery-panel form{margin-top:20px;padding-top:4px;border-top:1px solid #e3e9df}
+.invoice-delivery-panel .invoice-order-reference{display:block;overflow-wrap:anywhere}
+.invoice-delivery-panel .invoice-order-reference strong{display:block;float:none;margin-top:5px}
+.badge.neutral,.badge.unknown{background:#f0f2ee;color:#647568}
+@media(max-width:700px){.invoice-delivery-filter{flex:1 1 100%;max-width:none}.list-toolbar:has(.invoice-delivery-filter){flex-wrap:wrap}.list-toolbar:has(.invoice-delivery-filter) .search-box{flex:1 1 100%}}

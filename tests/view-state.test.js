@@ -51,7 +51,7 @@ test('financial statement routes reject impossible dates, future cutoffs and rev
 test('back and forward routes recover separate document filters without crossing sections', () => {
   const saved = sanitizeViewState({ quotes: { filter: 'accepted', query: 'Proyecto' }, invoices: { filter: 'paid', query: 'Cliente' } }, options);
   const invoice = applyViewRoute(saved, parseViewRoute({ hash: '#facturas?estado=overdue' }), options);
-  assert.deepEqual(invoice.invoices, { filter: 'overdue', query: 'Cliente' });
+  assert.deepEqual(invoice.invoices, { filter: 'overdue', query: 'Cliente', deliveryFilter: 'all' });
   assert.deepEqual(invoice.quotes, { filter: 'accepted', query: 'Proyecto' });
   const back = applyViewRoute(invoice, parseViewRoute({ hash: '#presupuestos?estado=accepted' }), options);
   assert.equal(back.page, 'quotes');

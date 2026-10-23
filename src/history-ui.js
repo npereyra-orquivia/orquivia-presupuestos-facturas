@@ -4,7 +4,7 @@ import { mailStatus } from './mail-domain.js';
 const fields = {
   kind: 'Tipo', number: 'Número', clientId: 'Cliente', date: 'Fecha', dueDate: 'Vencimiento / validez',
   contractExpectedDate: 'Fecha de seguimiento', contractReceived: 'Aceptación / contrato', title: 'Referencia interna',
-  status: 'Estado', items: 'Conceptos', vat: 'IVA', withholding: 'Retención', discount: 'Descuento',
+  status: 'Estado', deliveryStatus: 'Estado de envío', billingEmail: 'Correo de facturación', items: 'Conceptos', vat: 'IVA', withholding: 'Retención', discount: 'Descuento',
   notes: 'Notas y condiciones', po: 'Orden de pedido (PO)', paymentMethod: 'Método de pago', total: 'Total',
   companySnapshot: 'Datos de empresa del documento', clientSnapshot: 'Datos del cliente del documento', quoteId: 'Presupuesto vinculado',
   paymentReviewNeeded: 'Confirmación del cobro', name: 'Nombre', taxId: 'NIF', address: 'Dirección', email: 'Correo', phone: 'Teléfono',
@@ -82,11 +82,11 @@ export function mergeRecordHistory(entries = [], jobs = []) {
   const mail = [...mailById.values()], absorbed = new Set();
   for (const change of changes) {
     if (change.event !== 'email_sent' || change.entityType !== 'document' || change.action !== 'updated'
-      || change.changedFields.length !== 1 || change.changedFields[0] !== 'status'
-      || !addressKey(change.actorEmail) || timestamp(change.createdAt) === null) continue;
+      || change.changedFields.length !== 1 || !['status', 'deliveryStatus'].includes(change.changedFields[0])
+      || !addressKey(change.actorEmail) || !text(change.entityId).trim() || timestamp(change.createdAt) === null) continue;
     const candidates = mail.filter(entry => !entry.stateChange && !entry.partial && ['sent', 'archive_pending'].includes(entry.status)
       && addressKey(entry.sender) === addressKey(change.actorEmail)
-      && (!entry.documentId || !change.entityId || entry.documentId === change.entityId)
+      && entry.documentId === change.entityId
       && timestamp(entry.createdAt) !== null && Math.abs(timestamp(entry.createdAt) - timestamp(change.createdAt)) <= 5000)
       .map(entry => ({ entry, distance: Math.abs(timestamp(entry.createdAt) - timestamp(change.createdAt)) }))
       .sort((a, b) => a.distance - b.distance);
@@ -197,6 +197,7 @@ function comparisonValue(value, key, record, entityType) {
   else if (key === 'vatDocumentStatus') text = { 'included-unitemized': 'IVA incluido, sin desglose', 'not-stated': 'Justificante sin datos de IVA' }[value] || 'Por revisar';
   else if (key === 'paymentStatus') text = { paid: 'Pagado', pending: 'Pendiente', 'no-payment': 'Sin ingreso', unconfirmed: 'Pago por confirmar', included: 'Incluido en pago al gestor' }[value] || String(value);
   else if (key === 'status') text = { draft: 'Borrador', issued: 'Emitida', ready: 'Preparado', sent: 'Enviado', accepted: 'Aceptado', rejected: 'Rechazado' }[value] || String(value);
+  else if (key === 'deliveryStatus') text = { ready: 'Preparada', sent: 'Enviada' }[value] || String(value);
   else if (key === 'kind') text = { quote: 'Presupuesto', invoice: 'Factura', credit: 'Abono / devolución' }[value] || String(value);
   else if (typeof value === 'object') text = Object.entries(value).filter(([name]) => Object.hasOwn(fields, name)).map(([name, item]) => `${historyFieldLabel(name)}: ${typeof item === 'object' ? 'Datos del registro' : item ?? 'Vacío'}`).join('\n') || 'Datos del registro';
   else text = String(value);

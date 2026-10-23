@@ -1,6 +1,9 @@
+import { isMailAddress } from './mail-address.js';
+
 const EUR = new Intl.NumberFormat('es-ES', { style: 'currency', currency: 'EUR', useGrouping: false });
 const QUOTE_STATUSES = new Set(['draft', 'ready', 'sent', 'accepted', 'rejected']);
 const INVOICE_STATUSES = new Set(['issued', 'paid', 'partial', 'overdue']);
+const INVOICE_DELIVERY_STATUSES = new Set(['ready', 'sent']);
 const MAX_CENTS = BigInt(Number.MAX_SAFE_INTEGER);
 
 /** The calendar date in Madrid, independent of the device's configured timezone. */
@@ -148,6 +151,17 @@ export function status(doc, payments = [], today = todayISO()) {
   return paid > 0n ? 'partial' : 'issued';
 }
 
+/** Sending a document and collecting its payment are independent facts. */
+export function invoiceDeliveryStatus(doc) {
+  if (doc?.kind !== 'invoice') return 'unknown';
+  if (doc.status === 'draft') return 'draft';
+  return INVOICE_STATUSES.has(doc.status) && INVOICE_DELIVERY_STATUSES.has(doc.deliveryStatus) ? doc.deliveryStatus : 'unknown';
+}
+
+export function invoiceDeliveryLabel(doc) {
+  return { ready: 'Preparada', sent: 'Enviada', draft: 'Borrador', unknown: 'Sin indicar' }[invoiceDeliveryStatus(doc)];
+}
+
 function readableDate(date) {
   return date.split('-').reverse().join('/');
 }
@@ -243,6 +257,8 @@ export function createInvoiceFromQuote(quote, documents = [], today = todayISO()
   if (!validDate(today)) throw new Error('La fecha de la factura no es válida.');
   const copy = typeof structuredClone === 'function'
     ? structuredClone(quote) : JSON.parse(JSON.stringify(quote));
+  // A quote's delivery record is not evidence that its new invoice was sent.
+  delete copy.deliveryStatus;
   return {
     ...copy, id: uuid(), kind: 'invoice', status: 'draft',
     number: nextNumber('invoice', documents, Number(today.slice(0, 4))),
@@ -260,6 +276,8 @@ function numericValue(value) {
 export function validateDocument(doc) {
   if (!doc || typeof doc !== 'object') return ['El documento no es válido.'];
   const errors = [];
+  if (doc.billingEmail !== undefined && doc.billingEmail !== '' && (doc.kind !== 'invoice' || !isMailAddress(doc.billingEmail))) errors.push('Indica un único correo de facturación válido para la factura.');
+  if (doc.deliveryStatus !== undefined && (doc.kind !== 'invoice' || doc.status === 'draft' || !INVOICE_DELIVERY_STATUSES.has(doc.deliveryStatus))) errors.push('El estado de envío de la factura no es válido.');
   if (!String(doc.clientId ?? '').trim()) errors.push('Selecciona un cliente.');
   if (doc.status !== 'draft' && !String(doc.number ?? '').trim()) errors.push('Indica el número del documento.');
   const dateIsValid = validDate(doc.date);
@@ -375,6 +393,7 @@ export function validateWorkspace(workspace, today = todayISO()) {
     const path = `clients[${index}]`;
     requireString(client.name, `${path}.name`, true);
     for (const key of ['taxId', 'email', 'address', 'contact']) requireString(client[key], `${path}.${key}`);
+    if (client.billingEmail !== undefined && client.billingEmail !== '' && !isMailAddress(client.billingEmail)) error(`${path}.billingEmail`, 'indica un único correo de facturación válido.');
   });
   const numbers = new Set(), sequences = new Set(), linkedQuotes = new Set();
   documents.forEach((doc, index) => {

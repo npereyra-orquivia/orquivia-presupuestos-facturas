@@ -9,6 +9,7 @@ const DOCUMENT_FILTERS = Object.freeze({
   invoices: ['all', 'draft', 'review', 'issued', 'partial', 'overdue', 'paid'],
   expenses: ['all', 'paid', 'pending', 'review'],
 });
+const INVOICE_DELIVERY_FILTERS = Object.freeze(['all', 'ready', 'sent', 'unknown']);
 const own = (value, key) => value && typeof value === 'object' && !Array.isArray(value) && Object.hasOwn(value, key) ? value[key] : undefined;
 const member = (value, list, fallback) => list.includes(value) ? value : fallback;
 const integer = (value, minimum, maximum, fallback) => {
@@ -23,7 +24,7 @@ const reportDate = value => typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.t
 
 export function defaultViewState(today = new Date().toISOString().slice(0, 10)) {
   const year = integer(today.slice(0, 4), 1900, 2200, 2026), month = integer(today.slice(5, 7), 1, 12, 1);
-  return { page: 'dashboard', quotes: { filter: 'all', query: '' }, invoices: { filter: 'all', query: '' },
+  return { page: 'dashboard', quotes: { filter: 'all', query: '' }, invoices: { filter: 'all', query: '', deliveryFilter: 'all' },
     expenses: { filter: 'all', query: '' }, reports: { type: 'quarter', year, quarter: Math.ceil(month / 3) },
     statements: { from: `${year}-01-01`, to: reportDate(today) ? today : `${year}-12-31` } };
 }
@@ -35,6 +36,7 @@ export function sanitizeViewState(value, { today } = {}) {
     const input = own(value, section);
     result[section] = { filter: member(own(input, 'filter'), DOCUMENT_FILTERS[section], 'all'), query: term(own(input, 'query')) };
   }
+  result.invoices.deliveryFilter = member(own(own(value, 'invoices'), 'deliveryFilter'), INVOICE_DELIVERY_FILTERS, 'all');
   const period = own(value, 'reports');
   result.reports = { type: member(own(period, 'type'), ['quarter', 'year', 'all'], result.reports.type),
     year: integer(own(period, 'year'), 1900, 2200, result.reports.year), quarter: integer(own(period, 'quarter'), 1, 4, result.reports.quarter) };
@@ -55,6 +57,8 @@ export function parseViewRoute({ hash = '', search = '' } = {}) {
     const filter = query.get('estado');
     if (DOCUMENT_FILTERS[page].includes(filter)) route[page] = { filter };
   }
+  if (page === 'invoices') route.invoices = { ...route.invoices,
+    deliveryFilter: member(query.get('envio'), INVOICE_DELIVERY_FILTERS, 'all') };
   if (page === 'reports') {
     const period = {};
     if (['quarter', 'year', 'all'].includes(query.get('periodo'))) period.type = query.get('periodo');
@@ -84,6 +88,7 @@ export function applyViewRoute(value, route, options) {
 export function viewRouteHash(value, options) {
   const view = sanitizeViewState(value, options), parameters = new URLSearchParams();
   if (DOCUMENT_FILTERS[view.page]) parameters.set('estado', view[view.page].filter);
+  if (view.page === 'invoices') parameters.set('envio', view.invoices.deliveryFilter);
   if (view.page === 'reports') {
     parameters.set('periodo', view.reports.type);
     if (view.reports.type !== 'all') parameters.set('ano', view.reports.year);

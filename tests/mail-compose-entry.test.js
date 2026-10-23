@@ -76,3 +76,28 @@ test('the latest blocking result wins and returned data cannot mutate any input'
   result.draft.to.push('new@example.test');result.job.to.push('new@example.test');
   assert.deepEqual({ savedDraft, history, defaultDraft }, original);
 });
+
+test('an explicit billing contact replaces completed recipients while retaining edited message and CC', () => {
+  for (const status of ['sent', 'archive_pending', 'failed']) {
+    for (const saved of [undefined, savedDraft]) {
+      const result = resolveMailComposeEntry({ savedDraft: saved, history: [job(status)], defaultDraft,
+        preferDefaultRecipients: true, createId: () => 'new-id' });
+      assert.deepEqual(result.draft.to, defaultDraft.to);
+      assert.deepEqual(result.draft.cc, saved?.cc || job(status).cc);
+      assert.equal(result.draft.message, saved?.message || defaultDraft.message);
+      assert.equal(result.draft.idempotencyKey, 'new-id');
+      assert.equal(result.job, null);
+    }
+  }
+});
+
+test('a preferred billing contact never rewrites an unsent draft or an uncertain attempt', () => {
+  const unsent = resolveMailComposeEntry({ savedDraft, history: [], defaultDraft, preferDefaultRecipients: true, createId: neverCreate });
+  assert.deepEqual(unsent, { draft: savedDraft, job: null });
+  for (const blocked of [job('sending'), job('uncertain'), job('sent', { errorCode: 'SMTP_PARTIAL' })]) {
+    const result = resolveMailComposeEntry({ history: [blocked], defaultDraft, preferDefaultRecipients: true, createId: neverCreate });
+    assert.deepEqual(result.draft.to, blocked.to);
+    assert.equal(result.draft.idempotencyKey, blocked.id);
+    assert.deepEqual(result.job, blocked);
+  }
+});

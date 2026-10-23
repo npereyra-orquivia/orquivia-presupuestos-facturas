@@ -17,7 +17,7 @@ function withRecipientMetadata(draft, job) {
 }
 
 /** Choose an editable draft without turning a pending attempt into a new send. */
-export function resolveMailComposeEntry({ savedDraft, history = [], defaultDraft, createId = () => crypto.randomUUID() }) {
+export function resolveMailComposeEntry({ savedDraft, history = [], defaultDraft, preferDefaultRecipients = false, createId = () => crypto.randomUUID() }) {
   const ordered = recentFirst(history);
   const draft = { ...copy(defaultDraft || {}), ...(savedDraft ? copy(savedDraft) : {}) };
   // A partial result stays blocked even if contradictory metadata says "sent".
@@ -31,7 +31,11 @@ export function resolveMailComposeEntry({ savedDraft, history = [], defaultDraft
     const previous = ordered.find(job => job.id === savedDraft.idempotencyKey);
     // No visible result can mean an unsent draft or an attempt whose response
     // has not arrived. Preserve its UUID so replay protection remains intact.
-    return { draft: previous ? { ...draft, idempotencyKey: createId() } : draft, job: null };
+    return { draft: previous ? { ...draft,
+      ...(preferDefaultRecipients ? { to: copy(defaultDraft.to) } : {}), idempotencyKey: createId() } : draft, job: null };
   }
-  return { draft: { ...(ordered[0] ? withRecipientMetadata(draft, ordered[0]) : draft), idempotencyKey: createId() }, job: null };
+  // A stored billing contact takes precedence over the recipient of a completed
+  // attempt. Keep the latter in history rather than silently choosing it again.
+  return { draft: { ...(ordered[0] ? withRecipientMetadata(draft, ordered[0]) : draft),
+    ...(preferDefaultRecipients ? { to: copy(defaultDraft.to) } : {}), idempotencyKey: createId() }, job: null };
 }

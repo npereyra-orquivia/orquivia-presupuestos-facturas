@@ -8,8 +8,8 @@ const messages = {
   RATE_LIMITED: 'Has alcanzado el límite temporal de envíos. Espera antes de continuar.',
   MFA_REQUIRED: 'Confirma tu acceso con la verificación en dos pasos.',
   AUTH_CHANGED: 'La sesión cambió. Entra de nuevo antes de continuar.',
-  INVALID_DOCUMENT: 'Prepara el presupuesto antes de enviarlo por correo.',
-  DOCUMENT_NOT_SENDABLE: 'Este presupuesto no está preparado para enviarse.',
+  INVALID_DOCUMENT: 'Prepara el documento antes de enviarlo por correo.',
+  DOCUMENT_NOT_SENDABLE: 'Este documento no está preparado para enviarse.',
 };
 
 /** No mailbox credential is persisted or returned to the browser. */

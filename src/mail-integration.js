@@ -18,6 +18,12 @@ export function createMailFeature(ctx) {
   function reset() {
     cleanup?.(); cleanup = null; profile = null; identity = null; drafts.clear(); contexts.clear(); ++mountRequest; ++composerRequest;
   }
+  function forgetDraft(documentId) {
+    drafts.delete(documentId);
+    // Re-read delivery history too: changing a contact is never permission to
+    // bypass a send whose outcome is still uncertain on the server.
+    contexts.clear();
+  }
   function current() {
     const owner = ctx.getUser()?.id || ctx.getMode();
     if (identity !== owner) { reset(); identity = owner; }
@@ -56,10 +62,11 @@ export function createMailFeature(ctx) {
   }
   async function openComposer(document) {
     current();
+    const invoice = document.kind === 'invoice', kind = invoice ? 'factura' : 'presupuesto';
     const isCurrent = ctx.scope(), backend = ctx.getBackend(), cloud = ctx.getMode() === 'cloud';
     if (ctx.isBusy() || ctx.isConflict()) return ctx.toast('Termina de revisar los cambios antes de enviar.', true);
     const request = ++composerRequest;
-    ctx.openModal(ctx.header('Enviar presupuesto') + renderMailLoading());
+    ctx.openModal(ctx.header(`Enviar ${kind}`) + renderMailLoading());
     const modal = ctx.root.querySelector('.modal');
     const valid = () => request === composerRequest && isCurrent() && modal.isConnected;
     let data, draft, job, dispose;
@@ -88,7 +95,7 @@ export function createMailFeature(ctx) {
       draw();
     }
     async function send(fields) {
-      if (!valid() || !cloud || ctx.isConflict() || ctx.isBusy()) throw new Error('Entra de nuevo y revisa el presupuesto antes de enviar.');
+      if (!valid() || !cloud || ctx.isConflict() || ctx.isBusy()) throw new Error(`Entra de nuevo y revisa ${invoice ? 'la' : 'el'} ${kind} antes de enviar.`);
       ctx.setBusy(true);
       try { return await backend.mail.send(document.id, fields); }
       finally { if (isCurrent()) ctx.setBusy(false); }
@@ -103,7 +110,7 @@ export function createMailFeature(ctx) {
       if (!valid()) return;
       dispose?.();
       modal.classList.toggle('wide', !job);
-      const title = job ? 'Envío del presupuesto' : 'Enviar presupuesto';
+      const title = job ? `Envío ${invoice ? 'de la' : 'del'} ${kind}` : `Enviar ${kind}`;
       modal.innerHTML = ctx.header(title, document.number) + (job
         ? renderMailResult({ job, document: documentNow(), history: data.history })
         : renderMailComposer({ document: documentNow(), client: ctx.clientFor(documentNow()), profile: data.profile, history: data.history, preview: ctx.preview(documentNow()), draft, logoUrl: ctx.logoUrl }));
@@ -123,7 +130,10 @@ export function createMailFeature(ctx) {
       if (!valid()) return;
       profile = data.profile;
       const saved = drafts.get(document.id);
-      ({ draft, job } = resolveMailComposeEntry({ savedDraft: saved, history: data.history, defaultDraft: defaultMailDraft(document, ctx.clientFor(document)) }));
+      const latest = documentNow(), client = ctx.clientFor(latest);
+      ({ draft, job } = resolveMailComposeEntry({ savedDraft: saved, history: data.history,
+        defaultDraft: defaultMailDraft(latest, client),
+        preferDefaultRecipients: latest.kind === 'invoice' && Boolean(latest.billingEmail || client?.billingEmail) }));
       drafts.set(document.id, draft);
       draw();
     } catch (error) {
@@ -133,5 +143,5 @@ export function createMailFeature(ctx) {
       modal.querySelector('.mail-job-error').textContent = error.message; bindClose();
     }
   }
-  return { reset, mountSettings, openComposer };
+  return { reset, forgetDraft, mountSettings, openComposer };
 }
