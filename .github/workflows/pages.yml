@@ -24,6 +24,14 @@ jobs:
         with:
           ref: 087ed89525e2f6d5ccc08ad7d334cc92a7f761a2
           path: legacy-mail
+      - uses: actions/checkout@v4
+        with:
+          ref: 055cf6b3d7481824b4a4522f6568fe4253322f2d
+          path: compat-1-2
+      - uses: actions/checkout@v4
+        with:
+          ref: 8ec6851962a40c07d6236d0f39af648b2364b6ef
+          path: compat-1-3
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -34,8 +42,14 @@ jobs:
       - name: Conservar los recursos de las pestañas de pruebas abiertas
         run: npm ci && npm run build:production
         working-directory: legacy-mail
-      - name: Redirigir la dirección de pruebas al portal oficial
-        run: node scripts/prepare-release.mjs --legacy-dist legacy-mail/dist
+      - name: Conservar los recursos de las pestañas operativas 1.2
+        run: npm ci && npm run build:production
+        working-directory: compat-1-2
+      - name: Conservar los recursos de las pestañas operativas 1.3
+        run: npm ci && npm run build:production
+        working-directory: compat-1-3
+      - name: Preparar URL única y compatibilidad con enlaces anteriores
+        run: node scripts/prepare-release.mjs --legacy-dist legacy-mail/dist --previous-dist compat-1-2/dist --previous-dist compat-1-3/dist
       - name: Revisar el artefacto público completo
         run: node scripts/check-public-build.mjs
       - uses: actions/configure-pages@v5

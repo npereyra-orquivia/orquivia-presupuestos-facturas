@@ -3,6 +3,8 @@ import './controls.css';
 import './history-ui.css';
 import './mail.css';
 import './invoice-delivery.css';
+import './app-update.css';
+import { startAppUpdates } from './app-update.js';
 import { invoiceDeliveryBadge, invoiceDeliveryFilter, invoiceDeliveryPanel } from './invoice-delivery-ui.js';
 import { invoiceDeliveryStatus, invoiceDeliveryLabel } from './domain.js';
 import { version as appVersion } from '../package.json';
@@ -42,6 +44,7 @@ const brandLogo=`${import.meta.env.BASE_URL}orquivia-logo-full.svg`,markLogo=`${
 const documentLogo=`${import.meta.env.BASE_URL}orquivia-logo-wordmark.png`;
 const mailEnabled=import.meta.env.VITE_DOCUMENT_MAIL==='true';
 const production=!import.meta.env.DEV || import.meta.env.VITE_APP_MODE==='production';
+if(production)startAppUpdates({version:appVersion,baseURL:import.meta.env.BASE_URL});
 const demoAllowed=!production&&new URLSearchParams(location.search).has('demo');
 const storageKey=demoAllowed?'orquivia.demo.v1':'orquivia.local.private.v2';
 const localStore=demoAllowed?localStorage:sessionStorage;

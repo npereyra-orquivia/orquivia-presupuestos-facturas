@@ -4,6 +4,8 @@ import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 
 const legacyDirectory = 'pruebas-v1-1';
+// This address identifies the application, never a release. Versions live in Git tags.
+const appPath = '/orquivia-presupuestos-facturas/';
 const publicNames = new Set(['index.html', 'manifest.webmanifest', 'service-worker.js']);
 const publicAsset = name => /^orquivia-[A-Za-z0-9-]+\.(?:png|svg)$/.test(name);
 const inside = (parent, child) => {
@@ -26,6 +28,27 @@ if (target.origin !== window.location.origin) throw new Error('Invalid Orquivia 
 target.search = window.location.search;
 target.hash = window.location.hash;
 window.location.replace(target.href);
+`;
+
+const fallbackHTML = `<!doctype html>
+<html lang="es"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-src 'none'">
+<link rel="canonical" href="${appPath}"><title>Orquívia</title>
+<script src="${appPath}canonical-redirect.js" defer></script></head>
+<body><h1>Orquívia</h1><p>La aplicación tiene una dirección única. Abriendo Orquívia…</p><p><a href="${appPath}">Abrir Orquívia</a></p></body></html>
+`;
+
+const fallbackJS = `// Resolve the fixed root from this deployed script, not from a requested path.
+const target = new URL('.', document.currentScript.src);
+const source = new URL(window.location.href);
+if (target.origin !== source.origin) throw new Error('Invalid Orquivia origin');
+if (source.pathname.startsWith(target.pathname) && source.pathname !== target.pathname
+  && !/\\/(?:assets|pdfjs)\\//.test(source.pathname.slice(target.pathname.length - 1))) {
+  target.search = source.search;
+  target.hash = source.hash;
+  window.location.replace(target.href);
+}
 `;
 
 const compatibilityWorker = `/* Legacy subscription compatibility only. No fetch handler or application-data cache. */
@@ -115,9 +138,18 @@ async function legacyFiles(root) {
 }
 
 /** Assemble compatibility resources around an already-built operational root. */
-export async function prepareRelease({ dist = 'dist', legacyDist } = {}) {
+export async function prepareRelease({ dist = 'dist', legacyDist, previousDists = [], version } = {}) {
   const root = await buildDirectory(dist, 'dist'), legacy = await buildDirectory(legacyDist, '--legacy-dist');
   if (inside(root, legacy) || inside(legacy, root)) throw new Error('dist y --legacy-dist deben ser directorios independientes.');
+  if (!Array.isArray(previousDists)) throw new Error('Las versiones anteriores deben indicarse como directorios de build.');
+  if (version === undefined) version = JSON.parse(await fs.readFile(new URL('../package.json', import.meta.url), 'utf8')).version;
+  if (typeof version !== 'string' || !/^\d+\.\d+\.\d+$/.test(version)) throw new Error('La versión publicada no es válida.');
+  const compatible = [];
+  for (const value of previousDists) {
+    const previous = await buildDirectory(value, '--previous-dist');
+    if (inside(root, previous) || inside(previous, root)) throw new Error('Las versiones anteriores deben estar fuera de dist.');
+    compatible.push({ root: previous, files: (await legacyFiles(previous)).filter(file => /^(?:assets|pdfjs)\//.test(file)) });
+  }
   const files = await legacyFiles(legacy);
   const manifest = JSON.parse(await fs.readFile(path.join(root, 'manifest.webmanifest'), 'utf8'));
   if (!Array.isArray(manifest.icons) || !manifest.icons.length) throw new Error('El manifest operativo no contiene iconos.');
@@ -148,17 +180,38 @@ export async function prepareRelease({ dist = 'dist', legacyDist } = {}) {
     fs.writeFile(path.join(target, 'service-worker.js'), compatibilityWorker),
     fs.writeFile(path.join(target, 'manifest.webmanifest'), JSON.stringify({ ...manifest, id: './', start_url: '../', scope: '../', icons }, null, 2) + '\n'),
   ]);
-  return { dist: root, legacyDirectory: target, preservedFiles: files.filter(file => !publicNames.has(file)).length };
+  let preservedRootFiles = 0;
+  for (const previous of compatible) for (const relative of previous.files) {
+    const source = await fs.readFile(path.join(previous.root, ...relative.split('/')));
+    const destination = path.join(root, ...relative.split('/'));
+    try {
+      const current = await fs.readFile(destination);
+      // Hashed bundles must never collide. Shared, unversioned PDF fonts and
+      // notices use the current release's copy when it already exists.
+      if (!current.equals(source) && relative.startsWith('assets/')) throw new Error(`Un recurso de compatibilidad cambiaría un archivo actual: ${relative}`);
+    } catch (error) {
+      if (error.code !== 'ENOENT') throw error;
+      await fs.mkdir(path.dirname(destination), { recursive: true });
+      await fs.writeFile(destination, source, { flag: 'wx' });
+      ++preservedRootFiles;
+    }
+  }
+  await Promise.all([
+    fs.writeFile(path.join(root, '404.html'), fallbackHTML),
+    fs.writeFile(path.join(root, 'canonical-redirect.js'), fallbackJS),
+    fs.writeFile(path.join(root, 'version.json'), JSON.stringify({ version }) + '\n'),
+  ]);
+  return { dist: root, legacyDirectory: target, preservedFiles: files.filter(file => !publicNames.has(file)).length, preservedRootFiles };
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   try {
-    const { values } = parseArgs({ options: { dist: { type: 'string', default: 'dist' }, 'legacy-dist': { type: 'string' } }, strict: true, allowPositionals: false });
-    const result = await prepareRelease({ dist: values.dist, legacyDist: values['legacy-dist'] });
-    console.log(`Publicación preparada: raíz operativa y ${result.preservedFiles} recursos de compatibilidad en ${legacyDirectory}/.`);
+    const { values } = parseArgs({ options: { dist: { type: 'string', default: 'dist' }, 'legacy-dist': { type: 'string' }, 'previous-dist': { type: 'string', multiple: true, default: [] } }, strict: true, allowPositionals: false });
+    const result = await prepareRelease({ dist: values.dist, legacyDist: values['legacy-dist'], previousDists: values['previous-dist'] });
+    console.log(`Publicación preparada: URL única, ${result.preservedFiles} recursos en ${legacyDirectory}/ y ${result.preservedRootFiles} recursos operativos anteriores.`);
   } catch (error) {
     console.error(error.message);
-    console.error('Uso: node scripts/prepare-release.mjs --legacy-dist <build-beta> [--dist dist]');
+    console.error('Uso: node scripts/prepare-release.mjs --legacy-dist <build-beta> [--previous-dist <build-anterior>] [--dist dist]');
     process.exitCode = 1;
   }
 }

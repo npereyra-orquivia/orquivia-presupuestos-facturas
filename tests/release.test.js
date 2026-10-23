@@ -102,3 +102,47 @@ test('release rejects overlapping outputs, non-build directories and unexpected 
   await assert.rejects(prepareRelease({ dist: f.root, legacyDist: f.legacy }), /inesperado/);
   await assert.rejects(fs.stat(f.target), { code: 'ENOENT' });
 });
+
+test('old page paths converge on the script root while preserving navigation and recovery credentials', async t => {
+  const f = await fixture(t);await prepareRelease({ dist: f.root, legacyDist: f.legacy, version: '1.3.1' });
+  const html = await fs.readFile(path.join(f.root, '404.html'), 'utf8');
+  assert.match(html, /src="\/orquivia-presupuestos-facturas\/canonical-redirect\.js"/);
+  assert.ok(!html.includes('unsafe-inline'));
+  const source = await fs.readFile(path.join(f.root, 'canonical-redirect.js'), 'utf8');
+  const script = 'https://example.test/orquivia-presupuestos-facturas/canonical-redirect.js';
+  for (const request of [
+    'v1.3/#facturas?estado=paid&envio=sent',
+    'pruebas-v1-1/index.html?view=alerts#recordatorios',
+    'versiones/1.0/pantalla?next=https%3A%2F%2Fevil.test#presupuestos?estado=all',
+    'v1.2/?code=private-test-code#access_token=private-test-token&type=recovery',
+    'desconocida',
+  ]) {
+    const location = new URL(request, script);let redirected;
+    vm.runInNewContext(source, { URL, document: { currentScript: { src: script } }, window: { location: { href: location.href, replace: value => { redirected = new URL(value); } } } });
+    assert.equal(redirected.origin, location.origin);assert.equal(redirected.pathname, '/orquivia-presupuestos-facturas/');
+    assert.equal(redirected.search, location.search);assert.equal(redirected.hash, location.hash);
+  }
+  for (const href of ['https://example.test/orquivia-presupuestos-facturas/', 'https://example.test/other-project/v1.3/', 'https://example.test/orquivia-presupuestos-facturas/assets/missing.js']) {
+    let redirected = false;
+    vm.runInNewContext(source, { URL, document: { currentScript: { src: script } }, window: { location: { href, replace: () => { redirected = true; } } } });
+    assert.equal(redirected, false);
+  }
+  assert.deepEqual(JSON.parse(await fs.readFile(path.join(f.root, 'version.json'), 'utf8')), { version: '1.3.1' });
+});
+
+test('previous public assets survive a release without replacing the current entry or colliding with current files', async t => {
+  const f = await fixture(t), original = await fs.readFile(path.join(f.root, 'index.html'));
+  const result = await prepareRelease({ dist: f.root, legacyDist: f.legacy, previousDists: [f.legacy] });
+  assert.ok(result.preservedRootFiles > 0);
+  for (const file of ['assets/legacy.js', 'assets/lazy-pdf.js', 'assets/legacy.css', 'pdfjs/standard_fonts/font.ttf']) {
+    assert.deepEqual(await fs.readFile(path.join(f.root, file)), await fs.readFile(path.join(f.legacy, file)));
+  }
+  assert.deepEqual(await fs.readFile(path.join(f.root, 'index.html')), original);
+  assert.equal((await prepareRelease({ dist: f.root, legacyDist: f.legacy, previousDists: [f.legacy] })).preservedRootFiles, 0);
+  await fs.writeFile(path.join(f.root, 'pdfjs', 'standard_fonts', 'font.ttf'), 'current shared font');
+  await prepareRelease({ dist: f.root, legacyDist: f.legacy, previousDists: [f.legacy] });
+  assert.equal(await fs.readFile(path.join(f.root, 'pdfjs', 'standard_fonts', 'font.ttf'), 'utf8'), 'current shared font');
+  await fs.writeFile(path.join(f.legacy, 'assets', 'operational.js'), 'different contents');
+  await assert.rejects(prepareRelease({ dist: f.root, legacyDist: f.legacy, previousDists: [f.legacy] }), /cambiaría un archivo actual/);
+  assert.equal(await fs.readFile(path.join(f.root, 'assets', 'operational.js'), 'utf8'), "export const build = 'operational';");
+});
