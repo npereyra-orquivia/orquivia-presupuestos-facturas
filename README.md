@@ -2,7 +2,7 @@
 
 Portal en español para **GitHub Pages + Supabase**. Nicole y Liliana trabajan con los mismos clientes, presupuestos, facturas, cobros y gastos, cada una con su cuenta. Nicole administra la empresa y el saldo inicial; Liliana puede editar documentos, registrar cobros y gestionar gastos y justificantes. La página pública contiene la interfaz y la pantalla de acceso; los datos y los archivos privados de la empresa se cargan desde Supabase después de verificar la cuenta y el segundo factor.
 
-La versión operativa es **1.2.1**. Incluye envío de presupuestos desde el correo de cada usuaria, firma personal, destinatarios en copia e historial combinado de cambios y envíos. Consulta [el despliegue y el respaldo de la 1.0](EMAIL-V1.1.md).
+La versión operativa es **1.2.2**. Incluye envío de presupuestos desde el correo de cada usuaria, firma personal, destinatarios en copia e historial combinado de cambios y envíos. Consulta [el despliegue y el respaldo de la 1.0](EMAIL-V1.1.md).
 
 ## Estados financieros
 
@@ -38,6 +38,8 @@ Consulta [supabase/README.md](supabase/README.md) para el procedimiento completo
 5. Comprueba el acceso de las dos titulares, el alta y la verificación del autenticador, el rechazo de una cuenta ajena y los conflictos entre dos sesiones antes de dar por finalizado el despliegue.
 
 El acceso distingue los fallos temporales de red/servicio y el exceso de intentos de los rechazos de credenciales. Los estados particulares de una cuenta comparten un mensaje genérico para evitar revelar si una dirección existe. La contraseña del portal es independiente de la del buzón de Arsys.
+
+**¿Has olvidado la contraseña?** solicita un enlace a Supabase Auth. Configura previamente un SMTP propio en **Authentication → Emails → SMTP Settings**; la conexión de correo personal para enviar presupuestos es independiente de este remitente de acceso. La **Site URL** debe ser la raíz oficial del portal y cualquier redirección adicional debe estar permitida de forma explícita. El portal acepta únicamente callbacks de recuperación, elimina sus credenciales de la dirección antes de continuar y verifica la sesión con Auth. Antes de elegir la nueva contraseña exige el autenticador TOTP ya verificado de la cuenta, sin sustituirlo ni desactivarlo. La recuperación mantiene los documentos cerrados, conserva un marcador de continuidad por pestaña y caduca a los 30 minutos. El cambio admite entre 12 y 128 caracteres, conserva los espacios, cierra las sesiones y pide un inicio de sesión normal; si un cierre falla, muestra esa incidencia. La contraseña nueva se introduce y guarda personalmente en el formulario, nunca en el chat, SQL ni archivos de configuración. No se requieren migraciones ni cambios de permisos para recuperar una cuenta existente.
 
 La pertenencia a la empresa requiere una membresía explícita. Las políticas RLS y las funciones del servidor comprueban esa membresía y el nivel MFA antes de permitir leer o guardar datos. El navegador guarda la sesión en `sessionStorage`; la interfaz se bloquea al cerrar sesión, perder acceso o alcanzar 30 minutos de inactividad. El cambio de contraseña exige la contraseña actual y vuelve a pedir inicio de sesión. Las modificaciones se registran en una auditoría que las cuentas de la aplicación no pueden borrar.
 

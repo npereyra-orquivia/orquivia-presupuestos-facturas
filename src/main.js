@@ -21,12 +21,18 @@ import { demoState, emptyState } from './demo.js';
 import { createBackend } from './backend.js';
 import { publicConfigIsValid, prepareRestore, sessionShouldLock } from './security.js';
 import { renderAccess, accountMarkup, bindPasswordForm } from './auth-ui.js';
+import { parsePasswordRecoveryURL } from './password-recovery.js';
 import { defaultPersonalProfile, validateProfile } from './personal-backend.js';
 import { personalPage, bindPersonal, profileName, avatarMarkup } from './personal-ui.js';
 import { createMailFeature } from './mail-integration.js';
 import { registerPWA, pushCapability, devicePushSubscription, enableDevicePush, disableDevicePush } from './push-client.js';
 import { defaultViewState, sanitizeViewState, parseViewRoute, applyViewRoute, viewRouteHash, readViewState, writeViewState, readActivityTime, writeActivityTime } from './view-state.js';
 
+// Remove the one-use recovery credentials before any asynchronous startup work.
+// They stay in memory only until the Auth SDK validates the recovery session.
+let passwordRecoveryCallback=parsePasswordRecoveryURL(location.href);
+if(passwordRecoveryCallback)window.history.replaceState(null,'',passwordRecoveryCallback.cleanURL);
+const recoveryRedirectURL=new URL('.',location.href);recoveryRedirectURL.search='';recoveryRedirectURL.hash='';
 const app=document.querySelector('#app'), modalRoot=document.querySelector('#modal-root');
 const logo=`${import.meta.env.BASE_URL}orquivia-logo.png`;
 const brandLogo=`${import.meta.env.BASE_URL}orquivia-logo-full.svg`,markLogo=`${import.meta.env.BASE_URL}orquivia-logo-mark.svg`;
@@ -58,7 +64,7 @@ function lockPrivate(message='',{restoring=false}={}){
   const generation=++accessGeneration,activeBackend=backend;
   appControlsCleanup?.();appControlsCleanup=null;resetPersonal();
   state=emptyState();user=null;mode='locked';editor=null;busy=false;workspaceConflict=null;viewState=defaultViewState(todayISO());closeModal(true);
-  accessUI=renderAccess(app,{backend,logo,brandLogo,message,restoring,onAuthenticated:async({user:account,state:loaded,restored})=>{
+  accessUI=renderAccess(app,{backend,logo,brandLogo,message,restoring,recoveryRedirectTo:recoveryRedirectURL.href,onAuthenticated:async({user:account,state:loaded,restored})=>{
     if(generation!==accessGeneration||backend!==activeBackend)return;
     const storedActivity=readActivityTime(sessionStorage,account.id),now=Date.now();
     if(restored&&storedActivity!==null&&sessionShouldLock({lastActivityAt:storedActivity,now})){
@@ -408,8 +414,15 @@ setInterval(async()=>{
 setInterval(()=>{if(mode!=='locked'&&page!=='personal'&&!modalRoot.childElementCount&&!document.querySelector('[data-receipt-viewer]')&&!busy&&!personalBusy&&!document.activeElement?.closest('input,textarea,select,[role="combobox"]')&&!app.querySelector('[role="combobox"][aria-expanded="true"]')){render()}},60000);
 if(window.top!==window.self){app.textContent='Abre Orquívia directamente en su página para iniciar sesión.';}
 else if(publicConfigIsValid(config)){
-  connectBackend();lockPrivate('',{restoring:true});
-  await accessUI.resume();
+  connectBackend();lockPrivate(passwordRecoveryCallback?.error||'',{restoring:!passwordRecoveryCallback?.error});
+  if(passwordRecoveryCallback?.credentials){
+    const credentials=passwordRecoveryCallback.credentials;passwordRecoveryCallback=null;
+    await accessUI.recover(credentials);
+  }else if(passwordRecoveryCallback?.error){
+    passwordRecoveryCallback=null;
+  }else if(backend.hasPasswordRecovery()){
+    await accessUI.recover();
+  }else await accessUI.resume();
 }else if(production){lockPrivate();}
 else{
   mode=demoAllowed?'demo':'local';state=loadDemo();

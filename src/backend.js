@@ -2,6 +2,7 @@ import { createClient } from '@supabase/supabase-js';
 import { createPersonalBackend } from './personal-backend.js';
 import { createDocumentMailBackend } from './document-mail-backend.js';
 import { validateWorkspace } from './domain.js';
+import { validRecoveryCredentials } from './password-recovery.js';
 
 const MAX_STATE_BYTES = 5_000_000;
 export const RECEIPT_BUCKET = 'orquivia-receipts';
@@ -194,13 +195,44 @@ export function createBackend({ url, anonKey }) {
   let queue = Promise.resolve();
   let disposed = false;
   let authGeneration = 0;
+  let recovery = null;
+  let recoveryAttempt = 0;
+  const recoveryMarkerKey = `orquivia.password-recovery.${new URL(url).host}`;
+  const recoveryLifetime = 30 * 60 * 1000;
   const listeners = new Set();
+
+  function clearRecovery() {
+    recovery = null;
+    try { if (typeof sessionStorage !== 'undefined') sessionStorage.removeItem(recoveryMarkerKey); } catch {}
+  }
+
+  function recoveryMarker() {
+    let raw;
+    try {
+      raw = typeof sessionStorage === 'undefined' ? null : sessionStorage.getItem(recoveryMarkerKey);
+    } catch { return null; }
+    if (raw === null) return null;
+    try {
+      const marker = JSON.parse(raw);
+      if (marker && UUID_PATTERN.test(marker.userId) && Number.isFinite(marker.startedAt)) return marker;
+    } catch {}
+    // A damaged or old recovery marker must not silently restore an AAL2
+    // session as a normal workspace login. The recovery UI can close it.
+    return { invalid: true };
+  }
+
+  function assertRecovery(context) {
+    if (!context || disposed || context !== recovery || context.generation !== authGeneration || context.userId !== ownerId
+      || context.startedAt > Date.now() || Date.now() - context.startedAt >= recoveryLifetime) {
+      throw backendError('Vuelve a abrir un enlace de recuperación válido para cambiar la contraseña.', 'RECOVERY_REQUIRED');
+    }
+  }
 
   function resetForUser(user) {
     if (ownerId !== (user?.id || null)) {
       // The first restored owner establishes the initial context. Every later
       // identity change (and explicit login/logout) invalidates earlier work.
-      if (ownerId !== null || authGeneration !== 0) ++authGeneration;
+      if (ownerId !== null || authGeneration !== 0) { ++authGeneration; clearRecovery(); }
       ownerId = user?.id || null;
       version = null;
       workspace = null;
@@ -208,6 +240,7 @@ export function createBackend({ url, anonKey }) {
   }
 
   const { data: authEvents } = client.auth.onAuthStateChange((event, session) => {
+    if (event === 'SIGNED_OUT') clearRecovery();
     resetForUser(session?.user);
     // Defer callbacks to avoid making another Supabase call inside its auth lock.
     setTimeout(() => {
@@ -251,6 +284,7 @@ export function createBackend({ url, anonKey }) {
   }
 
   async function checkWorkspaceAccess(user, generation = authGeneration) {
+    if (recovery || recoveryMarker()) throw backendError('Termina de restablecer tu contraseña antes de abrir la empresa.', 'PASSWORD_RECOVERY_REQUIRED');
     const { data, error } = await client.rpc('refresh_orquivia_access', {});
     assertSession(user, generation);
     if (error) {
@@ -269,6 +303,7 @@ export function createBackend({ url, anonKey }) {
   }
 
   async function requireUser(generation = authGeneration) {
+    if (recovery || recoveryMarker()) throw backendError('Termina de restablecer tu contraseña antes de abrir la empresa.', 'PASSWORD_RECOVERY_REQUIRED');
     const user = await currentUser();
     if (authGeneration !== generation) throw backendError('La sesión cambió durante la operación.', 'AUTH_CHANGED');
     if (!user) throw backendError('Inicia sesión para guardar los datos en Supabase.', 'AUTH_REQUIRED');
@@ -306,6 +341,30 @@ export function createBackend({ url, anonKey }) {
     return job;
   }
 
+  async function passwordRecoveryStatus() {
+    const marker = recovery || recoveryMarker();
+    if (!marker) return null;
+    if (marker.invalid || marker.startedAt > Date.now() || Date.now() - marker.startedAt >= recoveryLifetime) {
+      throw backendError('La recuperación ha caducado. Cierra esta sesión y solicita un enlace nuevo.', 'RECOVERY_REQUIRED');
+    }
+    const user = await currentUser();
+    if (!user || user.id !== marker.userId) throw backendError('La sesión cambió durante la recuperación. Cierra esta sesión y solicita otro enlace.', 'AUTH_CHANGED');
+    if (!recovery) recovery = { ...marker, generation: authGeneration };
+    const context = recovery;
+    assertRecovery(context);
+    const [factorsResult, levelResult] = await Promise.all([
+      client.auth.mfa.listFactors(), client.auth.mfa.getAuthenticatorAssuranceLevel(),
+    ]);
+    assertRecovery(context);
+    if (factorsResult.error || levelResult.error) {
+      throw backendError('No se pudo comprobar el autenticador de esta cuenta. Vuelve a intentarlo.', 'AUTH_ERROR', factorsResult.error || levelResult.error);
+    }
+    const factor = (factorsResult.data?.totp || factorsResult.data?.all || [])
+      .find(value => value.factor_type === 'totp' && value.status === 'verified');
+    const currentLevel = levelResult.data?.currentLevel;
+    return { user, factorId: factor?.id || null, currentLevel, requiresMfa: !factor || currentLevel !== 'aal2' };
+  }
+
   return {
     mail: createDocumentMailBackend({ client, requireUser, getWorkspace: () => workspace, getVersion: () => version, enqueue,
       adoptWorkspace(result) {
@@ -316,6 +375,8 @@ export function createBackend({ url, anonKey }) {
     }),
     personal: createPersonalBackend({ client, requireUser, getWorkspace: () => workspace, url }),
     async signIn(email, password) {
+      ++recoveryAttempt;
+      clearRecovery();
       ++authGeneration;
       version = null;
       workspace = null;
@@ -325,11 +386,85 @@ export function createBackend({ url, anonKey }) {
       return data.user;
     },
     async signOut() {
+      ++recoveryAttempt;
+      clearRecovery();
       ++authGeneration;
       await queue;
       const { error } = await client.auth.signOut({ scope: 'local' });
       if (error) throw backendError('No se pudo cerrar la sesión.', 'AUTH_ERROR', error);
       resetForUser(null);
+    },
+    async requestPasswordRecovery(email, { redirectTo } = {}) {
+      const address = typeof email === 'string' ? email.trim() : '';
+      if (!address || address.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(address)) {
+        throw backendError('Introduce un correo electrónico válido.', 'INVALID_EMAIL');
+      }
+      let redirect;
+      try { redirect = new URL(redirectTo); } catch { throw backendError('La dirección de recuperación no es válida.', 'INVALID_CONFIG'); }
+      if (redirect.username || redirect.password || (redirect.protocol !== 'https:'
+        && !(redirect.protocol === 'http:' && ['localhost', '127.0.0.1'].includes(redirect.hostname)))) {
+        throw backendError('La dirección de recuperación no es válida.', 'INVALID_CONFIG');
+      }
+      const { error } = await client.auth.resetPasswordForEmail(address, { redirectTo: redirect.href });
+      if (error && !['user_not_found', 'email_not_found'].includes(error.code)) {
+        if (error.status === 429) throw backendError('Se han solicitado demasiados enlaces. Espera unos minutos antes de volver a intentarlo.', 'AUTH_ERROR', error);
+        throw backendError('No se ha podido enviar el enlace de recuperación. Inténtalo más tarde o contacta con la administradora.', 'AUTH_ERROR', error);
+      }
+      return { requested: true };
+    },
+    async beginPasswordRecovery(credentials) {
+      if (!validRecoveryCredentials(credentials)) throw backendError('El enlace de recuperación no es válido. Solicita uno nuevo.', 'RECOVERY_REQUIRED');
+      const attempt = ++recoveryAttempt;
+      clearRecovery();
+      ++authGeneration;
+      workspace = null;
+      version = null;
+      const { data, error } = await client.auth.setSession({ access_token: credentials.accessToken, refresh_token: credentials.refreshToken });
+      if (attempt !== recoveryAttempt) throw backendError('La sesión cambió durante la recuperación. Solicita otro enlace.', 'AUTH_CHANGED');
+      if (error || !data.user?.id) {
+        // Do not leave a partially accepted recovery session available to the
+        // normal workspace restoration path after a rejected callback.
+        try { await client.auth.signOut({ scope: 'local' }); } catch {}
+        throw backendError('El enlace de recuperación no es válido o ha caducado. Solicita uno nuevo.', 'RECOVERY_REQUIRED', error);
+      }
+      recovery = { userId: data.user.id, generation: authGeneration, startedAt: Date.now() };
+      try { if (typeof sessionStorage !== 'undefined') sessionStorage.setItem(recoveryMarkerKey, JSON.stringify({ userId: recovery.userId, startedAt: recovery.startedAt })); } catch {}
+      const user = await currentUser();
+      if (attempt !== recoveryAttempt || user?.id !== data.user.id) throw backendError('La sesión cambió durante la recuperación. Solicita otro enlace.', 'AUTH_CHANGED');
+      return passwordRecoveryStatus();
+    },
+    recoveryStatus: passwordRecoveryStatus,
+    hasPasswordRecovery() { return Boolean(recovery || recoveryMarker()); },
+    async completePasswordRecovery(newPassword) {
+      const context = recovery;
+      assertRecovery(context);
+      const length = typeof newPassword === 'string' ? Array.from(newPassword).length : 0;
+      if (length < 12 || length > 128) throw backendError('La nueva contraseña debe tener entre 12 y 128 caracteres.', 'INVALID_PASSWORD');
+      const status = await passwordRecoveryStatus();
+      assertRecovery(context);
+      if (!status?.factorId || status.requiresMfa || status.currentLevel !== 'aal2') {
+        throw backendError('Confirma tu código del autenticador antes de cambiar la contraseña.', 'MFA_REQUIRED');
+      }
+      const { data, error } = await client.auth.updateUser({ password: newPassword });
+      assertRecovery(context);
+      if (error) throw backendError('No se pudo restablecer la contraseña. Vuelve a intentarlo.', 'AUTH_ERROR', error);
+      if (data.user?.id !== context.userId) throw backendError('La identidad cambió durante la recuperación.', 'AUTH_CHANGED');
+      let warning = null;
+      try {
+        const { error: othersError } = await client.auth.signOut({ scope: 'others' });
+        if (othersError) warning = 'La contraseña se ha cambiado, pero no se pudieron cerrar todas las demás sesiones. Contacta con la administradora.';
+      } catch { warning = 'La contraseña se ha cambiado, pero no se pudieron cerrar todas las demás sesiones. Contacta con la administradora.'; }
+      if (recovery !== context || context.generation !== authGeneration || ownerId !== context.userId) {
+        return { completed: true, warning: 'La contraseña se ha cambiado. La sesión cambió durante el cierre; vuelve a entrar con la nueva contraseña.' };
+      }
+      try {
+        const { error: localError } = await client.auth.signOut({ scope: 'local' });
+        if (localError) warning = 'La contraseña se ha cambiado, pero no se pudo confirmar el cierre de todas las sesiones. Cierra esta pestaña y vuelve a entrar.';
+      } catch { warning = 'La contraseña se ha cambiado, pero no se pudo confirmar el cierre de todas las sesiones. Cierra esta pestaña y vuelve a entrar.'; }
+      clearRecovery();
+      ++authGeneration;
+      resetForUser(null);
+      return { completed: true, warning };
     },
     async changePassword(currentPassword, newPassword) {
       const user = await currentUser();
