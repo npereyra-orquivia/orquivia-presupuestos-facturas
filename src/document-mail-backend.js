@@ -10,6 +10,11 @@ const messages = {
   AUTH_CHANGED: 'La sesión cambió. Entra de nuevo antes de continuar.',
   INVALID_DOCUMENT: 'Prepara el documento antes de enviarlo por correo.',
   DOCUMENT_NOT_SENDABLE: 'Este documento no está preparado para enviarse.',
+  INVALID_ATTACHMENT: 'Revisa los adjuntos: se admiten documentos PDF e imágenes JPG o PNG.',
+  ATTACHMENTS_NOT_ALLOWED: 'Los documentos adicionales están disponibles en los correos de facturas.',
+  ATTACHMENT_LIMIT: 'Puedes añadir hasta 5 archivos, de 5 MB cada uno y 10 MB en total.',
+  MAIL_STORAGE_LIMIT: 'Hay demasiadas copias pendientes en Supabase. Revisa los envíos pendientes antes de enviar otro correo.',
+  MAIL_MESSAGE_TOO_LARGE: 'El correo completo supera el límite de tamaño. Reduce los adjuntos e inténtalo de nuevo.',
 };
 
 /** No mailbox credential is persisted or returned to the browser. */

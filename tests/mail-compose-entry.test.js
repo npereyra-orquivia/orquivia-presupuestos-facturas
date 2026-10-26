@@ -101,3 +101,17 @@ test('a preferred billing contact never rewrites an unsent draft or an uncertain
     assert.deepEqual(result.job, blocked);
   }
 });
+
+test('extra attachment bytes stay with an unsent or uncertain attempt but never silently carry into a new send', () => {
+  const attached = { ...savedDraft, attachments: [{ name: 'Pedido.pdf', contentType: 'application/pdf', bytes: new Uint8Array([1, 2, 3]) }] };
+  for (const status of ['sent', 'archive_pending', 'failed']) {
+    const result = resolveMailComposeEntry({ savedDraft: attached, history: [job(status)], defaultDraft, createId: () => 'new-id' });
+    assert.deepEqual(result.draft.attachments, []);assert.equal(result.draft.idempotencyKey, 'new-id');
+  }
+  for (const history of [[], [job('uncertain')], [job('sent', { errorCode: 'SMTP_PARTIAL' })]]) {
+    const result = resolveMailComposeEntry({ savedDraft: attached, history, defaultDraft, createId: neverCreate });
+    assert.deepEqual(result.draft.attachments[0].bytes, new Uint8Array([1, 2, 3]));
+    assert.equal(result.draft.idempotencyKey, attached.idempotencyKey);
+  }
+  assert.equal(attached.attachments.length, 1);
+});

@@ -1,25 +1,30 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createDocumentMailHandler } from '../supabase/functions/_shared/document-mail-handler.js';
+import { encodeMailAttachments, MAIL_ATTACHMENT_LIMITS } from '../src/mail-attachments.js';
 const user = '10000000-0000-4000-8000-000000000001', org = '20000000-0000-4000-8000-000000000001', id = '30000000-0000-4000-8000-000000000001';
 const signature = {name:'Persona de prueba',role:'Dirección',phone:''};
 const token = (aal='aal2') => `header.${Buffer.from(JSON.stringify({sub:user,exp:Math.floor(Date.now()/1000)+3600,aal})).toString('base64url')}.signature`;
 const request = (action,fields={},aal='aal2') => new Request('https://example.test',{method:'POST',headers:{authorization:`Bearer ${token(aal)}`,origin:'https://npereyra-orquivia.github.io'},body:JSON.stringify({action,organizationId:org,expectedUserId:user,...fields})});
 const fields = {documentId:'quote',expectedWorkspaceVersion:7,idempotencyKey:id,to:['client@example.test'],subject:'Presupuesto',message:'Un mensaje'};
 
-function fixture({smtpError,archiveError,existing=false}={}) {
-  const calls=[];let smtp=0,append=0,status='sending';
+function fixture({smtpError,archiveError,existing=false,invoice=false,storeError,buildError}={}) {
+  const calls=[],built=[];let smtp=0,append=0,status='sending';
   const db={rpc:async(name,p)=>{calls.push({name,p});let data;
     if(name.endsWith('_profile'))data={email:'sender@example.test',connected:true,signature,version:1,provider:'serviciodecorreo',...(p.p_secrets?{password:'test-password',sentFolder:'Sent'}:{})};
-    if(name.endsWith('_claim')&&!name.endsWith('archive_claim'))data={existing,job:{id,status,createdAt:'2026-10-15T09:00:00Z'},document:{id:'quote',kind:'quote',status:'ready',number:'PR-001'},company:{},client:{}};
+    if(name.endsWith('_claim')&&!name.endsWith('archive_claim')){
+      if(p.p_attachments?.length&&!invoice)return {data:null,error:{message:'DOCUMENT_NOT_SENDABLE'}};
+      data={existing,job:{id,status,createdAt:'2026-10-15T09:00:00Z'},document:{id:invoice?'invoice':'quote',kind:invoice?'invoice':'quote',status:invoice?'issued':'ready',number:invoice?'F-001':'PR-001'},company:{},client:{}};
+    }
+    if(name.endsWith('_store_message')&&storeError)return {data:null,error:{message:storeError}};
     if(name.endsWith('_complete')){status=p.p_status;data={job:{id,status,...(p.p_delivery?{errorCode:p.p_delivery.errorCode,accepted:p.p_delivery.accepted,rejected:p.p_delivery.rejected}:{})},...(status==='archive_pending'?{workspace:{state:{},version:8}}:{})};}
-    if(name.endsWith('_archive_claim'))data={raw:btoa('exact-mime'),messageId:'<fixture@example.test>'};
+    if(name.endsWith('_archive_claim'))data={...(p.p_include_raw===false?{}:{raw:btoa('exact-mime')}),messageId:'<fixture@example.test>'};
     return {data,error:null};}};
-  const mail={buildMessage:async()=>({raw:new TextEncoder().encode('exact-mime'),messageId:'<fixture@example.test>',envelope:{from:'sender@example.test',to:fields.to}}),
+  const mail={buildMessage:async args=>{built.push(args);if(buildError)throw Object.assign(Error('private detail'),{code:buildError});return {raw:new TextEncoder().encode('exact-mime'),messageId:'<fixture@example.test>',envelope:{from:'sender@example.test',to:fields.to}};},
     sendRaw:async()=>{++smtp;if(smtpError)throw Object.assign(new Error('raw secret detail'),typeof smtpError==='string'?{code:smtpError}:smtpError);},
     appendSent:async(_c,folder,raw)=>{++append;assert.equal(folder,'Sent');assert.equal(new TextDecoder().decode(raw),'exact-mime');if(archiveError)throw Error('private detail');}};
   const handler=createDocumentMailHandler({db,auth:{getUser:async()=>({data:{user:{id:user,email:'sender@example.test'}}})},mail,renderDocumentPdf:async()=>new Uint8Array([1,2]),logoBytes:new Uint8Array([3])});
-  return {handler,calls,count:()=>({smtp,append})};
+  return {handler,calls,built,count:()=>({smtp,append})};
 }
 test('AAL1 and a switched identity cannot access profile, credentials or jobs',async()=>{
   for(const req of [request('profile',{},'aal1'),request('profile',{expectedUserId:org}),request('composer',{documentId:'quote'},'aal1'),request('composer',{documentId:'quote',expectedUserId:org})]){
@@ -96,4 +101,54 @@ test('a partially accepted message records recipients without archiving, marking
   assert.equal(result.workspace,undefined);assert.deepEqual(f.count(),{smtp:1,append:0});
   assert.ok(f.calls.some(call=>call.name==='orquivia_mail_store_message'));
   assert.ok(!f.calls.some(call=>call.p.p_status==='archive_pending'||call.name==='orquivia_mail_archive_claim'));
+});
+
+const extra = (text='Synthetic document') => ({ name:'Justificante.pdf',contentType:'application/pdf',bytes:new TextEncoder().encode('%PDF-1.7\n'+text+'\n%%EOF') });
+
+test('invoice extras are decoded once, hashed into the claim and archived as exactly the prepared MIME',async()=>{
+  const f=fixture({invoice:true}), attachment=extra('a'.repeat(110_000));
+  const r=await f.handler(request('send',{...fields,documentId:'invoice',attachments:encodeMailAttachments([attachment])}));
+  const result=await r.json();assert.equal(r.status,200);assert.equal(result.job.status,'sent');
+  assert.deepEqual(f.count(),{smtp:1,append:1});
+  const claim=f.calls.find(call=>call.name==='orquivia_mail_claim').p;
+  assert.equal(claim.p_attachments[0].name,attachment.name);assert.equal(claim.p_attachments[0].size,attachment.bytes.length);
+  assert.match(claim.p_attachments[0].sha256,/^[a-f0-9]{64}$/);
+  assert.equal(claim.p_attachments[0].bytes,undefined);assert.equal(claim.p_attachments[0].contentBase64,undefined);
+  assert.deepEqual(f.built[0].attachments,[attachment]);assert.equal(f.built[0].documentKind,'invoice');
+  assert.equal(f.calls.find(call=>call.name==='orquivia_mail_archive_claim').p.p_include_raw,false);
+  assert.ok(!JSON.stringify(result).includes('Synthetic document'));
+});
+
+test('same file bytes preserve idempotency while changed bytes or filenames alter the request hash',async()=>{
+  const attempts=[];
+  for(const attachment of [extra('same'),extra('same'),extra('changed'),{...extra('same'),name:'Otra-referencia.pdf'}]){
+    const f=fixture({invoice:true,existing:true});await f.handler(request('send',{...fields,documentId:'invoice',attachments:encodeMailAttachments([attachment])}));
+    attempts.push(f.calls.find(call=>call.name==='orquivia_mail_claim').p.p_hash);assert.deepEqual(f.count(),{smtp:0,append:0});
+  }
+  assert.equal(attempts[0],attempts[1]);assert.notEqual(attempts[0],attempts[2]);assert.notEqual(attempts[0],attempts[3]);
+  const a=fixture(),b=fixture();await a.handler(request('send',fields));await b.handler(request('send',{...fields,attachments:[]}));
+  assert.equal(a.calls.find(call=>call.name==='orquivia_mail_claim').p.p_hash,b.calls.find(call=>call.name==='orquivia_mail_claim').p.p_hash);
+});
+
+test('quote extras and malformed or oversized payloads cannot reach SMTP or the PDF renderer',async()=>{
+  const quote=fixture();const r=await quote.handler(request('send',{...fields,attachments:encodeMailAttachments([extra()])}));
+  assert.equal(r.status,400);assert.deepEqual(quote.count(),{smtp:0,append:0});assert.equal(quote.built.length,0);
+  for(const attachments of [[{name:'proof.pdf',contentType:'application/pdf',contentBase64:btoa('<html>not pdf</html>')}],
+    [{name:'proof.pdf',contentType:'application/pdf',contentBase64:btoa('%PDF-1.7'),url:'https://private.invalid/file'}],
+    Array.from({length:6},(_,index)=>({...encodeMailAttachments([extra()])[0],name:`proof-${index}.pdf`}))]){
+    const f=fixture({invoice:true});const response=await f.handler(request('send',{...fields,documentId:'invoice',attachments}));
+    assert.equal(response.status,400);assert.deepEqual(f.count(),{smtp:0,append:0});assert.equal(f.built.length,0);
+    assert.ok(!f.calls.some(call=>call.name==='orquivia_mail_claim'));
+  }
+  const f=fixture();const oversized=request('send',fields);oversized.headers.set('content-length',String(MAIL_ATTACHMENT_LIMITS.bodyBytes+1));
+  assert.equal((await f.handler(oversized)).status,400);assert.equal(f.calls.length,0);
+});
+
+test('quota and MIME preparation failures are definite unsent outcomes with a useful recorded error',async()=>{
+  for(const options of [{storeError:'MAIL_STORAGE_LIMIT'}, {buildError:'MAIL_MESSAGE_TOO_LARGE'}, {buildError:'provider-private-error'}]){
+    const f=fixture({invoice:true,...options});const result=await(await f.handler(request('send',{...fields,documentId:'invoice',attachments:encodeMailAttachments([extra()])}))).json();
+    assert.equal(result.job.status,'failed');assert.equal(result.workspace,undefined);assert.deepEqual(f.count(),{smtp:0,append:0});
+    assert.equal(result.job.errorCode,options.storeError||(['MAIL_MESSAGE_TOO_LARGE'].includes(options.buildError)?options.buildError:'MAIL_PREPARATION_FAILED'));
+    assert.ok(!JSON.stringify(result).includes('private'));
+  }
 });

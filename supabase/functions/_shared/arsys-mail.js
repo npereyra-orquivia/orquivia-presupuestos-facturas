@@ -1,4 +1,5 @@
 import { isMailAddress, renderMailSignature, validateMailDraft, validateMailSignature } from '../../../src/mail-domain.js';
+import { MAIL_ATTACHMENT_LIMITS, validateMailAttachments } from '../../../src/mail-attachments.js';
 
 export const MAIL_HOSTS = Object.freeze({
   serviciodecorreo: { smtp: 'smtp.serviciodecorreo.es', imap: 'imap.serviciodecorreo.es' },
@@ -44,10 +45,13 @@ export function createArsysMail({ createTransport, createImapClient }) {
       } catch (error) { throw fail(error?.code === 'SENT_FOLDER_NOT_FOUND' ? error.code : 'MAIL_CONNECTION_FAILED'); }
       finally { smtp.close?.(); }
     },
-    async buildMessage({ email, to, cc, subject, message, signature, pdfBytes, filename, jobId, date, logoBytes }) {
+    async buildMessage({ email, to, cc, subject, message, signature, pdfBytes, filename, jobId, date, logoBytes, attachments = [], documentKind }) {
       const draft = validateMailDraft({ to, cc, subject, message });
       if (!draft.ok || !isMailAddress(email) || !validateMailSignature(signature).ok || !/^[0-9a-f-]{36}$/i.test(jobId)
         || !(pdfBytes instanceof Uint8Array) || pdfBytes.length > 3 * 1024 * 1024 || !/^[A-Za-z0-9_-]+\.pdf$/.test(filename)) throw fail('INVALID_MESSAGE');
+      const additional = validateMailAttachments(attachments);
+      if (additional.length && documentKind !== 'invoice') throw fail('INVALID_ATTACHMENT');
+      if (additional.some(item => [filename.toLowerCase(), 'orquivia.png'].includes(item.name.toLowerCase()))) throw fail('INVALID_ATTACHMENT');
       const messageId = `<${jobId}@orquivia.com>`;
       const transport = createTransport({ streamTransport: true, buffer: true, newline: 'windows', disableFileAccess: true, disableUrlAccess: true });
       try {
@@ -59,9 +63,11 @@ export function createArsysMail({ createTransport, createImapClient }) {
           attachments: [
             { filename, content: pdfBytes, contentType: 'application/pdf' },
             { filename: 'orquivia.png', content: logoBytes, contentType: 'image/png', cid: 'orquivia-logo', contentDisposition: 'inline' },
+            ...additional.map(item => ({ filename: item.name, content: item.bytes, contentType: item.contentType, contentDisposition: 'attachment' })),
           ],
         });
-        return { raw: new Uint8Array(result.message), messageId, envelope: { from: email, to: [...draft.value.to, ...draft.value.cc] } };
+        if (!(result.message instanceof Uint8Array) || result.message.byteLength > MAIL_ATTACHMENT_LIMITS.rawBytes) throw fail('MAIL_MESSAGE_TOO_LARGE');
+        return { raw: result.message, messageId, envelope: { from: email, to: [...draft.value.to, ...draft.value.cc] } };
       } finally { transport.close?.(); }
     },
     async sendRaw(credentials, raw, envelope) {

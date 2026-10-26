@@ -76,7 +76,7 @@ export function createMailFeature(ctx) {
     const bindClose = () => modal.querySelectorAll('[data-close]').forEach(button => { button.onclick = () => ctx.closeModal(); });
     function newMail() {
       if (!valid() || ctx.isBusy() || ctx.isConflict()) return;
-      draft = { ...draft, idempotencyKey: crypto.randomUUID() };
+      draft = { ...draft, attachments: [], idempotencyKey: crypto.randomUUID() };
       drafts.set(document.id, draft); job = null; draw();
     }
     async function reloadHistory() {
@@ -91,6 +91,9 @@ export function createMailFeature(ctx) {
       if (!valid()) return;
       if (result.workspace) ctx.adopt(result.workspace);
       job = result.job;
+      if (job?.errorCode !== 'SMTP_PARTIAL' && ['sent', 'archive_pending', 'failed'].includes(job?.status)) {
+        draft = { ...draft, attachments: [] }; drafts.set(document.id, draft);
+      }
       data = { ...data, history: mergeMailJob(data.history, job) }; remember();
       draw();
     }
@@ -116,7 +119,7 @@ export function createMailFeature(ctx) {
         : renderMailComposer({ document: documentNow(), client: ctx.clientFor(documentNow()), profile: data.profile, history: data.history, preview: ctx.preview(documentNow()), draft, logoUrl: ctx.logoUrl }));
       bindClose();
       const bindings = {
-        draft, profile: data.profile, logoUrl: ctx.logoUrl, send, onResult, retryArchive, reloadHistory, onNewMail: newMail,
+        draft, document: documentNow(), profile: data.profile, logoUrl: ctx.logoUrl, send, onResult, retryArchive, reloadHistory, onNewMail: newMail, isCurrent: valid,
         onDraftChange: value => { if (valid()) { draft = value; drafts.set(document.id, value); } },
         configure: () => { ctx.closeModal(true); ctx.navigate('personal'); },
       };

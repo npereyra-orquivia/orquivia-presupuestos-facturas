@@ -88,3 +88,69 @@ test('address/header injection and user HTML do not become executable mail conte
   assert.ok(!signature.includes('<img')); assert.match(signature,/&lt;img/);
   assert.equal(defaultMailSignature({email:'user@example.test'}).phone,'');
 });
+
+const invoiceMessage = () => ({ email: account.email, to: ['client@example.test'], subject: 'Factura de prueba', message: 'Factura y justificantes',
+  signature: { name: 'Persona de prueba', role: '', phone: '' }, pdfBytes: new TextEncoder().encode('%PDF-1.7 generated invoice'),
+  logoBytes: new Uint8Array([1, 2, 3]), filename: 'factura-F-001.pdf', documentKind: 'invoice',
+  jobId: '10000000-0000-4000-8000-000000000001', date: '2026-10-26T09:00:00Z' });
+
+test('an invoice MIME keeps its generated PDF and inline signature logo and attaches exact additional document bytes', async () => {
+  const pdf = new TextEncoder().encode('%PDF-1.4 supporting document\n%%EOF');
+  const jpg = new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 1, 2, 0xff, 0xd9]);
+  const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 255]);
+  const input = invoiceMessage();
+  const mail = createArsysMail({ createTransport: options => nodemailer.createTransport(options) });
+  const result = await mail.buildMessage({ ...input, attachments: [
+    { name: 'justificante.pdf', contentType: 'application/pdf', bytes: pdf },
+    { name: 'ticket.jpg', contentType: 'image/jpeg', bytes: jpg },
+    { name: 'foto.png', contentType: 'image/png', bytes: png },
+  ] });
+  const raw = new TextDecoder().decode(result.raw);
+  const bodies = raw.split(/\r\n--[^\r\n]+\r\n/).flatMap(part => {
+    const separator = part.indexOf('\r\n\r\n');
+    if (separator < 0 || !/Content-Transfer-Encoding: base64/i.test(part.slice(0, separator))) return [];
+    return [Buffer.from(part.slice(separator + 4).split('\r\n--')[0], 'base64')];
+  });
+  for (const expected of [input.pdfBytes, input.logoBytes, pdf, jpg, png]) assert.ok(bodies.some(body => body.equals(Buffer.from(expected))));
+  assert.equal((raw.match(/Content-Type: application\/pdf/gi) || []).length, 2);
+  assert.equal((raw.match(/Content-Disposition: attachment/gi) || []).length, 4);
+  assert.equal((raw.match(/Content-ID: <orquivia-logo>/gi) || []).length, 1);
+  assert.deepEqual(result.envelope.to, ['client@example.test']);
+});
+
+test('extra files are refused for quotes, reserved filenames, invalid content and URI/header options never reach the provider', async () => {
+  let transports = 0;const captured = [];
+  const mail = createArsysMail({ createTransport: options => {
+    ++transports;assert.equal(options.streamTransport, true);
+    return { sendMail: async value => { captured.push(value);return { message: new Uint8Array([1]) }; }, close() {} };
+  } });
+  const bytes = new TextEncoder().encode('%PDF-1.7 supporting file');
+  const item = { name: 'support.pdf', contentType: 'application/pdf', bytes };
+  for (const change of [{ documentKind: 'quote' }, { documentKind: undefined }, { attachments: [{ ...item, name: 'FACTURA-F-001.PDF' }] },
+    { attachments: [{ ...item, name: 'orquivia.png', contentType: 'image/png', bytes: new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]) }] },
+    { attachments: [{ ...item, name: 'support.pdf\r\nBcc: other@example.test' }] },
+    { attachments: [{ ...item, bytes: new TextEncoder().encode('<svg onload=alert(1)>') }] }]) {
+    await assert.rejects(mail.buildMessage({ ...invoiceMessage(), attachments: [item], ...change }), error => error.code === 'INVALID_ATTACHMENT');
+  }
+  assert.equal(transports, 0);
+  await mail.buildMessage({ ...invoiceMessage(), attachments: [{ ...item, path: 'https://example.test/private', href: 'file:///etc/passwd', cid: 'injected' }] });
+  const additional = captured[0].attachments.at(-1);
+  assert.deepEqual(Object.keys(additional), ['filename', 'content', 'contentType', 'contentDisposition']);
+  assert.equal(additional.content, bytes);assert.equal(additional.contentDisposition, 'attachment');
+});
+
+test('Unicode attachment names are MIME encoded and oversized MIME is rejected before SMTP without duplicating its buffer', async () => {
+  const item = { name: 'Justificación-Órden.pdf', contentType: 'application/pdf', bytes: new TextEncoder().encode('%PDF-1.4 content') };
+  const mail = createArsysMail({ createTransport: options => nodemailer.createTransport(options) });
+  const result = await mail.buildMessage({ ...invoiceMessage(), attachments: [item] });
+  const raw = new TextDecoder().decode(result.raw);
+  assert.match(raw, /filename\*(?:0\*)?=/i);assert.ok(!raw.includes('Bcc:'));
+  const buffer = new Uint8Array([1, 2]);
+  const efficient = createArsysMail({ createTransport: () => ({ sendMail: async () => ({ message: buffer }), close() {} }) });
+  assert.equal((await efficient.buildMessage(invoiceMessage())).raw, buffer);
+  const oversized = createArsysMail({ createTransport: options => {
+    assert.equal(options.streamTransport, true);
+    return { sendMail: async () => ({ message: new Uint8Array(20_000_001) }), close() {} };
+  } });
+  await assert.rejects(oversized.buildMessage(invoiceMessage()), error => error.code === 'MAIL_MESSAGE_TOO_LARGE');
+});

@@ -192,6 +192,16 @@ test('mail audit rendering escapes IDs, sender, recipients and subject and shows
   assert.ok(!recordHistoryMarkup('expense', 'expense-1').includes('data-include-mail'));
 });
 
+test('invoice mail history projects attachment metadata without raw content and explains preparation limits', () => {
+  const job = mailJob({ status: 'failed', errorCode: 'MAIL_STORAGE_LIMIT', attachments: [{ name: '<img bad>.pdf', size: 1000,
+    contentType: 'application/pdf', sha256: 'a'.repeat(64), bytes: 'PRIVATE_ATTACHMENT_BYTES', contentBase64: 'PRIVATE_BASE64', path: 'PRIVATE_STORAGE_PATH' }] });
+  const projected = mergeRecordHistory([], [job]);
+  assert.ok(!JSON.stringify(projected).includes('PRIVATE_'));
+  const html = renderUnifiedHistory([], [job]);
+  assert.match(html, /Adjuntos adicionales/);assert.match(html, /&lt;img bad&gt;.pdf/);
+  assert.match(html, /espacio reservado/);assert.ok(!html.includes('<img bad>'));assert.ok(!html.includes('PRIVATE_'));
+});
+
 function unifiedHistoryFixture({ includeMail = true } = {}) {
   const requests = [], content = { innerHTML: '' }, refresh = { disabled: false, onclick: null };
   const details = { isConnected: true, open: true, dataset: { entityType: 'document', entityId: 'quote-1', ...(includeMail ? { includeMail: 'true' } : {}) },

@@ -1,5 +1,6 @@
 import { escapeHTML as esc, money } from './domain.js';
 import { mailStatus } from './mail-domain.js';
+import { formatMailAttachmentSize } from './mail-attachments.js';
 
 const fields = {
   kind: 'Tipo', number: 'Número', clientId: 'Cliente', date: 'Fecha', dueDate: 'Vencimiento / validez',
@@ -76,6 +77,9 @@ export function mergeRecordHistory(entries = [], jobs = []) {
       kind: 'mail', id: `mail:${job.id}`, jobId: job.id, documentId: text(job.documentId),
       sender: text(job.sender || job.from), to: recipientText(job.to), cc: recipientText(job.cc), subject: text(job.subject),
       status: text(job.status), partial: job.errorCode === 'SMTP_PARTIAL', accepted: recipientText(job.accepted), rejected: recipientText(job.rejected),
+      errorCode: text(job.errorCode), attachments: (Array.isArray(job.attachments) ? job.attachments : []).slice(0, 5)
+        .filter(item => typeof item?.name === 'string' && Number.isSafeInteger(item.size) && item.size > 0)
+        .map(item => ({ name: item.name.slice(0, 140), size: item.size, contentType: text(item.contentType), sha256: text(item.sha256) })),
       createdAt: timestamp(job.sentAt) !== null ? job.sentAt : job.createdAt, requestedAt: job.createdAt,
     });
   }
@@ -108,7 +112,13 @@ function mailHistoryEntry(entry) {
     uncertain: 'Resultado del envío por confirmar', sending: 'Envío en curso',
   })[entry.status] || status.label;
   const stateChange = entry.stateChange;
-  return `<li class="record-history-mail" data-history-id="${esc(entry.id)}"><strong>${esc(entry.sender || 'Cuenta autorizada')}</strong><span class="record-history-action">${esc(label)} · ${esc(dateTime(entry.createdAt))}</span><dl class="record-history-mail-fields"><div><dt>Para</dt><dd>${esc(entry.to || 'No disponible')}</dd></div>${entry.cc ? `<div><dt>CC</dt><dd>${esc(entry.cc)}</dd></div>` : ''}<div><dt>Asunto</dt><dd>${esc(entry.subject || 'Sin asunto')}</dd></div>${entry.status !== 'sent' || entry.partial ? `<div><dt>Estado</dt><dd>${esc(entry.partial ? 'El servidor aceptó solo algunos destinatarios. Revisa tu correo antes de repetir el envío.' : status.description)}</dd></div>` : ''}${entry.partial ? `<div><dt>Aceptados</dt><dd>${esc(entry.accepted || 'Por confirmar')}</dd></div><div><dt>Rechazados</dt><dd>${esc(entry.rejected || 'Por confirmar')}</dd></div>` : ''}</dl>${stateChange ? `<small data-history-audit-id="${esc(String(stateChange.historyId ?? ''))}">Estado del documento actualizado · ${esc(stateChange.changedFields.map(historyFieldLabel).join(', '))} · versión ${esc(String(stateChange.workspaceVersion ?? '—'))}</small>` : ''}</li>`;
+  const preparationError = {
+    MAIL_STORAGE_LIMIT: 'Se ha alcanzado el espacio reservado para correos pendientes. Revisa los resultados y las copias pendientes antes de volver a enviar.',
+    MAIL_MESSAGE_TOO_LARGE: 'El correo completo superaba el tamaño permitido.',
+    MAIL_PREPARATION_FAILED: 'No se pudieron preparar los documentos del correo.',
+  }[entry.errorCode];
+  const attachments = entry.attachments?.length ? `<div><dt>Adjuntos adicionales</dt><dd>${entry.attachments.map(item => `${esc(item.name)} (${esc(formatMailAttachmentSize(item.size))})`).join('<br>')}</dd></div>` : '';
+  return `<li class="record-history-mail" data-history-id="${esc(entry.id)}"><strong>${esc(entry.sender || 'Cuenta autorizada')}</strong><span class="record-history-action">${esc(label)} · ${esc(dateTime(entry.createdAt))}</span><dl class="record-history-mail-fields"><div><dt>Para</dt><dd>${esc(entry.to || 'No disponible')}</dd></div>${entry.cc ? `<div><dt>CC</dt><dd>${esc(entry.cc)}</dd></div>` : ''}<div><dt>Asunto</dt><dd>${esc(entry.subject || 'Sin asunto')}</dd></div>${attachments}${entry.status !== 'sent' || entry.partial ? `<div><dt>Estado</dt><dd>${esc(entry.partial ? 'El servidor aceptó solo algunos destinatarios. Revisa tu correo antes de repetir el envío.' : preparationError || status.description)}</dd></div>` : ''}${entry.partial ? `<div><dt>Aceptados</dt><dd>${esc(entry.accepted || 'Por confirmar')}</dd></div><div><dt>Rechazados</dt><dd>${esc(entry.rejected || 'Por confirmar')}</dd></div>` : ''}</dl>${stateChange ? `<small data-history-audit-id="${esc(String(stateChange.historyId ?? ''))}">Estado del documento actualizado · ${esc(stateChange.changedFields.map(historyFieldLabel).join(', '))} · versión ${esc(String(stateChange.workspaceVersion ?? '—'))}</small>` : ''}</li>`;
 }
 
 export function renderUnifiedHistory(entries, jobs) {

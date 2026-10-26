@@ -239,10 +239,174 @@ try {
   equal(afterPartialInvoice.version,workspace.version);
   equal(afterPartialInvoice.state.documents.find(d=>d.id==='invoice-draft').deliveryStatus,'ready');
   equal(afterPartialInvoice.state.payments,workspace.state.payments);
+
+  // Install attachments against a populated history: no historical MIME or
+  // financial/workspace record may be rewritten as part of this migration.
+  await db.exec('reset role');
+  const historicalJobs=await query("select id,status,encode(raw_message,'base64') raw,message_id,pdf_hash from orquivia_private.mail_jobs order by id");
+  const attachmentsWorkspace=(await query('select state,version from public.orquivia_team_workspaces where organization_id=$1',[org]))[0];
+  await db.exec(await readFile(new URL('../migrations/202610260015_invoice_mail_attachments.sql',import.meta.url),'utf8'));
+  equal(await query("select id,status,encode(raw_message,'base64') raw,message_id,pdf_hash from orquivia_private.mail_jobs order by id"),historicalJobs);
+  equal((await query('select state,version from public.orquivia_team_workspaces where organization_id=$1',[org]))[0],attachmentsWorkspace);
+  equal((await query('select count(*)::int count from orquivia_private.mail_jobs where transient_message'))[0].count,0);
+  equal((await query("select count(*)::int count from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname='public' and p.proname='orquivia_mail_claim'"))[0].count,1);
+  equal((await query("select count(*)::int count from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname='public' and p.proname='orquivia_mail_archive_claim'"))[0].count,1);
+  const attachment={name:'Justificante.pdf',contentType:'application/pdf',size:20,sha256:'a'.repeat(64)};
+  const attachSQL='select public.orquivia_mail_claim($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) result';
+  const storeSQL='select public.orquivia_mail_store_message($1,$2,$3,$4,$5,$6)';
+  const attachmentJob='40000000-0000-4000-8000-000000000001';
+  const attachmentClaim=[user,org,attachmentJob,'invoice',workspace.version,'attachment-request-hash',['accounts@example.test'],'Invoice with evidence',[],[attachment]];
+  for(const role of ['anon','authenticated']) {
+    await as(role);
+    await deny(attachSQL,attachmentClaim);
+    await deny(storeSQL,[user,org,attachmentJob,raw,'<fixture@example.test>','hash']);
+    await deny('select public.orquivia_mail_archive_claim($1,$2,$3,$4)',[user,org,attachmentJob,false]);
+    await deny('select orquivia_private.valid_mail_attachments($1)',[[attachment]]);
+    await deny('select attachments,raw_message from orquivia_private.mail_jobs');
+  }
+  await as('service_role');
+  equal((await query(claimSQL,claim))[0].result.existing,true);
+  equal((await query(multiSQL,multi))[0].result.existing,true);
+  const validMeta=async value=>(await query('select orquivia_private.valid_mail_attachments($1::jsonb) valid',[JSON.stringify(value)]))[0].valid;
+  equal(await validMeta([]),true);equal(await validMeta([attachment]),true);
+  equal(await validMeta([{...attachment,name:'Fotografía.JPG',contentType:'image/jpeg',size:5000000},{...attachment,name:'Segunda.png',contentType:'image/png',size:5000000}]),true);
+  equal(await validMeta(Array.from({length:5},(_,i)=>({...attachment,name:`Archivo${i}.pdf`,size:2000000}))),true);
+  for(const metadata of [null,{},[null],[[]],[{...attachment,bytes:'not stored'}],[{...attachment,size:0}],
+    [{...attachment,size:5000001}],[{...attachment,size:1.5}],[{...attachment,size:'20'}],
+    [{...attachment,sha256:'A'.repeat(64)}],[{...attachment,sha256:'short'}],
+    [{...attachment,contentType:'text/html'}],[{...attachment,name:'file.png'}],
+    [{...attachment,name:'../file.pdf'}],[{...attachment,name:'folder\\file.pdf'}],[{...attachment,name:'.file.pdf'}],
+    [{...attachment,name:' file.pdf'}],[{...attachment,name:'file\r\nBcc.pdf'}],
+    [{...attachment,name:'file\u0085.pdf'}],[{...attachment,name:'file\u2028.pdf'}],
+    [{...attachment,name:'file\u202e.pdf'}],[{...attachment,name:'file\u2066.pdf'}],
+    [{...attachment,name:'bad:name.pdf'}],[{...attachment,name:'bad<name.pdf'}],[{...attachment,name:'bad?name.pdf'}],
+    [{...attachment,name:'x'.repeat(137)+'.pdf'}],[{...attachment,name:'😀'.repeat(69)+'.pdf'}],
+    [{...attachment},{...attachment,name:'JUSTIFICANTE.PDF',sha256:'b'.repeat(64)}],
+    [{...attachment,size:5000000},{...attachment,name:'Other.pdf',size:5000000},{...attachment,name:'Third.pdf',size:1}],
+    Array.from({length:6},(_,i)=>({...attachment,name:`File${i}.pdf`}))]) equal(await validMeta(metadata),false);
+  await deny(attachSQL,[...attachmentClaim.slice(0,3),'quote',...attachmentClaim.slice(4)]);
+  await deny(attachSQL,[...attachmentClaim.slice(0,3),'invoice-draft',...attachmentClaim.slice(4)]);
+  await deny(attachSQL,[...attachmentClaim.slice(0,4),workspace.version-1,...attachmentClaim.slice(5)]);
+  await deny(attachSQL,[...attachmentClaim.slice(0,9),[{...attachment,size:5000001}]]);
+  await deny(attachSQL,[editor,'20000000-0000-4000-8000-000000000099',...attachmentClaim.slice(2)]);
+  await db.exec('reset role');
+  await query("update auth.mfa_factors set status='unverified' where user_id=$1",[editor]);
+  await as('service_role');await deny(attachSQL,[editor,...attachmentClaim.slice(1)]);
+  await db.exec('reset role');await query("update auth.mfa_factors set status='verified' where user_id=$1",[editor]);
+  // Move only fixture clocks outside the rate window, preserving production rules.
+  await db.exec("reset role;update orquivia_private.mail_jobs set created_at=created_at-interval '2 hours'");await as('service_role');
+  // Attachments cannot make a forged fiscal ledger entry sendable.
+  await db.exec('reset role;begin');
+  await query("update public.orquivia_document_numbers set fiscal_data=fiscal_data||'{\"vat\":10}'::jsonb where organization_id=$1 and document_id='invoice'",[org]);
+  await db.exec('savepoint attachments_invalid_ledger');await as('service_role');
+  await deny(attachSQL,attachmentClaim);
+  await db.exec('rollback to savepoint attachments_invalid_ledger;reset role;rollback');await as('service_role');
+  result=(await query(attachSQL,attachmentClaim))[0].result;
+  equal(result.existing,false);equal(result.job.attachments,[attachment]);equal(result.document.kind,'invoice');
+  equal((await query(attachSQL,attachmentClaim))[0].result.existing,true);
+  await deny(attachSQL,[...attachmentClaim.slice(0,5),'changed-attachment-hash',...attachmentClaim.slice(6)]);
+  await deny(attachSQL,[...attachmentClaim.slice(0,9),[{...attachment,sha256:'b'.repeat(64)}]]);
+  await query(storeSQL,[user,org,attachmentJob,raw,'<attachments@example.test>','attachment-pdf-hash']);
+  await deny(storeSQL,[user,org,attachmentJob,raw,'<attachments@example.test>','attachment-pdf-hash']);
+  await query(completeSQL,[user,org,attachmentJob,'archive_pending']);
+  const lease=(await query('select public.orquivia_mail_archive_claim($1,$2,$3,$4) result',[user,org,attachmentJob,false]))[0].result;
+  equal(lease.messageId,'<attachments@example.test>');equal(lease.raw,undefined);
+  await deny('select public.orquivia_mail_archive_claim($1,$2,$3)',[user,org,attachmentJob]);
+  await db.exec('reset role');
+  equal((await query("select encode(raw_message,'base64') raw,transient_message from orquivia_private.mail_jobs where id=$1",[attachmentJob]))[0],{raw,transient_message:true});
+  await query("update orquivia_private.mail_jobs set archive_lease_until=now()-interval '1 second' where id=$1",[attachmentJob]);
+  await as('service_role');
+  equal((await query('select public.orquivia_mail_archive_claim($1,$2,$3) result',[user,org,attachmentJob]))[0].result.raw.replace(/\s/g,''),raw);
+  await query(completeSQL,[user,org,attachmentJob,'sent']);
+  await deny('select public.orquivia_mail_archive_claim($1,$2,$3,$4)',[user,org,attachmentJob,false]);
+  await db.exec('reset role');
+  equal((await query('select raw_message from orquivia_private.mail_jobs where id=$1',[attachmentJob]))[0].raw_message,null);
+  // A completed legacy archive deliberately retains its historical bytes.
+  equal((await query("select encode(raw_message,'base64') raw from orquivia_private.mail_jobs where id=$1",[invoiceResend]))[0].raw,raw);
+  await as('service_role');await query(completeSQL,[user,org,invoiceResend,'sent']);await db.exec('reset role');
+  equal((await query("select encode(raw_message,'base64') raw from orquivia_private.mail_jobs where id=$1",[invoiceResend]))[0].raw,raw);
+  await as('service_role');
+  const metadataHistory=(await query('select public.orquivia_mail_history($1,$2,$3) result',[user,org,'invoice']))[0].result.history;
+  equal(metadataHistory.find(j=>j.id===attachmentJob).attachments,[attachment]);
+  equal(Object.hasOwn(metadataHistory.find(j=>j.id===attachmentJob),'raw'),false);
+  // New failed preparations release their buffer and expose a safe reason.
+  const failedAttachmentJob='40000000-0000-4000-8000-000000000002';
+  const failedAttachment=[user,org,failedAttachmentJob,'invoice',workspace.version,'failed-attachment-request',['accounts@example.test'],'Failed attachment preparation',[],[attachment]];
+  await query(attachSQL,failedAttachment);
+  await query(storeSQL,[user,org,failedAttachmentJob,raw,'<failed-attachment@example.test>','pdf-hash']);
+  for(const delivery of [{errorCode:'OTHER'},{errorCode:'MAIL_STORAGE_LIMIT',accepted:[]},{errorCode:'MAIL_STORAGE_LIMIT',raw:'secret'},{errorCode:'SMTP_PARTIAL'}]) {
+    await deny('select public.orquivia_mail_complete($1,$2,$3,$4,$5)',[user,org,failedAttachmentJob,'failed',delivery]);
+  }
+  result=(await query('select public.orquivia_mail_complete($1,$2,$3,$4,$5) result',[user,org,failedAttachmentJob,'failed',{errorCode:'MAIL_STORAGE_LIMIT'}]))[0].result;
+  equal(result.job.errorCode,'MAIL_STORAGE_LIMIT');equal(result.job.status,'failed');equal(result.workspace,undefined);
+  await db.exec('reset role');equal((await query('select raw_message from orquivia_private.mail_jobs where id=$1',[failedAttachmentJob]))[0].raw_message,null);
+  await as('service_role');
+  const maximumRawJob='40000000-0000-4000-8000-000000000006';
+  await query(attachSQL,[user,org,maximumRawJob,'invoice',workspace.version,'max-raw-request',['accounts@example.test'],'Maximum raw message',[],[]]);
+  await query('select public.orquivia_mail_store_message($1,$2,$3,encode(repeat(\'m\',20000000)::bytea,\'base64\'),$4,$5)',[user,org,maximumRawJob,'<maximum@example.test>','hash']);
+  await db.exec('reset role');equal((await query('select octet_length(raw_message) size from orquivia_private.mail_jobs where id=$1',[maximumRawJob]))[0].size,20000000);await as('service_role');
+  result=(await query('select public.orquivia_mail_complete($1,$2,$3,$4,$5) result',[user,org,maximumRawJob,'failed',{errorCode:'MAIL_MESSAGE_TOO_LARGE'}]))[0].result;
+  equal(result.job.errorCode,'MAIL_MESSAGE_TOO_LARGE');
+  await db.exec('reset role');equal((await query('select raw_message from orquivia_private.mail_jobs where id=$1',[maximumRawJob]))[0].raw_message,null);await as('service_role');
+  // Preparing a message enforces decoded, not merely encoded, size.
+  await db.exec("reset role;update orquivia_private.mail_jobs set created_at=created_at-interval '2 hours'");await as('service_role');
+  const quotaJob='40000000-0000-4000-8000-000000000003';
+  await query(attachSQL,[user,org,quotaJob,'invoice',workspace.version,'quota-request',['accounts@example.test'],'Quota fixture',[],[]]);
+  await deny('select public.orquivia_mail_store_message($1,$2,$3,encode(repeat(\'x\',20000001)::bytea,\'base64\'),$4,$5)',[user,org,quotaJob,'<large@example.test>','hash']);
+  await deny(storeSQL,[user,org,quotaJob,'!!!!','<invalid@example.test>','hash']);
+  await deny(storeSQL,[user,org,quotaJob,'','<empty@example.test>','hash']);
+  // Pending legacy jobs count against the same 50 MB buffer, whereas already
+  // archived legacy history is never rewritten just to recover capacity.
+  await db.exec('reset role');
+  const buffered=Number((await query("select coalesce(sum(octet_length(raw_message)),0) size from orquivia_private.mail_jobs where organization_id=$1 and raw_message is not null and status in ('sending','uncertain','archive_pending')",[org]))[0].size);
+  const fill=[20000000,20000000,9999999-buffered];
+  for(let i=0;i<fill.length;i++) await query("insert into orquivia_private.mail_jobs(id,organization_id,user_id,document_id,request_hash,document_snapshot,sender,recipients,subject,status,raw_message) values($1,$2,$3,'quota-filler','quota-filler','{}','owner@example.test','[]','Fixture pending buffer','archive_pending',repeat('q',$4)::bytea)",[`50000000-0000-4000-8000-00000000000${i+1}`,org,user,fill[i]]);
+  await as('service_role');
+  await assert.rejects(db.query(storeSQL,[user,org,quotaJob,Buffer.from('ab').toString('base64'),'<quota@example.test>','hash']),/MAIL_STORAGE_LIMIT/);++checks;
+  await query(storeSQL,[user,org,quotaJob,Buffer.from('a').toString('base64'),'<quota@example.test>','hash']);
+  await db.exec('reset role');
+  equal(Number((await query("select sum(octet_length(raw_message)) size from orquivia_private.mail_jobs where organization_id=$1 and raw_message is not null and status in ('sending','uncertain','archive_pending')",[org]))[0].size),50000000);
+  await as('service_role');
+  await query('select public.orquivia_mail_complete($1,$2,$3,$4,$5)',[user,org,quotaJob,'failed',{errorCode:'MAIL_PREPARATION_FAILED'}]);
+  await db.exec('reset role');
+  equal((await query('select raw_message from orquivia_private.mail_jobs where id=$1',[quotaJob]))[0].raw_message,null);
+  await query("update orquivia_private.mail_jobs set status='failed' where document_id='quota-filler'");
+  // Unknown/partial outcomes retain their exact MIME and block another send.
+  await as('service_role');
+  const uncertainAttachmentJob='40000000-0000-4000-8000-000000000004';
+  await query(attachSQL,[user,org,uncertainAttachmentJob,'invoice',workspace.version,'uncertain-attachment',['accounts@example.test'],'Uncertain attached invoice',[],[attachment]]);
+  await query(storeSQL,[user,org,uncertainAttachmentJob,raw,'<uncertain-attachment@example.test>','hash']);
+  result=(await query(completeSQL,[user,org,uncertainAttachmentJob,'uncertain']))[0].result;
+  equal(result.job.status,'uncertain');equal(result.workspace,undefined);
+  await deny(attachSQL,[user,org,'40000000-0000-4000-8000-000000000005','invoice',workspace.version,'duplicate-after-uncertain',['accounts@example.test'],'Must stay blocked',[],[attachment]]);
+  await db.exec('reset role');
+  equal((await query("select encode(raw_message,'base64') raw from orquivia_private.mail_jobs where id=$1",[uncertainAttachmentJob]))[0].raw,raw);
+  equal((await query('select state,version from public.orquivia_team_workspaces where organization_id=$1',[org]))[0],attachmentsWorkspace);
+  equal((await query("select encode(raw_message,'base64') raw from orquivia_private.mail_jobs where id=$1",[partialJob]))[0].raw,raw);
+
+  // A new invoice with partly accepted recipients keeps its entire MIME and
+  // leaves the issued delivery/payment metadata untouched.
+  await as('authenticated');
+  let partialWorkspace=(await query('select public.load_orquivia_workspace() result'))[0].result;
+  const extraPartialState=structuredClone(partialWorkspace.state);
+  extraPartialState.documents.push({...structuredClone(state.documents[0]),id:'attachment-partial-document',kind:'invoice',status:'draft',number:''});
+  saved=(await query('select public.save_orquivia_team_state($1,$2,$3) result',[org,extraPartialState,partialWorkspace.version]))[0].result;
+  const partialIssue=(await query('select public.issue_orquivia_document($1,$2,$3) result',[org,'attachment-partial-document',saved.version]))[0].result;
+  await db.exec("reset role;update orquivia_private.mail_jobs set created_at=created_at-interval '2 hours'");await as('service_role');
+  const partialAttachmentJob='40000000-0000-4000-8000-000000000007';
+  await query(attachSQL,[user,org,partialAttachmentJob,'attachment-partial-document',partialIssue.version,'new-partial-attachment',['accounts@example.test'],'Partial attachment', ['copy@example.test'],[attachment]]);
+  await query(storeSQL,[user,org,partialAttachmentJob,raw,'<partial-new-attachment@example.test>','hash']);
+  result=(await query('select public.orquivia_mail_complete($1,$2,$3,$4,$5) result',[user,org,partialAttachmentJob,'uncertain',{errorCode:'SMTP_PARTIAL',accepted:['accounts@example.test'],rejected:['copy@example.test']}]))[0].result;
+  equal(result.job.errorCode,'SMTP_PARTIAL');equal(result.job.attachments,[attachment]);equal(result.workspace,undefined);
+  equal(result.job.accepted,['accounts@example.test']);equal(result.job.rejected,['copy@example.test']);
+  await db.exec('reset role');
+  equal((await query("select encode(raw_message,'base64') raw,transient_message from orquivia_private.mail_jobs where id=$1",[partialAttachmentJob]))[0],{raw,transient_message:true});
+  await as('authenticated');partialWorkspace=(await query('select public.load_orquivia_workspace() result'))[0].result;
+  equal(partialWorkspace.version,partialIssue.version);equal(partialWorkspace.state.documents.find(d=>d.id==='attachment-partial-document').deliveryStatus,'ready');
   await as('service_role');
   await query('update public.orquivia_memberships set active=false where user_id=$1',[editor]);
   await deny(profileSQL,[editor,org,true]);
   await deny('select public.orquivia_mail_history($1,$2,$3)',[editor,org,'invoice']);
-  console.log(`PASS ${checks} SQL mail checks: private credentials, member boundaries, CAS, To/Cc, quote/invoice delivery, legacy preservation, fiscal immutability, concurrent payment preservation, intentional resend, duplicate claims, immutable copies, partial delivery, archive leases and audited status updates.`);
+  console.log(`PASS ${checks} SQL mail checks: private credentials, member boundaries, CAS, To/Cc, quote/invoice delivery, legacy preservation, fiscal immutability, concurrent payment preservation, intentional resend, duplicate claims, immutable copies, partial delivery, archive leases, attachment metadata/quotas/transient cleanup, legacy MIME preservation and audited status updates.`);
 } catch(error) { console.error(error.code,error.message,error.where||'',error.position||'');process.exitCode=1; }
 finally {await db.close();}

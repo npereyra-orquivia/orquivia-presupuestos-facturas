@@ -31,7 +31,7 @@ export function resolveMailComposeEntry({ savedDraft, history = [], defaultDraft
     const previous = ordered.find(job => job.id === savedDraft.idempotencyKey);
     // No visible result can mean an unsent draft or an attempt whose response
     // has not arrived. Preserve its UUID so replay protection remains intact.
-    return { draft: previous ? { ...draft,
+    return { draft: previous ? { ...draft, ...(Object.hasOwn(draft, 'attachments') ? { attachments: [] } : {}),
       ...(preferDefaultRecipients ? { to: copy(defaultDraft.to) } : {}), idempotencyKey: createId() } : draft, job: null };
   }
   // A stored billing contact takes precedence over the recipient of a completed
