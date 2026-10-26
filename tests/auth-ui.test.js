@@ -31,7 +31,7 @@ test('rejected login stays on the access screen without checking MFA or loading 
       backend.currentUser = backend.loadState = backend.mfa.factors = async () => assert.fail('A rejected login must stop before session, workspace or MFA checks');
       const fixture = loginFixture();
       renderAccess(fixture.container, { backend, logo: 'logo.svg', onAuthenticated: () => assert.fail('A rejected login must not open the private portal') });
-      assert.match(fixture.host.innerHTML, /contraseña del portal Orquívia.*distinta.*Arsys/);
+      assert.match(fixture.host.innerHTML, /contraseña del portal Orquivia.*distinta.*Arsys/);
       await fixture.form.onsubmit({ preventDefault() {}, target: fixture.form });
       assert.equal(fixture.button.disabled, false);
       assert.equal(fixture.button.textContent, 'Iniciar sesión');

@@ -57,7 +57,7 @@ function summaryText(report, { demo, receiptCount, activity }) {
   const s = report.summary;
   const t = activity.totals;
   return [
-    `ORQUÍVIA — ${report.label}`,
+    `ORQUIVIA — ${report.label}`,
     report.from ? `Período seleccionado: ${report.from} a ${report.to}` : 'Período seleccionado: sin registros',
     `Preparado: ${todayISO()}`,
     ...(demo ? ['DATOS DE DEMOSTRACIÓN — ARCHIVO DE PRUEBA'] : []),

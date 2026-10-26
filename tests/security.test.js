@@ -8,7 +8,7 @@ const publicKey = 'sb_publishable_example-KEY_123';
 const jwt = (role = 'anon', header = { alg: 'HS256', typ: 'JWT' }) =>
   `${Buffer.from(JSON.stringify(header)).toString('base64url')}.${Buffer.from(JSON.stringify({ role })).toString('base64url')}.c2lnbmF0dXJl`;
 const validState = () => ({
-  company: { name: 'Orquívia', vat: 21, withholding: 0, paymentTerms: 30 },
+  company: { name: 'Orquivia', vat: 21, withholding: 0, paymentTerms: 30 },
   clients: [{ id: 'client-1', name: 'Cliente' }],
   documents: [{ id: 'doc-1', kind: 'invoice', status: 'issued', number: '2026-002', clientId: 'client-1',
     date: '2026-09-15', dueDate: null, items: [{ description: 'Servicio', quantity: 1, price: 100 }],

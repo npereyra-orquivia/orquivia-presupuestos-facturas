@@ -3,7 +3,7 @@ import { validatePasswordChange } from './security.js';
 
 export function renderAccess(container,{backend,logo,brandLogo=logo,onAuthenticated,message='',restoring=false,recoveryRedirectTo}){
   container.inert=false;
-  container.innerHTML=`<main class="access-page"><section class="access-intro"><a class="brand"><img class="brand-full" src="${brandLogo}" alt="Orquívia"></a><div><span class="eyebrow">TU EMPRESA, EN UN SOLO LUGAR</span><h1>De la primera propuesta<br>al último cobro.</h1><p>Presupuestos, facturas y seguimiento de tus proyectos.</p></div><small>Acceso privado a los documentos de Orquívia.</small></section><section class="access-card"><div id="auth-content"></div></section></main>`;
+  container.innerHTML=`<main class="access-page"><section class="access-intro"><a class="brand"><img class="brand-full" src="${brandLogo}" alt="Orquivia"></a><div><span class="eyebrow">TU EMPRESA, EN UN SOLO LUGAR</span><h1>De la primera propuesta<br>al último cobro.</h1><p>Presupuestos, facturas y seguimiento de tus proyectos.</p></div><small>Acceso privado a los documentos de Orquivia.</small></section><section class="access-card"><div id="auth-content"></div></section></main>`;
   const host=container.querySelector('#auth-content');
   let revision=0,recoveryActive=false;
   const active=(version)=>version===revision&&container.querySelector('#auth-content')===host&&host.isConnected!==false;
@@ -12,7 +12,7 @@ export function renderAccess(container,{backend,logo,brandLogo=logo,onAuthentica
   function checking(){
     const version=nextView();
     container.querySelector('.access-page')?.classList.add('is-restoring');
-    host.innerHTML=`<div class="access-session-check" role="status" aria-live="polite"><img class="access-session-logo" src="${esc(brandLogo)}" alt="Orquívia"><span class="access-session-spinner" aria-hidden="true"></span><h2>Comprobando tu sesión…</h2><p>Volverás a la página donde estabas.</p></div>`;
+    host.innerHTML=`<div class="access-session-check" role="status" aria-live="polite"><img class="access-session-logo" src="${esc(brandLogo)}" alt="Orquivia"><span class="access-session-spinner" aria-hidden="true"></span><h2>Comprobando tu sesión…</h2><p>Volverás a la página donde estabas.</p></div>`;
     return version;
   }
   async function finish(existingUser,restored=false,version=revision){
@@ -23,7 +23,7 @@ export function renderAccess(container,{backend,logo,brandLogo=logo,onAuthentica
   function login({notice='',warning='',showMessage=true}={}){
     const version=nextView();recoveryActive=false;
     if(!backend){host.innerHTML='<div class="eyebrow">PORTAL EN PREPARACIÓN</div><h2>La conexión aún no está lista.</h2><p>El acceso se activará al terminar la configuración de Supabase. Los documentos de empresa requieren una cuenta autorizada.</p>';return}
-    host.innerHTML=`<div class="eyebrow">BIENVENIDA A ORQUÍVIA</div><h2>Entra en tu espacio.</h2><p>Usa tu cuenta individual para trabajar con los documentos de la empresa.</p>${notice?`<p role="status">${esc(notice)}</p>`:''}<form id="access-form"><label class="field"><span>Correo electrónico</span><input name="email" type="email" autocomplete="username" required></label><label class="field"><span>Contraseña</span><input name="password" type="password" autocomplete="current-password" required></label><button class="button primary full">Iniciar sesión</button></form><button class="text-button" id="forgot-password" type="button">¿Has olvidado la contraseña?</button><p class="field-hint">Usa la contraseña del portal Orquívia, que puede ser distinta de la del correo de Arsys. Puedes cambiarla desde Configuración después de entrar.</p>`;
+    host.innerHTML=`<div class="eyebrow">BIENVENIDA A ORQUIVIA</div><h2>Entra en tu espacio.</h2><p>Usa tu cuenta individual para trabajar con los documentos de la empresa.</p>${notice?`<p role="status">${esc(notice)}</p>`:''}<form id="access-form"><label class="field"><span>Correo electrónico</span><input name="email" type="email" autocomplete="username" required></label><label class="field"><span>Contraseña</span><input name="password" type="password" autocomplete="current-password" required></label><button class="button primary full">Iniciar sesión</button></form><button class="text-button" id="forgot-password" type="button">¿Has olvidado la contraseña?</button><p class="field-hint">Usa la contraseña del portal Orquivia, que puede ser distinta de la del correo de Arsys. Puedes cambiarla desde Configuración después de entrar.</p>`;
     if(warning||(showMessage&&message))error(warning||message,version);
     const forgot=host.querySelector('#forgot-password');if(forgot)forgot.onclick=()=>requestRecovery(host.querySelector('form').elements.email?.value||'');
     host.querySelector('form').onsubmit=async e=>{e.preventDefault();if(!active(version))return;const b=e.target.querySelector('button');b.disabled=true;b.textContent='Conectando…';const f=new FormData(e.target);try{await backend.signIn(f.get('email'),f.get('password'));e.target.elements.password.value='';if(active(version))await finish(null,false,version);}catch(err){if(active(version)){error(err.message,version);b.disabled=false;b.textContent='Iniciar sesión'}}};

@@ -3,6 +3,7 @@ import { createPersonalBackend } from './personal-backend.js';
 import { createDocumentMailBackend } from './document-mail-backend.js';
 import { validateWorkspace } from './domain.js';
 import { validRecoveryCredentials } from './password-recovery.js';
+import { BRAND_NAME, normalizeOrquivia } from './brand.js';
 
 const MAX_STATE_BYTES = 5_000_000;
 export const RECEIPT_BUCKET = 'orquivia-receipts';
@@ -513,11 +514,11 @@ export function createBackend({ url, anonKey }) {
         // Existing verified authenticators and factors belonging to other setups
         // must remain intact.
         for (const factor of factors.all || []) {
-          if (factor.factor_type !== 'totp' || factor.status !== 'unverified' || factor.friendly_name !== 'Orquívia') continue;
+          if (factor.factor_type !== 'totp' || factor.status !== 'unverified' || normalizeOrquivia(factor.friendly_name) !== BRAND_NAME) continue;
           const { error } = await client.auth.mfa.unenroll({ factorId: factor.id });
           if (error) throw error;
         }
-        const { data, error } = await client.auth.mfa.enroll({ factorType: 'totp', friendlyName: 'Orquívia' });
+        const { data, error } = await client.auth.mfa.enroll({ factorType: 'totp', friendlyName: BRAND_NAME });
         if (error) throw error;
         return data;
       },

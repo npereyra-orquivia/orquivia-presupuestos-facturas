@@ -138,7 +138,7 @@ test('startup shows a session check until both authenticated user and private wo
   await Promise.resolve();
   assert.equal(authenticated, null);
   assert.match(fixture.host.innerHTML, /Comprobando tu sesión/);
-  const state = { company: { name: 'Orquívia' } };
+  const state = { company: { name: 'Orquivia' } };
   workspace.resolve(state); await resumed;
   assert.deepEqual(authenticated, { user: { id: nicole }, state, restored: true });
   assert.ok(fixture.markup.every(value => !value.includes('id="access-form"')));

@@ -1,5 +1,6 @@
 import { jsPDF } from 'jspdf';
 import { totals, documentAmounts, money, formatNumber } from './domain.js';
+import { normalizeOrquivia } from './brand.js';
 
 const clean = value => String(value ?? '').replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, '').replace(/[\u2010-\u2015\u2212]/g, '-');
 const date = value => value ? String(value).split('-').reverse().join('/') : '';
@@ -8,12 +9,13 @@ const ink = [23, 37, 49], muted = [130, 145, 153], pale = [236, 242, 242];
 /** Vector A4 output. All user text wraps and flows before the reserved footer. */
 export function createPDF(document, company, client, { logoData, demo = false } = {}) {
   company = document.companySnapshot || company || {};
+  company = { ...company, name: normalizeOrquivia(company.name), legalName: normalizeOrquivia(company.legalName) };
   client = document.clientSnapshot || client || {};
   const pdf = new jsPDF({ unit: 'mm', format: 'a4', compress: true });
   const kind = document.kind === 'invoice' ? 'Factura' : 'Presupuesto';
   const number = clean(document.number).trim() || 'Borrador';
   const left = 24, right = 186, width = right - left;
-  pdf.setProperties({ title: `${kind} ${number}`, author: clean(company.name || 'Orquívia'), creator: 'Orquívia' });
+  pdf.setProperties({ title: `${kind} ${number}`, author: clean(company.name || 'Orquivia'), creator: 'Orquivia' });
 
   function text(value, x, y, size = 9, { color = ink, align = 'left', style = 'normal' } = {}) {
     pdf.setFont('helvetica', style); pdf.setFontSize(size); pdf.setTextColor(...color);
@@ -66,7 +68,7 @@ export function createPDF(document, company, client, { logoData, demo = false } 
   }
   function continuation(withTable = true) {
     pdf.addPage();
-    fit(company.name || 'Orquívia', left, 20, 65, 11);
+    fit(company.name || 'Orquivia', left, 20, 65, 11);
     fit(`${kind.toUpperCase()} ${number}`, right, 20, 92, 10, { align: 'right' });
     y = 35;
     if (withTable) tableHeader();
@@ -86,7 +88,7 @@ export function createPDF(document, company, client, { logoData, demo = false } 
     const ratio = image.width / image.height;
     const imageWidth = Math.min(ratio >= 2 ? 52 : 13, 17 * ratio);
     pdf.addImage(logoData, 'PNG', 25, ratio >= 2 ? 14 : 12, imageWidth, imageWidth / ratio);
-  } else fit(company.name || 'Orquívia', left, 24, 68, 15);
+  } else fit(company.name || 'Orquivia', left, 24, 68, 15);
   text(kind.toUpperCase(), right, 26, 14, { align: 'right' });
   fit(`Número: ${number}`, right, 34, 87, 9, { align: 'right' });
   text(`Fecha: ${date(document.date)}`, right, 39, 9, { color: muted, align: 'right' });

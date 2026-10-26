@@ -21,7 +21,7 @@ const tax = (overrides = {}) => ({ id: TAX, date: '2026-07-13', model: '303', ye
 const expense = (overrides = {}) => ({ id: EXPENSE, date: '2026-07-01', supplier: 'Gestor', description: 'Servicios y suplido',
   base: 100, vatAmount: 21, vatDeductibleAmount: 0, additionalAmount: 30, total: 151,
   paymentStatus: 'paid', paidDate: '2026-07-01', attachments: [], ...overrides });
-const workspace = (overrides = {}) => ({ company: { name: 'Orquívia', openingBalance: 3000, openingBalanceDate: '2026-07-01' },
+const workspace = (overrides = {}) => ({ company: { name: 'Orquivia', openingBalance: 3000, openingBalanceDate: '2026-07-01' },
   clients: [], documents: [], payments: [], expenses: [], taxRecords: [], ...overrides });
 
 test('declarations use their fiscal period while actual bank payments use their own date', () => {
@@ -72,7 +72,7 @@ test('zero declarations, unconfirmed payments, pending payments and refunds have
   const refund = tax({ amount: -100 });
   assert.deepEqual(validateWorkspace(workspace({ taxRecords: [refund] }), TODAY), []);
   assert.equal(cashSummary(workspace({ taxRecords: [refund] }), TODAY).balance, 3100);
-  const cutoff = workspace({ taxRecords: [tax()], company: { name: 'Orquívia', openingBalance: 8346.54, openingBalanceDate: '2026-10-01' } });
+  const cutoff = workspace({ taxRecords: [tax()], company: { name: 'Orquivia', openingBalance: 8346.54, openingBalanceDate: '2026-10-01' } });
   assert.equal(cashSummary(cutoff, TODAY).balance, 8346.54, 'Old tax payments cannot be subtracted again from the opening balance');
 });
 

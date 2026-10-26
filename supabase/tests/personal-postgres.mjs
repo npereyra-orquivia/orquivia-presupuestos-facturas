@@ -29,7 +29,7 @@ try {
     grant select,insert,update,delete on storage.objects to anon,authenticated; grant all on storage.objects,storage.buckets to service_role;`);
   for (const name of ['202610130001_orquivia.sql','202610140002_team_production.sql','202610140003_expenses.sql','202610140004_personal_profiles.sql']) await db.exec(await readFile(new URL('../migrations/'+name,import.meta.url),'utf8'));
   checks++;
-  await as('service_role'); await db.query('select public.bootstrap_orquivia_team($1,$2,$3,$4)',[admin,editor,'Orquívia test',org]);
+  await as('service_role'); await db.query('select public.bootstrap_orquivia_team($1,$2,$3,$4)',[admin,editor,'Orquivia test',org]);
   await db.query('update public.orquivia_organizations set require_mfa=true where id=$1',[org]);
   await as('authenticated',admin);
   let loaded=(await query('select public.load_orquivia_profile() result'))[0].result;
@@ -70,7 +70,7 @@ try {
   await deny('select public.save_orquivia_push_subscription($1)',[subscription],'22023');
   assert.equal((await query('select public.remove_orquivia_push_subscription($1) result',[subscription.endpoint]))[0].result,false); checks++;
   await deny('select public.list_orquivia_push_targets()');
-  await deny('select public.claim_orquivia_push_delivery($1,$2,$3,$4)',[device.id,'2026-10-14',avatarId,{title:'Orquívia'}]);
+  await deny('select public.claim_orquivia_push_delivery($1,$2,$3,$4)',[device.id,'2026-10-14',avatarId,{title:'Orquivia'}]);
   await as('authenticated',admin);
   await query('select public.save_orquivia_profile($1)',[{...profile,avatar,notifications:{...prefs,enabled:true}}]);
   await as('service_role');
@@ -78,7 +78,7 @@ try {
   assert.equal(targets.length,1); assert.equal(targets[0].id,device.id); assert.ok(targets[0].state); checks++;
   const claim='select public.claim_orquivia_push_delivery($1,$2,$3,$4) result';
   const finish='select public.finish_orquivia_push_delivery($1,$2,$3,$4,$5) result';
-  const payload={title:'Orquívia',body:'Tienes asuntos pendientes.',url:'./'};
+  const payload={title:'Orquivia',body:'Tienes asuntos pendientes.',url:'./'};
   assert.deepEqual((await query(claim,[device.id,'2026-10-14',avatarId,payload]))[0].result,payload); checks++;
   assert.equal((await query(claim,[device.id,'2026-10-14',avatarId,{title:'Changed'}]))[0].result,null); checks++;
   assert.equal((await query(finish,[device.id,'2026-10-14',editor,'failed','oops']))[0].result,false); checks++;

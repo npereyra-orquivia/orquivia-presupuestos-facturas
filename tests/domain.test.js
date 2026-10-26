@@ -11,7 +11,7 @@ function invoice(overrides = {}) {
 }
 
 function workspace(overrides = {}) {
-  return { company: { name: 'Orquívia', vat: 21, withholding: 0, paymentTerms: 30 },
+  return { company: { name: 'Orquivia', vat: 21, withholding: 0, paymentTerms: 30 },
     clients: [{ id: 'client-1', name: 'Cliente' }], documents: [invoice()], payments: [], ...overrides };
 }
 
@@ -199,7 +199,7 @@ test('workspace import preserves evidence, comments and nullable validity withou
     po: 'SA01P103213', notes: 'Comentario libre', importWarnings: ['La validez original era anterior a la emisión.'],
     sourceMetadata: { originalValidityDate: '2026-02-30', originalTotals: { total: 121.02 }, paymentStatusEvidence: 'unknown' } });
   const importedInvoice = invoice({ number: '2026-002', paymentReviewNeeded: true, total: 121,
-    companySnapshot: { name: 'Orquívia' }, clientSnapshot: { name: 'Cliente' } });
+    companySnapshot: { name: 'Orquivia' }, clientSnapshot: { name: 'Cliente' } });
   const data = workspace({ documents: [importedQuote, importedInvoice] });
   const snapshot = structuredClone(data);
   assert.deepEqual(validateWorkspace(data, '2026-10-14'), []);

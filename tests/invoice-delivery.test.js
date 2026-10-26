@@ -11,7 +11,7 @@ const today = '2026-10-23', options = { today };
 const invoice = (extra = {}) => ({ id: 'invoice-1', kind: 'invoice', status: 'issued', number: 'F-2026-008',
   clientId: 'client-1', date: '2026-10-01', dueDate: '2026-11-01',
   items: [{ description: 'Servicio', quantity: 1, price: 100 }], vat: 21, discount: 0, withholding: 0, ...extra });
-const workspace = (extra = {}) => ({ company: { name: 'Orquívia' }, clients: [{ id: 'client-1', name: 'Cliente' }],
+const workspace = (extra = {}) => ({ company: { name: 'Orquivia' }, clients: [{ id: 'client-1', name: 'Cliente' }],
   documents: [invoice()], payments: [], ...extra });
 
 test('historical invoice delivery stays unknown and drafts remain distinct from issued delivery filters', () => {

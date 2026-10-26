@@ -18,7 +18,7 @@ async function fixture(t) {
     await fs.writeFile(path.join(directory, 'assets', `${name}.js`), `export const build = '${name}';`);
     await fs.writeFile(path.join(directory, 'service-worker.js'), `// ${name} original worker`);
     await fs.writeFile(path.join(directory, 'orquivia-icon-192.png'), Buffer.from([1, 2, 3, name.length]));
-    await fs.writeFile(path.join(directory, 'manifest.webmanifest'), JSON.stringify({ id: './', name: 'Orquívia', start_url: './', scope: './', icons: [{ src: 'orquivia-icon-192.png', sizes: '192x192', type: 'image/png' }] }));
+    await fs.writeFile(path.join(directory, 'manifest.webmanifest'), JSON.stringify({ id: './', name: 'Orquivia', start_url: './', scope: './', icons: [{ src: 'orquivia-icon-192.png', sizes: '192x192', type: 'image/png' }] }));
   }
   await fs.mkdir(path.join(legacy, 'pdfjs', 'standard_fonts'), { recursive: true });
   await fs.writeFile(path.join(legacy, 'pdfjs', 'standard_fonts', 'font.ttf'), Buffer.from([0, 1, 255, 50]));

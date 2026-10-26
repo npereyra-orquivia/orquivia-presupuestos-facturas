@@ -9,7 +9,7 @@ export const MAIL_PROVIDERS = Object.freeze([
 ]);
 
 export const MAIL_STATUS = Object.freeze({
-  not_configured: { label: 'Correo sin conectar', description: 'Conecta tu cuenta de Arsys en Mi espacio para enviar desde Orquívia.', tone: 'neutral' },
+  not_configured: { label: 'Correo sin conectar', description: 'Conecta tu cuenta de Arsys en Mi espacio para enviar desde Orquivia.', tone: 'neutral' },
   sending: { label: 'Envío en curso', description: 'Se está comprobando el resultado del envío. No vuelvas a enviar este documento.', tone: 'pending' },
   sent: { label: 'Enviado', description: 'El servidor ha confirmado el envío y se ha guardado su copia en Enviados.', tone: 'success' },
   archive_pending: { label: 'Enviado · copia pendiente', description: 'El servidor ha confirmado el envío. Falta guardar la copia en Enviados; puedes reintentar solo esa copia.', tone: 'pending' },
@@ -106,7 +106,7 @@ export function defaultMailDraft(document = {}, client = {}) {
   return {
     to: recipient ? [recipient] : [''],
     cc: [],
-    subject: `${kind === 'factura' ? 'Factura' : 'Presupuesto'}${reference ? ` ${reference}` : ''} · Orquívia`.slice(0, 200),
+    subject: `${kind === 'factura' ? 'Factura' : 'Presupuesto'}${reference ? ` ${reference}` : ''} · Orquivia`.slice(0, 200),
     message: `Hola,\n\nTe adjunto ${invoice ? 'la' : 'el'} ${kind}${reference ? ` ${reference}` : ''} para que puedas ${invoice ? 'tramitarla' : 'revisarlo'}.${po ? `\n\nOrden de pedido (PO): ${po}` : ''}\n\nQuedo a tu disposición para cualquier consulta.\n\nUn saludo,`,
   };
 }
@@ -149,6 +149,6 @@ export function renderMailSignature(signature, { email = '', logoUrl = 'cid:orqu
   const address = isMailAddress(email) ? email : '';
   const logo = signatureLogoUrl(logoUrl);
   const telephone = value.phone.replace(/[^+\d]/g, '');
-  return `<table role="presentation" class="mail-signature-table" cellpadding="0" cellspacing="0" style="border-collapse:collapse;font-family:Arial,sans-serif;color:#18312c;font-size:13px;line-height:1.5"><tr><td style="border:0;border-left:3px solid #20343c;padding:4px 0 4px 12px">${logo ? `<img src="${esc(logo)}" alt="Orquívia" width="190" style="display:block;width:190px;max-width:190px;height:auto;border:0;margin-bottom:8px">` : ''}<strong style="display:block;font-size:16px;font-weight:600">${esc(value.name)}</strong>${value.role ? `<span style="display:block;color:#526875">${esc(value.role)}</span>` : ''}<div style="margin-top:16px">${value.phone ? `M: <a href="tel:${esc(telephone)}" style="color:#637b82;text-decoration:none">${esc(value.phone)}</a>${address ? ' &nbsp;|&nbsp; ' : ''}` : ''}${address ? `<a href="mailto:${esc(address)}" style="color:#174fa8;text-decoration:underline">${esc(address)}</a>` : ''}</div></td></tr></table>`;
+  return `<table role="presentation" class="mail-signature-table" cellpadding="0" cellspacing="0" style="border-collapse:collapse;font-family:Arial,sans-serif;color:#18312c;font-size:13px;line-height:1.5"><tr><td style="border:0;border-left:3px solid #20343c;padding:4px 0 4px 12px">${logo ? `<img src="${esc(logo)}" alt="Orquivia" width="190" style="display:block;width:190px;max-width:190px;height:auto;border:0;margin-bottom:8px">` : ''}<strong style="display:block;font-size:16px;font-weight:600">${esc(value.name)}</strong>${value.role ? `<span style="display:block;color:#526875">${esc(value.role)}</span>` : ''}<div style="margin-top:16px">${value.phone ? `M: <a href="tel:${esc(telephone)}" style="color:#637b82;text-decoration:none">${esc(value.phone)}</a>${address ? ' &nbsp;|&nbsp; ' : ''}` : ''}${address ? `<a href="mailto:${esc(address)}" style="color:#174fa8;text-decoration:underline">${esc(address)}</a>` : ''}</div></td></tr></table>`;
 
 }

@@ -1,5 +1,5 @@
 import { todayISO, totals } from './domain.js';
-export const emptyState = () => ({ company: { name:'Orquívia', legalName:'', taxId:'', address:'', email:'', phone:'', iban:'', bic:'', vat:21, withholding:0, paymentTerms:30, emailNotifications:false, notificationEmail:'' }, clients:[], documents:[], payments:[] });
+export const emptyState = () => ({ company: { name:'Orquivia', legalName:'', taxId:'', address:'', email:'', phone:'', iban:'', bic:'', vat:21, withholding:0, paymentTerms:30, emailNotifications:false, notificationEmail:'' }, clients:[], documents:[], payments:[] });
 const offset = (n) => { const d=new Date(`${todayISO()}T12:00:00Z`); d.setUTCDate(d.getUTCDate()+n); return d.toISOString().slice(0,10); };
 export function demoState() {
   const s=emptyState();

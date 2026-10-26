@@ -1,5 +1,6 @@
 import './document-preview.css';
 import { money, formatNumber, escapeHTML as esc, documentAmounts, totals } from './domain.js';
+import { normalizeOrquivia } from './brand.js';
 
 const dateFormatter = new Intl.DateTimeFormat('es-ES', {
   day: '2-digit', month: 'short', year: 'numeric', timeZone: 'UTC',
@@ -18,14 +19,14 @@ export function renderDocumentPreview(d = {}, { company = {}, client = {}, logoU
   const items = Array.isArray(d.items) ? d.items : [];
   return `<article class="paper doc-preview" aria-label="Vista previa del ${invoice ? 'documento de factura' : 'presupuesto'}">
     <header class="paper-header">
-      <img class="document-brand" src="${esc(logoUrl)}" alt="Orquívia">
+      <img class="document-brand" src="${esc(logoUrl)}" alt="Orquivia">
       <div class="paper-document-meta">
         <h2>${invoice ? 'FACTURA' : 'PRESUPUESTO'}</h2>
         <p>Número: <strong>${esc(d.number || 'Borrador')}</strong><br>Fecha: ${esc(displayDate(d.date))}</p>
       </div>
     </header>
     <div class="paper-parties">
-      <div><small>${invoice ? 'Factura de' : 'Presupuesto de'}</small><strong>${esc(company.legalName || company.name)}</strong><span>${esc(company.taxId || 'NIF / CIF por completar')}</span><span>${esc(company.address || 'Dirección por completar')}</span><span>${esc(company.email)}</span></div>
+      <div><small>${invoice ? 'Factura de' : 'Presupuesto de'}</small><strong>${esc(normalizeOrquivia(company.legalName || company.name))}</strong><span>${esc(company.taxId || 'NIF / CIF por completar')}</span><span>${esc(company.address || 'Dirección por completar')}</span><span>${esc(company.email)}</span></div>
       <div class="paper-client"><small>Cliente</small><strong>${esc(client.name)}</strong><span>${esc(client.taxId)}</span><span>${esc(client.address)}</span><span>${esc(client.email)}</span></div>
     </div>
     <table class="paper-table" aria-label="Conceptos del documento">

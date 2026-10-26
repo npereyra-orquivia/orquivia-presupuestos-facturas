@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { resolveMailComposeEntry } from '../src/mail-compose-entry.js';
+import { BRAND_NAME, normalizeOrquivia } from '../src/brand.js';
 
 const defaultDraft = { to: ['default@example.test'], cc: [], subject: 'Presupuesto actual', message: 'Mensaje por defecto' };
 const savedDraft = { to: ['chosen@example.test'], cc: ['copy@example.test'], subject: 'Asunto editado', message: 'Mi mensaje completo\ncon cambios.', idempotencyKey: 'existing-id' };
@@ -114,4 +115,40 @@ test('extra attachment bytes stay with an unsent or uncertain attempt but never 
     assert.equal(result.draft.idempotencyKey, attached.idempotencyKey);
   }
   assert.equal(attached.attachments.length, 1);
+});
+
+test('brand correction preserves casing and every accent outside the complete brand word', () => {
+  assert.equal(BRAND_NAME, 'Orquivia');
+  const original = 'Orqu\u00edvia, ORQU\u00cdVIA, orqui\u0301via y oRqu\u00cdvia. Inspecci\u00f3n, factura pr\u00f3xima y Garci\u0301a.';
+  assert.equal(normalizeOrquivia(original), 'Orquivia, ORQUIVIA, orquivia y oRquIvia. Inspecci\u00f3n, factura pr\u00f3xima y Garci\u0301a.');
+  assert.equal(normalizeOrquivia('Orquiv\u00eda Global'), 'Orquivia Global');
+  assert.equal(normalizeOrquivia('Orquiviario y preOrqu\u00edvia'), 'Orquiviario y preOrqu\u00edvia');
+  for (const value of [undefined, null, 10]) assert.equal(normalizeOrquivia(value), value);
+});
+
+test('fresh editable attempts correct historical brand spelling without rewriting the sent record', () => {
+  const legacy = 'Orqu\u00edvia';
+  for (const status of ['sent', 'archive_pending', 'failed']) {
+    const previous = job(status, { subject: `Factura \u00b7 ${legacy}` });
+    const edited = { ...savedDraft, subject: `Factura \u00b7 ${legacy}`, message: `Inspecci\u00f3n de ${legacy}.` };
+    for (const saved of [undefined, edited]) {
+      const result = resolveMailComposeEntry({ savedDraft: saved, history: [previous], defaultDraft, createId: () => 'new-id' });
+      assert.equal(result.draft.subject, 'Factura \u00b7 Orquivia');
+      assert.equal(result.draft.message, saved ? 'Inspecci\u00f3n de Orquivia.' : defaultDraft.message);
+      assert.equal(result.draft.idempotencyKey, 'new-id');assert.equal(result.job, null);
+    }
+    assert.equal(previous.subject, `Factura \u00b7 ${legacy}`);assert.equal(edited.subject, `Factura \u00b7 ${legacy}`);
+  }
+});
+
+test('brand correction never changes content or UUID for a possibly submitted attempt', () => {
+  const legacy = { ...savedDraft, subject: 'Factura de Orqu\u00edvia', message: 'Inspecci\u00f3n de Orqui\u0301via.' };
+  for (const history of [[], [job('sent', { id: 'another-attempt' })], [job('sending')], [job('uncertain')],
+    [job('not-yet-understood')], [job('sent', { errorCode: 'SMTP_PARTIAL' })]]) {
+    const result = resolveMailComposeEntry({ savedDraft: legacy, history, defaultDraft, createId: neverCreate });
+    assert.deepEqual(result.draft, legacy);
+  }
+  const blocked = job('uncertain', { subject: 'Factura de Orqu\u00edvia' });
+  const result = resolveMailComposeEntry({ history: [blocked], defaultDraft, createId: neverCreate });
+  assert.equal(result.draft.subject, blocked.subject);assert.equal(result.draft.idempotencyKey, blocked.id);
 });

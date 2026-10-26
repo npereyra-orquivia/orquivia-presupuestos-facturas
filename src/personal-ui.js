@@ -1,10 +1,11 @@
 import './personal.css';
+import { normalizeOrquivia } from './brand.js';
 import { escapeHTML as esc } from './domain.js';
 import { icon } from './icons.js';
 import { DEFAULT_NOTIFICATIONS, validateAvatarFile } from './personal-backend.js';
 
 export function profileName(profile, user, mode) {
-  return profile?.displayName || user?.user_metadata?.name || user?.email?.split('@')[0] || (mode === 'demo' ? 'Nicole' : 'Mi cuenta');
+  return normalizeOrquivia(profile?.displayName || user?.user_metadata?.name || user?.email?.split('@')[0] || (mode === 'demo' ? 'Nicole' : 'Mi cuenta'));
 }
 
 export function avatarMarkup(name, photoUrl, extra = '') {
@@ -31,7 +32,7 @@ export function personalPage({ profile, user, photoUrl, mode, loading, error, de
   const deviceMessage = deviceMessageFor(device, cloud);
   return `<div class="page-heading"><div><div class="eyebrow">TU ZONA PERSONAL</div><h1>Tu espacio, a tu manera.</h1><p>Tu foto, tu cuenta y los avisos que te ayudan a estar al día.</p></div></div>
     ${error ? `<div class="note-banner">${icon('info')}<p>${esc(error)}</p><button class="text-button" data-action="reload-personal">Volver a cargar</button></div>` : ''}
-    <div class="personal-grid"><div class="personal-identity"><section class="card personal-profile"><div class="card-header"><div><h2>Así te ve tu espacio</h2><p>Tu perfil es personal y no cambia los datos de Orquívia.</p></div></div>
+    <div class="personal-grid"><div class="personal-identity"><section class="card personal-profile"><div class="card-header"><div><h2>Así te ve tu espacio</h2><p>Tu perfil es personal y no cambia los datos de Orquivia.</p></div></div>
       <form id="profile-form"><fieldset ${blocked ? 'disabled' : ''}><div class="profile-photo-row"><span id="profile-photo-preview">${avatarMarkup(name, photoUrl, 'large')}</span><div><strong>${esc(name)}</strong><p>${esc(user?.email || 'Perfil de prueba')}</p><div class="photo-actions"><label class="button secondary">${icon('upload')}Cambiar foto<input id="profile-photo" class="visually-hidden" type="file" accept="image/jpeg,image/png,image/webp"></label><button class="text-button" type="button" id="remove-profile-photo" ${!photoUrl ? 'hidden' : ''}>Quitar foto</button></div></div></div>
       <label class="field"><span>Cómo quieres aparecer</span><input name="displayName" value="${esc(name)}" maxlength="100" required autocomplete="nickname"></label>
       <p class="field-hint">La inicial de tu nombre aparece cuando no tienes foto. Tu foto se guarda privada.</p>
@@ -43,7 +44,7 @@ export function personalPage({ profile, user, photoUrl, mode, loading, error, de
       <div class="form-grid"><label class="field"><span>Avisar antes del plazo (días)</span><input name="daysBefore" type="number" min="0" max="30" step="1" required value="${n.daysBefore}"></label><label class="field"><span>Repetir pendientes cada (días)</span><input name="repeatDays" type="number" min="0" max="30" step="1" required value="${n.repeatDays}"></label><label class="field"><span>Hora del aviso · España peninsular</span><select name="hour">${hours}</select></label><label class="checkbox-label same-day"><input type="checkbox" name="onDueDate" ${n.onDueDate ? 'checked' : ''}>Avisar también el mismo día</label></div>
       <p class="field-hint">Con 2 y 2 recibirás un aviso dos días antes y recordatorios cada dos días si sigue pendiente. Un 0 desactiva esa antelación o repetición. El servicio revisa los avisos cada hora, en el minuto 20; se enviarán a partir de la hora elegida. Al registrar el cobro o recibir el contrato, ese aviso deja de ser necesario.</p>
       <div class="form-footer"><button class="button primary">Guardar preferencias</button></div></fieldset></form>
-      <div class="device-notifications"><div class="device-status"><span class="device-indicator ${device?.active ? 'active' : ''}"></span><strong>${device?.active ? 'Avisos activos en este dispositivo' : 'Avisos en este dispositivo'}</strong></div><p id="device-notification-description">${esc(deviceMessage)}</p><button class="button secondary" id="enable-device-push" ${!cloud || blocked || !capability?.supported || !device?.ready ? 'disabled' : ''}>${icon('bell')}${device?.active ? 'Comprobar y renovar este dispositivo' : 'Activar avisos en este dispositivo'}</button>${device?.active ? '<button class="text-button" id="disable-device-push">Desactivar este dispositivo</button>' : ''}<p class="field-hint">Los avisos muestran un mensaje general. Los importes y clientes se consultan después de entrar en Orquívia.</p><div id="personal-device-feedback" role="status" aria-live="polite"></div></div></section></div>`;
+      <div class="device-notifications"><div class="device-status"><span class="device-indicator ${device?.active ? 'active' : ''}"></span><strong>${device?.active ? 'Avisos activos en este dispositivo' : 'Avisos en este dispositivo'}</strong></div><p id="device-notification-description">${esc(deviceMessage)}</p><button class="button secondary" id="enable-device-push" ${!cloud || blocked || !capability?.supported || !device?.ready ? 'disabled' : ''}>${icon('bell')}${device?.active ? 'Comprobar y renovar este dispositivo' : 'Activar avisos en este dispositivo'}</button>${device?.active ? '<button class="text-button" id="disable-device-push">Desactivar este dispositivo</button>' : ''}<p class="field-hint">Los avisos muestran un mensaje general. Los importes y clientes se consultan después de entrar en Orquivia.</p><div id="personal-device-feedback" role="status" aria-live="polite"></div></div></section></div>`;
 }
 
 async function preparePhoto(file) {

@@ -1,4 +1,4 @@
-# Orquívia: empresa compartida en Supabase
+# Orquivia: empresa compartida en Supabase
 
 La interfaz se publica en GitHub Pages; los datos reales y los justificantes privados permanecen en Supabase. Nicole administra la empresa y el saldo inicial; Liliana edita clientes, presupuestos, facturas, cobros y gastos en el mismo espacio. Los correos y contraseñas para crear sus cuentas se pasan al script de servidor mediante stdin, nunca al código público.
 

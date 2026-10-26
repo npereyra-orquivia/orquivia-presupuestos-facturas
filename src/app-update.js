@@ -69,7 +69,7 @@ export function startAppUpdates({ version, baseURL = './', win = globalThis.wind
     }
     banner.hidden = false;
     const [copy, button] = banner.children, [title, description] = copy.children;
-    title.textContent = availableVersion ? 'Hay una actualización disponible.' : 'No se pudo cargar una parte de Orquívia.';
+    title.textContent = availableVersion ? 'Hay una actualización disponible.' : 'No se pudo cargar una parte de Orquivia.';
     description.textContent = availableVersion ? 'Guarda tus cambios antes de actualizar. La dirección del portal se mantiene.'
       : 'Puede faltar conexión o haberse actualizado la aplicación. Guarda tus cambios antes de recargar.';
     button.textContent = availableVersion ? 'Actualizar' : 'Recargar';

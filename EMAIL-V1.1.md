@@ -1,4 +1,4 @@
-# Orquívia 1.1 operativa
+# Orquivia 1.1 operativa
 
 **Actualización 1.4.0:** la misma dirección operativa incorpora extras en correos de facturas mediante la migración 015 y un nuevo despliegue de `document-mail`. Los límites y la política temporal del MIME están descritos en [supabase/README.md](supabase/README.md). Las copias de nuevos envíos confirmados quedan en Enviados de Arsys; Supabase conserva los metadatos y las huellas tras liberar el MIME temporal. Las copias históricas de versiones anteriores permanecen intactas.
 

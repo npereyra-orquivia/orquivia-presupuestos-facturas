@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { bindRecordHistory, captureFormDraft, changedRecordFields, compareWorkspaceEdits, renderConflictComparison, renderHistoryEntries, recordHistoryMarkup, captureOperationScope, runScopedOperation, mergeRecordHistory, renderUnifiedHistory } from '../src/history-ui.js';
 
-const workspace = () => ({ company: { name: 'Orquívia' }, clients: [], documents: [{ id: 'd1', number: '2026-001', kind: 'quote', notes: 'Original', items: [{ description: 'Inspección', quantity: 1, price: 100 }] }], payments: [], expenses: [{ id: 'e1', description: 'Gasto', total: 12, paymentStatus: 'paid' }] });
+const workspace = () => ({ company: { name: 'Orquivia' }, clients: [], documents: [{ id: 'd1', number: '2026-001', kind: 'quote', notes: 'Original', items: [{ description: 'Inspección', quantity: 1, price: 100 }] }], payments: [], expenses: [{ id: 'e1', description: 'Gasto', total: 12, paymentStatus: 'paid' }] });
 
 test('comparison distinguishes conflicting fields and preserves unrelated remote edits without merging them', () => {
   const base = workspace(), draft = structuredClone(base), remote = structuredClone(base);

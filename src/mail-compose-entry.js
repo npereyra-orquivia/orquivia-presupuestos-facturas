@@ -1,5 +1,8 @@
+import { normalizeOrquivia } from './brand.js';
+
 const terminalStatuses = new Set(['sent', 'archive_pending', 'failed']);
 const copy = value => structuredClone(value);
+const freshDraft = value => ({ ...value, subject: normalizeOrquivia(value.subject), message: normalizeOrquivia(value.message) });
 
 function recentFirst(history) {
   return history.map((job, index) => ({ job, index,
@@ -31,11 +34,11 @@ export function resolveMailComposeEntry({ savedDraft, history = [], defaultDraft
     const previous = ordered.find(job => job.id === savedDraft.idempotencyKey);
     // No visible result can mean an unsent draft or an attempt whose response
     // has not arrived. Preserve its UUID so replay protection remains intact.
-    return { draft: previous ? { ...draft, ...(Object.hasOwn(draft, 'attachments') ? { attachments: [] } : {}),
-      ...(preferDefaultRecipients ? { to: copy(defaultDraft.to) } : {}), idempotencyKey: createId() } : draft, job: null };
+    return { draft: previous ? freshDraft({ ...draft, ...(Object.hasOwn(draft, 'attachments') ? { attachments: [] } : {}),
+      ...(preferDefaultRecipients ? { to: copy(defaultDraft.to) } : {}), idempotencyKey: createId() }) : draft, job: null };
   }
   // A stored billing contact takes precedence over the recipient of a completed
   // attempt. Keep the latter in history rather than silently choosing it again.
-  return { draft: { ...(ordered[0] ? withRecipientMetadata(draft, ordered[0]) : draft),
-    ...(preferDefaultRecipients ? { to: copy(defaultDraft.to) } : {}), idempotencyKey: createId() }, job: null };
+  return { draft: freshDraft({ ...(ordered[0] ? withRecipientMetadata(draft, ordered[0]) : draft),
+    ...(preferDefaultRecipients ? { to: copy(defaultDraft.to) } : {}), idempotencyKey: createId() }), job: null };
 }

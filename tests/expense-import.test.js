@@ -4,7 +4,7 @@ import JSZip from 'jszip';
 import {prepareExpenseImport,executeExpenseImport} from '../src/expense-import.js';
 
 const org='00000000-0000-4000-8000-000000000001',id='00000000-0000-4000-8000-000000000002';
-const state=()=>({company:{name:'Orquívia'},clients:[],documents:[],payments:[],expenses:[]});
+const state=()=>({company:{name:'Orquivia'},clients:[],documents:[],payments:[],expenses:[]});
 const receiptBytes=new TextEncoder().encode('%PDF-1.7\nTest original receipt');
 const hash=async bytes=>Buffer.from(await crypto.subtle.digest('SHA-256',bytes)).toString('hex');
 async function pack(change=()=>{},extra={}){

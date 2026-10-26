@@ -2,6 +2,7 @@ import { renderMailSettings, bindMailSettings, renderMailComposer, bindMailCompo
 import { defaultMailProfile, normalizeMailProfile, defaultMailDraft } from './mail-domain.js';
 import { createMailContextCache, mergeMailJob } from './mail-context-cache.js';
 import { resolveMailComposeEntry } from './mail-compose-entry.js';
+import { normalizeOrquivia } from './brand.js';
 
 export function createMailFeature(ctx) {
   let profile = null, identity = null, cleanup = null, mountRequest = 0, composerRequest = 0;
@@ -76,7 +77,7 @@ export function createMailFeature(ctx) {
     const bindClose = () => modal.querySelectorAll('[data-close]').forEach(button => { button.onclick = () => ctx.closeModal(); });
     function newMail() {
       if (!valid() || ctx.isBusy() || ctx.isConflict()) return;
-      draft = { ...draft, attachments: [], idempotencyKey: crypto.randomUUID() };
+      draft = { ...draft, subject: normalizeOrquivia(draft.subject), message: normalizeOrquivia(draft.message), attachments: [], idempotencyKey: crypto.randomUUID() };
       drafts.set(document.id, draft); job = null; draw();
     }
     async function reloadHistory() {

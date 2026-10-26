@@ -24,7 +24,7 @@ function invoice(overrides = {}) {
 }
 
 function workspace(overrides = {}) {
-  return { company: { name: 'Orquívia' }, clients: [{ id: 'client-1', name: 'Cliente', taxId: 'NIF-1' }],
+  return { company: { name: 'Orquivia' }, clients: [{ id: 'client-1', name: 'Cliente', taxId: 'NIF-1' }],
     documents: [invoice()], payments: [], ...overrides };
 }
 
@@ -37,7 +37,7 @@ test('acknowledged missing receipts record real cash without inventing VAT evide
   const e = expense({ base: 13, vatAmount: 0, total: 13, vatRate: undefined, vatDeductibleAmount: 0,
     vatReviewNeeded: true, vatDocumentStatus: 'not-stated', reviewNeeded: false,
     missingReceiptReason: 'Bebida de networking; no pedí el ticket.', paymentStatus: 'paid', paidDate: '2026-03-31' });
-  const state = workspace({ expenses: [e], company: { name: 'Orquívia', openingBalance: 100, openingBalanceDate: '2026-03-01' } });
+  const state = workspace({ expenses: [e], company: { name: 'Orquivia', openingBalance: 100, openingBalanceDate: '2026-03-01' } });
   assert.deepEqual(validateWorkspace(state, TODAY), []);
   assert.equal(expenseNeedsReview(e), false);
   assert.equal(expenseNeedsReview({ ...e, missingReceiptReason: '' }), true);
@@ -63,7 +63,7 @@ test('a reviewed voucher with undisclosed VAT keeps unknown tax amounts and its 
   for (const vatDocumentStatus of ['included-unitemized', 'not-stated']) {
     const e = expense({ total: 2.41, base: 2.41, vatAmount: 0, vatRate: undefined, vatReviewNeeded: true,
       vatDocumentStatus, reviewNeeded: false, paymentStatus: 'paid', paidDate: '2026-03-31', attachments: [attachment()] });
-    const state = workspace({ expenses: [e], company: { name: 'Orquívia', openingBalance: 100, openingBalanceDate: '2026-03-01' } });
+    const state = workspace({ expenses: [e], company: { name: 'Orquivia', openingBalance: 100, openingBalanceDate: '2026-03-01' } });
     assert.deepEqual(validateWorkspace(state, TODAY), []);
     assert.equal(expenseNeedsReview(e), false);
     assert.equal(expenseNeedsReview({ ...e, reviewNeeded: true }), true);
@@ -210,12 +210,12 @@ test('annual and all-history reports retain date boundaries, exclude drafts and 
 });
 
 test('opening balance is signed, paired with a real date, and rejects future dates', () => {
-  assert.deepEqual(validateWorkspace(workspace({ company: { name: 'Orquívia', openingBalance: -100.25,
+  assert.deepEqual(validateWorkspace(workspace({ company: { name: 'Orquivia', openingBalance: -100.25,
     openingBalanceDate: '2026-04-01' } }), TODAY), []);
   for (const company of [{ openingBalance: 10 }, { openingBalanceDate: '2026-01-01' },
     { openingBalance: 1.001, openingBalanceDate: '2026-01-01' },
     { openingBalance: 10, openingBalanceDate: '2026-10-15' }]) {
-    assert.ok(validateWorkspace(workspace({ company: { name: 'Orquívia', ...company } }), TODAY).some((entry) => entry.includes('opening')));
+    assert.ok(validateWorkspace(workspace({ company: { name: 'Orquivia', ...company } }), TODAY).some((entry) => entry.includes('opening')));
   }
 });
 
@@ -264,7 +264,7 @@ test('cash opening balance excludes earlier movements but outstanding invoices u
   const old = invoice({ id: 'old', number: 'F-2026-001', date: '2026-03-01' });
   const current = invoice({ id: 'current', number: 'F-2026-002', date: '2026-04-01' });
   const review = invoice({ id: 'review', number: 'F-2026-003', date: '2026-04-01', paymentReviewNeeded: true });
-  const state = workspace({ company: { name: 'Orquívia', openingBalance: 1000, openingBalanceDate: '2026-04-01' },
+  const state = workspace({ company: { name: 'Orquivia', openingBalance: 1000, openingBalanceDate: '2026-04-01' },
     documents: [old, current, review], payments: [{ documentId: old.id, amount: 121, date: '2026-03-31' },
       { documentId: current.id, amount: 20, date: '2026-04-01' }, { documentId: current.id, amount: 10, date: '2026-04-20' }],
     expenses: [expense({ date: '2026-04-01', base: 10, vatAmount: 0, total: 10, paymentStatus: 'paid', paidDate: '2026-04-02' }),
@@ -336,7 +336,7 @@ test('cash ledgers retain gross documents, bank discounts, advance dates and lat
       { id: '804f4204-ef81-4d89-a91c-3f7461916b47', date: '2026-05-12', amount: 144.16, reference: 'Cargo inicial' },
       { id: '04e43d6b-7a4a-4f83-996c-17af7a7c5e6d', date: '2026-05-31', amount: -9.9, reference: 'Devolución' },
     ] });
-  const state = workspace({ company: { name: 'Orquívia', openingBalance: 1000, openingBalanceDate: '2026-05-01' },
+  const state = workspace({ company: { name: 'Orquivia', openingBalance: 1000, openingBalanceDate: '2026-05-01' },
     expenses: [travel, rental] });
   assert.deepEqual(validateWorkspace(state, TODAY), []);
   assert.equal(expenseTotals(travel).total, 61.95);

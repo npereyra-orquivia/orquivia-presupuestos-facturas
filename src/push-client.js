@@ -8,7 +8,7 @@ export function pushCapability() {
   const supported = globalThis.isSecureContext === true && !!globalThis.navigator?.serviceWorker
     && typeof globalThis.PushManager !== 'undefined' && typeof globalThis.Notification !== 'undefined';
   const guidance = iphone && !installed
-    ? 'En tu iPhone: abre Orquívia en Safari, pulsa Compartir y Añadir a pantalla de inicio. Abre ese acceso para activar los avisos (iOS 16.4 o posterior).'
+    ? 'En tu iPhone: abre Orquivia en Safari, pulsa Compartir y Añadir a pantalla de inicio. Abre ese acceso para activar los avisos (iOS 16.4 o posterior).'
     : !supported ? 'Este navegador no permite avisos push. Puedes revisar tus pendientes en el portal.' : '';
   return {
     supported, installed, needsInstall: iphone && !installed,

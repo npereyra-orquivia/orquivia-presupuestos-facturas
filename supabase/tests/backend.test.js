@@ -5,7 +5,7 @@ import { reminderLines } from '../functions/_shared/reminders.js';
 import { build } from 'esbuild';
 import { historicalImportDecision, stateDigest } from '../scripts/bootstrap-team.mjs';
 
-const empty = () => ({ company: { name: 'Orquívia' }, clients: [], documents: [], payments: [] });
+const empty = () => ({ company: { name: 'Orquivia' }, clients: [], documents: [], payments: [] });
 const token = (role = 'anon', extra = {}) => [
   { alg: 'HS256', typ: 'JWT' }, { role, exp: Math.floor(Date.now() / 1000) + 3600, ...extra },
 ].map((part) => Buffer.from(JSON.stringify(part)).toString('base64url')).concat('test-signature').join('.');
@@ -17,7 +17,7 @@ test('cloud validation snapshots records and rejects invalid/orphaned financial 
   original.payments.push({ id: 'p1', documentId: 'd1', amount: 50, date: '2025-01-20' });
   const snapshot = validateCloudState(original);
   original.company.name = 'Changed';
-  assert.equal(snapshot.company.name, 'Orquívia');
+  assert.equal(snapshot.company.name, 'Orquivia');
   assert.throws(() => validateCloudState({ ...empty(), company: new Date() }), { code: 'INVALID_STATE' });
   assert.throws(() => validateCloudState({ ...empty(), company: { emailNotifications: 'false' } }), { code: 'INVALID_STATE' });
   assert.throws(() => validateCloudState({ ...empty(), clients: [{ id: 'c1' }, { id: 'c1' }] }), { code: 'INVALID_STATE' });
@@ -70,10 +70,10 @@ test('scheduled handler authenticates its caller, requires opt-in and reuses an 
   const env = {
     ORQUIVIA_CRON_SECRET: 'fictional-32-byte-test-cron-secret',
     SUPABASE_URL: 'https://example.supabase.co', SUPABASE_SERVICE_ROLE_KEY: 'fictional-service-key',
-    RESEND_API_KEY: 'fictional-resend-key', ORQUIVIA_FROM_EMAIL: 'Orquívia <owner@example.test>',
+    RESEND_API_KEY: 'fictional-resend-key', ORQUIVIA_FROM_EMAIL: 'Orquivia <owner@example.test>',
   };
   const state = empty();
-  state.company = { name: 'Orquívia', emailNotifications: true, notificationEmail: 'owner@example.test' };
+  state.company = { name: 'Orquivia', emailNotifications: true, notificationEmail: 'owner@example.test' };
   state.documents = [{ id: 'd1', number: 'F-2026-001', kind: 'invoice', status: 'issued', dueDate: '2026-10-12', items: [{ quantity: 1, price: 100 }], vat: 21 }];
   const storedPayload = { from: env.ORQUIVIA_FROM_EMAIL, to: ['owner@example.test'], subject: 'Original subject', text: 'Original immutable body' };
   let delivered = false;
@@ -216,8 +216,8 @@ test('versioned cloud writes are serialized and a conflict blocks further saving
     });
     if (url.includes('/auth/v1/user')) return json(user);
     if (url.includes('/auth/v1/logout')) return json({});
-    if (url.includes('/rest/v1/rpc/refresh_orquivia_access')) return json({ organization_id: 'a2000000-0000-4000-8000-000000000001', organization_name: 'Orquívia', role: 'admin', require_mfa: false });
-    if (url.includes('/rest/v1/rpc/load_orquivia_workspace')) return json({ organization_id: 'a2000000-0000-4000-8000-000000000001', organization_name: 'Orquívia', role: 'admin', require_mfa: false, state: stored, version: cloudVersion, updated_at: '2026-10-13T10:00:00Z' });
+    if (url.includes('/rest/v1/rpc/refresh_orquivia_access')) return json({ organization_id: 'a2000000-0000-4000-8000-000000000001', organization_name: 'Orquivia', role: 'admin', require_mfa: false });
+    if (url.includes('/rest/v1/rpc/load_orquivia_workspace')) return json({ organization_id: 'a2000000-0000-4000-8000-000000000001', organization_name: 'Orquivia', role: 'admin', require_mfa: false, state: stored, version: cloudVersion, updated_at: '2026-10-13T10:00:00Z' });
     if (url.includes('/rest/v1/rpc/save_orquivia_team_state')) {
       const { p_state, p_expected_version } = JSON.parse(init.body);
       attemptedVersions.push(p_expected_version);
@@ -261,7 +261,7 @@ test('access refresh checks server MFA and membership and invalidates the loaded
   const originalFetch = globalThis.fetch;
   const user = { id: 'b1000000-0000-4000-8000-000000000002', aud: 'authenticated', email: 'editor@example.test' };
   const org = 'a2000000-0000-4000-8000-000000000001';
-  const access = { organization_id: org, organization_name: 'Orquívia', role: 'editor', require_mfa: false };
+  const access = { organization_id: org, organization_name: 'Orquivia', role: 'editor', require_mfa: false };
   const json = (body, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
   let denied = null, refreshes = 0, saves = 0;
   globalThis.fetch = async (input) => {
@@ -315,7 +315,7 @@ test('password reauthentication preserves the active MFA session and revokes its
   const user = { id: 'b1000000-0000-4000-8000-000000000003', aud: 'authenticated', email: 'owner@example.test' };
   const activeToken = token('authenticated', { sub: user.id, aal: 'aal2', session_id: 'active-mfa-session' });
   const verifierToken = token('authenticated', { sub: user.id, aal: 'aal1', session_id: 'temporary-password-session' });
-  const access = { organization_id: 'a2000000-0000-4000-8000-000000000001', organization_name: 'Orquívia', role: 'admin', require_mfa: true };
+  const access = { organization_id: 'a2000000-0000-4000-8000-000000000001', organization_name: 'Orquivia', role: 'admin', require_mfa: true };
   const json = (body, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
   const authorization = (init) => new Headers(init.headers).get('authorization');
   const logouts = [];
@@ -379,13 +379,15 @@ test('password reauthentication preserves the active MFA session and revokes its
   }
 });
 
-test('MFA setup retry removes only unfinished Orquívia TOTP factors', async () => {
+test('MFA setup retry removes only unfinished Orquivia TOTP factors', async () => {
   const originalFetch = globalThis.fetch;
   const factors = [
-    { id: 'unfinished-orquivia', factor_type: 'totp', status: 'unverified', friendly_name: 'Orquívia' },
-    { id: 'verified-orquivia', factor_type: 'totp', status: 'verified', friendly_name: 'Orquívia' },
+    { id: 'unfinished-orquivia', factor_type: 'totp', status: 'unverified', friendly_name: 'Orquivia' },
+    { id: 'unfinished-legacy', factor_type: 'totp', status: 'unverified', friendly_name: 'Orqu\u00edvia' },
+    { id: 'verified-orquivia', factor_type: 'totp', status: 'verified', friendly_name: 'Orquivia' },
+    { id: 'verified-legacy', factor_type: 'totp', status: 'verified', friendly_name: 'Orqu\u00edvia' },
     { id: 'unfinished-other-app', factor_type: 'totp', status: 'unverified', friendly_name: 'Other app' },
-    { id: 'unfinished-phone', factor_type: 'phone', status: 'unverified', friendly_name: 'Orquívia' },
+    { id: 'unfinished-phone', factor_type: 'phone', status: 'unverified', friendly_name: 'Orquivia' },
   ];
   const user = { id: 'b1000000-0000-4000-8000-000000000004', aud: 'authenticated', email: 'owner@example.test', factors };
   const json = (body, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
@@ -397,14 +399,14 @@ test('MFA setup retry removes only unfinished Orquívia TOTP factors', async () 
     if (url.includes('/auth/v1/user')) return json(user);
     if (url.includes('/auth/v1/factors/') && init.method === 'DELETE') {
       const id = url.split('/').at(-1);
-      assert.equal(id, 'unfinished-orquivia', 'Verified and unrelated factors must never be unenrolled');
+      assert.ok(['unfinished-orquivia', 'unfinished-legacy'].includes(id), 'Verified and unrelated factors must never be unenrolled');
       removed.push(id);
       return json({ id });
     }
     if (url.endsWith('/auth/v1/factors') && init.method === 'POST') {
       enrollmentRequests++;
-      assert.deepEqual(removed, ['unfinished-orquivia'], 'Cleanup must finish before retrying enrollment');
-      assert.deepEqual(JSON.parse(init.body), { factor_type: 'totp', friendly_name: 'Orquívia' });
+      assert.deepEqual(removed, ['unfinished-orquivia', 'unfinished-legacy'], 'Cleanup must finish before retrying enrollment');
+      assert.deepEqual(JSON.parse(init.body), { factor_type: 'totp', friendly_name: 'Orquivia' });
       return json({ id: 'new-orquivia', type: 'totp', totp: { qr_code: '<svg/>', secret: 'fictional-test-secret', uri: 'otpauth://totp/test' } });
     }
     throw new Error(`Unexpected MFA setup request ${url}`);
@@ -414,7 +416,7 @@ test('MFA setup retry removes only unfinished Orquívia TOTP factors', async () 
     backend = createBackend({ url: 'https://example.supabase.co', anonKey: 'sb_publishable_test' });
     await backend.signIn(user.email, 'fictional-password');
     assert.equal((await backend.mfa.enroll()).id, 'new-orquivia');
-    assert.deepEqual(removed, ['unfinished-orquivia']);
+    assert.deepEqual(removed, ['unfinished-orquivia', 'unfinished-legacy']);
     assert.equal(enrollmentRequests, 1);
   } finally {
     backend?.dispose();
@@ -430,7 +432,7 @@ test('bootstrap imports are stable and cannot rewind production edits on a retry
   assert.equal(historicalImportDecision(pristine, original).action, 'import');
   const stored = structuredClone(original);
   stored.documents[0].total = 121;
-  stored.company = { name: 'Orquívia' };
+  stored.company = { name: 'Orquivia' };
   const result = historicalImportDecision({ state: stored, version: 2 }, original);
   assert.equal(result.action, 'already-imported');
   assert.match(result.importHash, /^[a-f0-9]{64}$/);
@@ -473,7 +475,7 @@ test('private receipt transport rechecks membership, uses immutable organization
   const originalFetch = globalThis.fetch;
   const user = { id: 'b1000000-0000-4000-8000-000000000005', aud: 'authenticated', email: 'owner@example.test' };
   const org = 'a2000000-0000-4000-8000-000000000001', expenseId = 'a4000000-0000-4000-8000-000000000001';
-  const access = { organization_id: org, organization_name: 'Orquívia', role: 'admin', require_mfa: true };
+  const access = { organization_id: org, organization_name: 'Orquivia', role: 'admin', require_mfa: true };
   const json = (body, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
   let uploadedPath = null, denyAccess = false, denyDelete = false, storageCalls = 0, refreshes = 0;
   globalThis.fetch = async (input, init = {}) => {
@@ -542,7 +544,7 @@ test('record history binds its member identity and a read-only comparison never 
   const member = { id: 'b1000000-0000-4000-8000-000000000006', aud: 'authenticated', email: 'third@example.test' };
   const other = { id: 'b1000000-0000-4000-8000-000000000007', aud: 'authenticated', email: 'other@example.test' };
   const org = 'a2000000-0000-4000-8000-000000000001';
-  const access = { organization_id: org, organization_name: 'Orquívia', role: 'editor', require_mfa: true };
+  const access = { organization_id: org, organization_name: 'Orquivia', role: 'editor', require_mfa: true };
   const json = (body, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
   const rows = [{ id: 11, actorId: member.id, actorEmail: member.email, event: 'save', action: 'updated',
     entityType: 'expense', entityId: 'receipt-1', workspaceVersion: 2, changedFields: ['reviewNeeded'], createdAt: '2026-10-14T10:00:00Z' }];
@@ -610,7 +612,7 @@ test('late errors from a prior login cannot clear the new login workspace or inv
   const originalFetch = globalThis.fetch;
   const first = { id: 'b1000000-0000-4000-8000-000000000008', aud: 'authenticated', email: 'first@example.test' };
   const second = { id: 'b1000000-0000-4000-8000-000000000009', aud: 'authenticated', email: 'second@example.test' };
-  const access = { organization_id: 'a2000000-0000-4000-8000-000000000001', organization_name: 'Orquívia', role: 'editor', require_mfa: true };
+  const access = { organization_id: 'a2000000-0000-4000-8000-000000000001', organization_name: 'Orquivia', role: 'editor', require_mfa: true };
   const json = (body, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
   let backend;
   try {
@@ -671,7 +673,7 @@ test('cold restored sessions can load directly and a late account verification c
   const originalStorage = globalThis.sessionStorage;
   const first = { id: 'b1000000-0000-4000-8000-000000000010', aud: 'authenticated', email: 'restored@example.test' };
   const second = { id: 'b1000000-0000-4000-8000-000000000011', aud: 'authenticated', email: 'new@example.test' };
-  const access = { organization_id: 'a2000000-0000-4000-8000-000000000001', organization_name: 'Orquívia', role: 'editor', require_mfa: true };
+  const access = { organization_id: 'a2000000-0000-4000-8000-000000000001', organization_name: 'Orquivia', role: 'editor', require_mfa: true };
   const json = (body) => new Response(JSON.stringify(body), { headers: { 'Content-Type': 'application/json' } });
   const session = (user) => ({ access_token: token('authenticated', { sub: user.id, aal: 'aal2' }), refresh_token: 'test-refresh', token_type: 'bearer', expires_at: Math.floor(Date.now() / 1000) + 3600, expires_in: 3600, user });
   let backend;

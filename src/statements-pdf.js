@@ -1,5 +1,6 @@
 import { jsPDF } from 'jspdf';
 import { money, todayISO } from './domain.js';
+import { normalizeOrquivia } from './brand.js';
 
 const clean=value=>String(value ?? '').replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g,'').replace(/[\u2010-\u2015\u2212]/g,'-').replace(/[\u00a0\u202f]/g,' ');
 const known=value=>typeof value==='number'&&Number.isFinite(value);
@@ -10,10 +11,11 @@ const ink=[27,48,42],muted=[104,118,110],pale=[241,245,239],amber=[116,92,43];
 /** Vector report. Missing data never becomes zero or a balancing equity entry. */
 export function createStatementsPDF({company={},profitLoss:p,balance:b,logoData,generatedAt=todayISO(),demo=false}) {
   if(!p?.range||!Array.isArray(p.lines)||!b?.summary||!Array.isArray(b.assets)||!Array.isArray(b.liabilities))throw new Error('Faltan datos para preparar los estados financieros.');
+  company={...company,name:normalizeOrquivia(company.name),legalName:normalizeOrquivia(company.legalName)};
   const pdf=new jsPDF({unit:'mm',format:'a4',compress:true}),left=19,right=191,width=172,bottom=271;
-  const name=clean(company.legalName||company.name||'Orquívia');
+  const name=clean(company.legalName||company.name||'Orquivia');
   const generated=String(generatedAt).slice(0,10);
-  pdf.setProperties({title:`Estados financieros provisionales - ${name} - ${date(b.asOf)}`,author:name,creator:'Orquívia'});
+  pdf.setProperties({title:`Estados financieros provisionales - ${name} - ${date(b.asOf)}`,author:name,creator:'Orquivia'});
   let y=0;
   const shownSources=new Set();
   function text(value,x,y,size=9,{color=ink,style='normal',align='left'}={}){pdf.setFont('helvetica',style);pdf.setFontSize(size);pdf.setTextColor(...color);pdf.text(clean(value),x,y,{align});}
@@ -48,7 +50,7 @@ export function createStatementsPDF({company={},profitLoss:p,balance:b,logoData,
     }
   }
 
-  if(logoData){const image=pdf.getImageProperties(logoData),ratio=image.width/image.height,w=Math.min(47,13*ratio);pdf.addImage(logoData,'PNG',left,15,w,w/ratio);}else text(company.name||'Orquívia',left,25,15,{style:'bold'});
+  if(logoData){const image=pdf.getImageProperties(logoData),ratio=image.width/image.height,w=Math.min(47,13*ratio);pdf.addImage(logoData,'PNG',left,15,w,w/ratio);}else text(company.name||'Orquivia',left,25,15,{style:'bold'});
   text('ESTADOS FINANCIEROS',right,21,12,{style:'bold',align:'right'});
   text(`Fecha de corte: ${date(b.asOf)}`,right,28,9,{color:muted,align:'right'});
   y=43;paragraph(name,{size:11,color:ink,gap:1});

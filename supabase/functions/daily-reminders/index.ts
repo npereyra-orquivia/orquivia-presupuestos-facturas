@@ -1,6 +1,7 @@
 import { createClient } from 'npm:@supabase/supabase-js@2';
 import { reminderLines } from '../_shared/reminders.js';
 import { todayISO } from '../../../src/domain.js';
+import { normalizeOrquivia } from '../../../src/brand.js';
 
 type Document = {
   id: string;
@@ -43,7 +44,7 @@ export default { fetch: async (request: Request) => {
     return Response.json({ error: 'La configuración de claves del servidor no es válida.' }, { status: 503 });
   }
   const resendKey = Deno.env.get('RESEND_API_KEY');
-  const from = Deno.env.get('ORQUIVIA_FROM_EMAIL');
+  const from = normalizeOrquivia(Deno.env.get('ORQUIVIA_FROM_EMAIL'));
   if (!supabaseUrl || !serviceKey || !resendKey || !from || /[\r\n]/.test(from)) {
     return Response.json({ error: 'Faltan secretos del servidor.' }, { status: 503 });
   }
@@ -73,9 +74,9 @@ export default { fetch: async (request: Request) => {
         const lines = reminderLines(state, today);
         if (!lines.length) continue;
         const messagePayload = {
-          from, to: [email], subject: `Orquívia · ${lines.length} pendientes · ${today}`,
+          from, to: [email], subject: `Orquivia · ${lines.length} pendientes · ${today}`,
           text: [
-            `Resumen de ${typeof state.company.name === 'string' ? state.company.name : 'Orquívia'} para ${today}.`, '',
+            `Resumen de ${normalizeOrquivia(typeof state.company.name === 'string' ? state.company.name : 'Orquivia')} para ${today}.`, '',
             ...lines.map((line: string) => `• ${line}`), '',
             'Revisa el portal y actualiza los cobros o la recepción del contrato.',
             'El estado se basa en los registros del portal. Comprueba tu banco antes de marcar un cobro.',

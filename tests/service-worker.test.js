@@ -30,8 +30,8 @@ test('service worker caches no request or account data and uses fixed private no
   });
   await pending;
   assert.equal(notifications.length, 1);
-  assert.equal(notifications[0].title, 'Orquívia');
-  assert.equal(notifications[0].body, 'Tienes tareas pendientes. Abre Orquívia para revisarlas.');
+  assert.equal(notifications[0].title, 'Orquivia');
+  assert.equal(notifications[0].body, 'Tienes tareas pendientes. Abre Orquivia para revisarlas.');
   assert.equal(notifications[0].data.url, 'https://npereyra-orquivia.github.io/orquivia-presupuestos-facturas/?view=alerts');
   assert.equal(notifications[0].renotify, false);
   assert.equal(notifications[0].tag, 'orquivia-2026-10-14');

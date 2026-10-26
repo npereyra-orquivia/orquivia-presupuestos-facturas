@@ -17,9 +17,9 @@ const redirectHTML = `<!doctype html>
 <html lang="es"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="referrer" content="no-referrer">
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; connect-src 'none'; img-src 'self'; manifest-src 'self'; worker-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-src 'none'">
-<link rel="manifest" href="./manifest.webmanifest"><title>Orquívia</title>
+<link rel="manifest" href="./manifest.webmanifest"><title>Orquivia</title>
 <script src="./redirect.js" defer></script></head>
-<body><h1>Orquívia</h1><p>Abriendo la aplicación…</p><p><a href="../">Abrir Orquívia</a></p></body></html>
+<body><h1>Orquivia</h1><p>Abriendo la aplicación…</p><p><a href="../">Abrir Orquivia</a></p></body></html>
 `;
 
 const redirectJS = `// Fixed same-origin destination. Query and hash are data, never a redirect target.
@@ -34,9 +34,9 @@ const fallbackHTML = `<!doctype html>
 <html lang="es"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="referrer" content="no-referrer">
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-src 'none'">
-<link rel="canonical" href="${appPath}"><title>Orquívia</title>
+<link rel="canonical" href="${appPath}"><title>Orquivia</title>
 <script src="${appPath}canonical-redirect.js" defer></script></head>
-<body><h1>Orquívia</h1><p>La aplicación tiene una dirección única. Abriendo Orquívia…</p><p><a href="${appPath}">Abrir Orquívia</a></p></body></html>
+<body><h1>Orquivia</h1><p>La aplicación tiene una dirección única. Abriendo Orquivia…</p><p><a href="${appPath}">Abrir Orquivia</a></p></body></html>
 `;
 
 const fallbackJS = `// Resolve the fixed root from this deployed script, not from a requested path.
@@ -65,8 +65,8 @@ self.addEventListener('push', event => {
       payload = JSON.parse(source);
     } catch { return; }
     if (payload?.kind !== 'orquivia-reminder' || !/^\\d{4}-\\d{2}-\\d{2}$/.test(payload.day || '')) return;
-    await self.registration.showNotification('Orquívia', {
-      body: 'Tienes tareas pendientes. Abre Orquívia para revisarlas.',
+    await self.registration.showNotification('Orquivia', {
+      body: 'Tienes tareas pendientes. Abre Orquivia para revisarlas.',
       icon: new URL('orquivia-icon-192.png', appRoot).href,
       badge: new URL('orquivia-icon-192.png', appRoot).href,
       tag: 'orquivia-' + payload.day, renotify: false, data: { url: alertsURL.href },

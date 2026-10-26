@@ -80,7 +80,7 @@ async function bootstrapTeam(c) {
   const { data: membership, error: membershipError } = await db.from('orquivia_memberships').select('organization_id').eq('user_id', users.admin).maybeSingle();
   if (membershipError) throw membershipError;
   const org = c.organizationId || membership?.organization_id || crypto.randomUUID();
-  const { error: bootstrapError } = await db.rpc('bootstrap_orquivia_team', { p_admin_user_id: users.admin, p_editor_user_id: users.editor, p_name: 'Orquívia', p_organization_id: org });
+  const { error: bootstrapError } = await db.rpc('bootstrap_orquivia_team', { p_admin_user_id: users.admin, p_editor_user_id: users.editor, p_name: 'Orquivia', p_organization_id: org });
   if (bootstrapError) throw bootstrapError;
   // The legacy SQL default stays unchanged; production provisioning explicitly requires MFA.
   const requireMfa = c.requireMfa !== false;

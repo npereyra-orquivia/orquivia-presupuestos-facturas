@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { getDocument } from 'pdfjs-dist/legacy/build/pdf.mjs';
 import { createPDF } from '../src/pdf.js';
 
-const company = { name: 'Orquívia', legalName: 'Empresa de prueba', address: 'Calle de prueba, 1', paymentTerms: 30 };
+const company = { name: 'Orquivia', legalName: 'Empresa de prueba', address: 'Calle de prueba, 1', paymentTerms: 30 };
 const client = { name: 'Cliente de prueba', address: 'Dirección de prueba, 2' };
 const document = (overrides = {}) => ({
   kind: 'quote', status: 'sent', number: 'PR-2026-001', date: '2026-10-15', dueDate: '2026-11-15',

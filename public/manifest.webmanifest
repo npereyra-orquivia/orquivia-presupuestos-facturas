@@ -1,8 +1,8 @@
 {
   "id": "./",
-  "name": "Orquívia · Presupuestos y facturas",
-  "short_name": "Orquívia",
-  "description": "Portal privado de presupuestos, facturas y gastos de Orquívia.",
+  "name": "Orquivia · Presupuestos y facturas",
+  "short_name": "Orquivia",
+  "description": "Portal privado de presupuestos, facturas y gastos de Orquivia.",
   "lang": "es",
   "start_url": "./",
   "scope": "./",

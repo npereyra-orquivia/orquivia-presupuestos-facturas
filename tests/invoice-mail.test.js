@@ -29,7 +29,7 @@ test('invalid legacy billing contacts cannot become recipients or injectable ema
 
 test('invoice message carries the actual invoice number and optional PO without copying the quote text', () => {
   const value = defaultMailDraft(invoice, client);
-  assert.equal(value.subject, 'Factura 2026-008 · Orquívia');
+  assert.equal(value.subject, 'Factura 2026-008 · Orquivia');
   assert.match(value.message, /Te adjunto la factura 2026-008 para que puedas tramitarla/);
   assert.match(value.message, /Orden de pedido \(PO\): PO-45008412/);
   assert.ok(!value.message.includes('presupuesto'));

@@ -12,8 +12,8 @@ self.addEventListener('push', (event) => {
     } catch { return; }
     if (payload?.kind !== 'orquivia-reminder' || !/^\d{4}-\d{2}-\d{2}$/.test(payload.day || '')) return;
     // Fixed text protects the lock screen even if a sender supplies extra fields.
-    await self.registration.showNotification('Orquívia', {
-      body: 'Tienes tareas pendientes. Abre Orquívia para revisarlas.',
+    await self.registration.showNotification('Orquivia', {
+      body: 'Tienes tareas pendientes. Abre Orquivia para revisarlas.',
       icon: new URL('orquivia-icon-192.png', self.registration.scope).href,
       badge: new URL('orquivia-icon-192.png', self.registration.scope).href,
       tag: `orquivia-${payload.day}`, renotify: false,

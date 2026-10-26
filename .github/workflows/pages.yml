@@ -1,4 +1,4 @@
-name: Publicar Orquívia en GitHub Pages
+name: Publicar Orquivia en GitHub Pages
 on:
   push:
     branches: [main]
