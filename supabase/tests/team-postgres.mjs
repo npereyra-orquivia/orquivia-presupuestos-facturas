@@ -1,6 +1,6 @@
 // Executes actual PostgreSQL (PGlite/WASM), not a hand-written SQL mock.
-// Install locally: npm install --prefix supabase/.verification --no-save --no-package-lock @electric-sql/pglite
-import { PGlite } from '../.verification/node_modules/@electric-sql/pglite/dist/index.js';
+// Install from the pinned root lockfile: npm ci
+import { PGlite } from '@electric-sql/pglite';
 import { readFile } from 'node:fs/promises';
 import assert from 'node:assert/strict';
 const db = await PGlite.create();

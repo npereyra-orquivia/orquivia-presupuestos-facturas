@@ -4,6 +4,10 @@ import './history-ui.css';
 import './mail.css';
 import './invoice-delivery.css';
 import './app-update.css';
+import './operations-health.css';
+import './environment-notice.css';
+import { installEnvironmentNotice } from './environment-notice.js';
+import { renderOperationsHealth } from './operations-health.js';
 import { startAppUpdates } from './app-update.js';
 import { invoiceDeliveryBadge, invoiceDeliveryFilter, invoiceDeliveryPanel } from './invoice-delivery-ui.js';
 import { invoiceDeliveryStatus, invoiceDeliveryLabel } from './domain.js';
@@ -40,6 +44,7 @@ let passwordRecoveryCallback=parsePasswordRecoveryURL(location.href);
 if(passwordRecoveryCallback)window.history.replaceState(null,'',passwordRecoveryCallback.cleanURL);
 const recoveryRedirectURL=new URL('.',location.href);recoveryRedirectURL.search='';recoveryRedirectURL.hash='';
 const app=document.querySelector('#app'), modalRoot=document.querySelector('#modal-root');
+installEnvironmentNotice({mode:import.meta.env.VITE_APP_MODE});
 const logo=`${import.meta.env.BASE_URL}orquivia-logo.png`;
 const brandLogo=`${import.meta.env.BASE_URL}orquivia-logo-full.svg`,markLogo=`${import.meta.env.BASE_URL}orquivia-logo-mark.svg`;
 const documentLogo=`${import.meta.env.BASE_URL}orquivia-logo-wordmark.png`;
@@ -220,7 +225,7 @@ function settingsPage(){
   '<section class="card settings-card"><div class="card-header"><h2>Conectar el proyecto de Supabase</h2>'+icon('shield')+'</div><form id="connection-form">'+field('URL de tu proyecto','url',config.url,'url','required placeholder="https://tu-proyecto.supabase.co"')+field('Clave pública (publishable)','anonKey',config.anonKey,'password','required autocomplete="off" placeholder="sb_publishable_…"')+'<p class="field-hint">La importación definitiva se realizará desde el servidor. Las claves secretas se rechazan en este formulario.</p><button class="button secondary full">Conectar e iniciar sesión</button></form></section>')+
   '<section class="card settings-card"><h2>Copias de seguridad</h2><p class="settings-copy">La copia JSON contiene datos privados y las referencias de los justificantes. Los archivos se descargan desde Informes y gestor, por trimestre, año o todo el histórico.</p><div class="backup-actions"><button class="button secondary" data-action="backup">'+icon('download')+'Descargar copia</button>'+
   (mode==='cloud'?'<p class="field-hint">Las restauraciones de la empresa se realizan mediante el procedimiento de administración, conservando la numeración y el historial.</p>':'<label class="button secondary">'+icon('upload')+'Restaurar copia<input id="restore-input" class="visually-hidden" type="file" accept=".json,application/json"></label>')+
-  '</div></section></div></div>';
+  '</div></section>'+renderOperationsHealth(state,{role:mode==='cloud'?backend.workspaceInfo()?.role:null,version:appVersion})+'</div></div>';
 }
 function bindApp(){
   app.querySelectorAll('[data-nav]').forEach(b=>b.onclick=e=>{e.preventDefault();navTo(b.dataset.nav)});

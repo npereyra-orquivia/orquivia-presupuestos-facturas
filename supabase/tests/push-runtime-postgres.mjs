@@ -1,6 +1,6 @@
 // Tests the actual private-key SQL permissions and one-time bootstrap in PostgreSQL/WASM.
 // Profile membership/MFA guards are separately covered by personal-postgres.mjs.
-import { PGlite } from '../.verification/node_modules/@electric-sql/pglite/dist/index.js';
+import { PGlite } from '@electric-sql/pglite';
 import { readFile } from 'node:fs/promises';
 import assert from 'node:assert/strict';
 

@@ -1,6 +1,6 @@
 // Runs the real migrations and authorization/CAS routines against PostgreSQL
 // (PGlite/WASM); fixture-only users and documents never touch the live company.
-import { PGlite } from '../.verification/node_modules/@electric-sql/pglite/dist/index.js';
+import { PGlite } from '@electric-sql/pglite';
 import { readFile } from 'node:fs/promises';
 import assert from 'node:assert/strict';
 
