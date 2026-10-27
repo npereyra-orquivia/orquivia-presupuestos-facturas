@@ -11,6 +11,7 @@ const ENV = { GITHUB_ACTIONS: 'true', GITHUB_REPOSITORY: 'npereyra-orquivia/orqu
   GITHUB_REF: 'refs/heads/main', GITHUB_EVENT_NAME: 'schedule', ORQUIVIA_BACKUPS_ENABLED: 'true',
   ORQUIVIA_BACKUP_RESTORE_REHEARSED: 'true', ORQUIVIA_BACKUP_SUPABASE_URL: 'https://tfaglecwycbamibnhqmq.supabase.co',
   ORQUIVIA_BACKUP_RECOVERY_JSON: JSON.stringify(RECOVERY), ORQUIVIA_DRIVE_UPLOAD_ENABLED: 'true',
+  ORQUIVIA_DRIVE_ALLOWED_EMAILS: 'owner@example.test,reviewer@example.test',
   ORQUIVIA_DRIVE_FOLDER_ID: 'fixture_private_folder_1234', ORQUIVIA_DRIVE_CLIENT_ID: '123456789-test.apps.googleusercontent.com',
   ORQUIVIA_DRIVE_CLIENT_SECRET: 'fixture-only-client-secret', ORQUIVIA_DRIVE_REFRESH_TOKEN: 'fixture-only-refresh-token-not-real' };
 const COMMIT = 'a'.repeat(40);
@@ -55,6 +56,7 @@ test('scheduled runs reject the legacy quiet claim, another project, or absent D
   await assert.rejects(runScheduled({ ...f.env, ORQUIVIA_BACKUP_RECOVERY_JSON: JSON.stringify({ ...RECOVERY, captureMode: undefined, confirmedQuietCapture: true }) }, f), { code: 'SCHEDULED_BACKUP_DRIFT_CHECKS_REQUIRED' });
   await assert.rejects(runScheduled({ ...f.env, ORQUIVIA_BACKUP_SUPABASE_URL: 'https://abcdefghijklmnopqrst.supabase.co' }, f), { code: 'SCHEDULED_BACKUP_PROJECT_INVALID' });
   await assert.rejects(runScheduled({ ...f.env, ORQUIVIA_DRIVE_UPLOAD_ENABLED: undefined }, f), { code: 'DRIVE_UPLOAD_NOT_AUTHORIZED' });
+  await assert.rejects(runScheduled({ ...f.env, ORQUIVIA_DRIVE_ALLOWED_EMAILS: undefined }, f), { code: 'DRIVE_ALLOWED_EMAILS_INVALID' });
   assert.deepEqual(f.calls, []);
 });
 

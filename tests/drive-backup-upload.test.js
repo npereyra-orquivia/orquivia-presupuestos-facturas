@@ -9,7 +9,11 @@ import { DRIVE_SCOPE, DRIVE_UPLOAD_LIMITS, driveConfiguration, validateSessionUR
 
 const FOLDER = 'fixture_private_folder_1234', FILE_ID = 'fixture_uploaded_file_1234';
 const SESSION = 'https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable&upload_id=fixture_session_12345';
+const OWNER = 'owner@example.test', REVIEWER = 'reviewer@example.test';
+const PRIVATE_PERMISSIONS = [{ id: 'fixture-owner', type: 'user', role: 'owner', emailAddress: OWNER },
+  { id: 'fixture-reviewer', type: 'user', role: 'reader', emailAddress: REVIEWER }];
 const ENV = { ORQUIVIA_DRIVE_UPLOAD_ENABLED: 'true', ORQUIVIA_DRIVE_FOLDER_ID: FOLDER,
+  ORQUIVIA_DRIVE_ALLOWED_EMAILS: `${OWNER},${REVIEWER}`,
   ORQUIVIA_DRIVE_CLIENT_ID: '123456789-test.apps.googleusercontent.com', ORQUIVIA_DRIVE_CLIENT_SECRET: 'fixture-only-client-secret',
   ORQUIVIA_DRIVE_REFRESH_TOKEN: 'fixture-only-refresh-token-not-real' };
 const json = (value, status = 200) => new Response(JSON.stringify(value), { status, headers: { 'content-type': 'application/json' } });
@@ -41,7 +45,7 @@ function service(f, { token, folder, permissions, session = SESSION, uploaded, c
     }
     if (url.includes('/permissions?')) {
       permissionCalls++;
-      return (permissionCalls > 1 && postPermissions) || permissions || json({ permissions: [{ id: 'fixture-owner', type: 'user', role: 'owner' }] });
+      return ((permissionCalls > 1 && postPermissions) || permissions)?.clone() || json({ permissions: PRIVATE_PERMISSIONS });
     }
     if (url.startsWith('https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable&fields=')) return new Response(null, { status: 200, headers: { location: session } });
     if (url === SESSION) {
@@ -60,6 +64,26 @@ test('Drive helper remains disabled without explicit authorization and accepts o
   for (const extra of [{ ORQUIVIA_DRIVE_FOLDER_ID: `https://drive.google.com/${FOLDER}` }, { ORQUIVIA_DRIVE_CLIENT_SECRET: 'bad\nsecret' }, { ORQUIVIA_DRIVE_REFRESH_TOKEN: '' }]) {
     assert.throws(() => driveConfiguration({ ...ENV, ...extra }), { code: 'DRIVE_CONFIGURATION_INVALID' });
   }
+});
+
+test('allowed people are a mandatory canonical ASCII list of one to twenty unique addresses', () => {
+  assert.deepEqual([...driveConfiguration(ENV).allowedEmails], [OWNER, REVIEWER]);
+  assert.deepEqual([...driveConfiguration({ ...ENV, ORQUIVIA_DRIVE_ALLOWED_EMAILS: OWNER }).allowedEmails], [OWNER]);
+  const twenty = Array.from({ length: 20 }, (_, index) => `person${index}@example.test`).join(',');
+  assert.equal(driveConfiguration({ ...ENV, ORQUIVIA_DRIVE_ALLOWED_EMAILS: twenty }).allowedEmails.size, 20);
+  for (const value of [undefined, null, [], '', OWNER.toUpperCase(), ` ${OWNER}`, `${OWNER}, ${REVIEWER}`, `${OWNER},`,
+    `${OWNER},${OWNER}`, `${OWNER},${OWNER.toUpperCase()}`, 'owner@example.test\n', 'ownér@example.test',
+    'Owner <owner@example.test>', 'owner@localhost', 'owner..name@example.test', '.owner@example.test',
+    'owner@example..test', `${OWNER};${REVIEWER}`, `${twenty},extra@example.test`]) {
+    assert.throws(() => driveConfiguration({ ...ENV, ORQUIVIA_DRIVE_ALLOWED_EMAILS: value }), { code: 'DRIVE_ALLOWED_EMAILS_INVALID' });
+  }
+});
+
+test('a missing allowed-person list fails before any Google request', async t => {
+  const f = await fixture(t); let calls = 0;
+  await assert.rejects(uploadBackup({ file: f.file, env: { ...f.env, ORQUIVIA_DRIVE_ALLOWED_EMAILS: undefined },
+    fetcher: () => { calls++; } }), { code: 'DRIVE_ALLOWED_EMAILS_INVALID' });
+  assert.equal(calls, 0);
 });
 
 test('session URLs cannot redirect the token or ciphertext to another host, path, port or query', () => {
@@ -82,7 +106,18 @@ test('only a verified complete encrypted archive is uploaded to the configured f
   assert.ok(mock.calls.every(call => call.options.redirect === 'manual' && call.options.credentials === 'omit'));
   assert.ok(mock.calls.every(call => !['PATCH', 'DELETE'].includes(call.options.method)));
   assert.ok(mock.calls.filter(call => call.url.includes('/permissions')).every(call => call.options.method === 'GET'));
+  assert.ok(mock.calls.filter(call => call.url.includes('/permissions')).every(call => new URL(call.url).searchParams.get('fields').includes('emailAddress')));
   assert.doesNotMatch(JSON.stringify(result), /token|fixture_private|uploaded_file|client_secret|BACKUP_KEY/);
+});
+
+test('one authorized owner or exactly two authorized people with supported roles can receive a copy', async t => {
+  const f = await fixture(t);
+  const one = service(f, { permissions: json({ permissions: [PRIVATE_PERMISSIONS[0]] }) });
+  assert.equal((await uploadBackup({ file: f.file, env: { ...f.env, ORQUIVIA_DRIVE_ALLOWED_EMAILS: OWNER }, fetcher: one.fetcher })).status, 'uploaded-and-verified');
+  for (const role of ['owner', 'writer', 'commenter', 'reader']) {
+    const mock = service(f, { permissions: json({ permissions: [PRIVATE_PERMISSIONS[0], { ...PRIVATE_PERMISSIONS[1], role, emailAddress: REVIEWER.toUpperCase() }] }) });
+    assert.equal((await uploadBackup({ file: f.file, env: f.env, fetcher: mock.fetcher })).status, 'uploaded-and-verified');
+  }
 });
 
 test('plaintext, invalid archives, wrong keys and incomplete recovery contents make no Google request', async t => {
@@ -115,12 +150,48 @@ test('public or domain-wide folder permissions and unsupported shared-drive targ
   await assert.rejects(uploadBackup({ file: f.file, env: f.env, fetcher: mock.fetcher }), { code: 'DRIVE_FOLDER_INVALID' });
 });
 
+test('extra users, groups, absent or invalid emails and unsupported roles prevent any upload', async t => {
+  const f = await fixture(t);
+  const variants = [
+    [...PRIVATE_PERMISSIONS, { id: 'extra-user', type: 'user', role: 'reader', emailAddress: 'extra@example.test' }],
+    [PRIVATE_PERMISSIONS[0]],
+    [{ ...PRIVATE_PERMISSIONS[0], emailAddress: undefined }, PRIVATE_PERMISSIONS[1]],
+    [{ ...PRIVATE_PERMISSIONS[0], emailAddress: 'ownér@example.test' }, PRIVATE_PERMISSIONS[1]],
+    [{ ...PRIVATE_PERMISSIONS[0], emailAddress: 'owner@example.test ' }, PRIVATE_PERMISSIONS[1]],
+    [{ ...PRIVATE_PERMISSIONS[0], type: 'group' }, PRIVATE_PERMISSIONS[1]],
+    [{ ...PRIVATE_PERMISSIONS[0], type: undefined }, PRIVATE_PERMISSIONS[1]],
+    ...['organizer', 'fileOrganizer', 'unknown', undefined].map(role => [{ ...PRIVATE_PERMISSIONS[0], role }, PRIVATE_PERMISSIONS[1]]),
+  ];
+  for (const permissions of variants) {
+    const mock = service(f, { permissions: json({ permissions }) });
+    await assert.rejects(uploadBackup({ file: f.file, env: f.env, fetcher: mock.fetcher }), { code: 'DRIVE_FOLDER_SHARING_UNSAFE' });
+    assert.equal(mock.calls.some(call => call.url.includes('/upload/')), false);
+    assert.equal(mock.calls.some(call => ['PATCH', 'DELETE'].includes(call.options.method)), false);
+  }
+});
+
+test('every folder and uploaded-file permission page must equal the authorized-person set', async t => {
+  const f = await fixture(t), original = service(f); let pageCalls = 0;
+  const fetcher = async (url, options) => {
+    if (url.includes('/permissions?')) {
+      pageCalls++; assert.equal(options.method, 'GET');
+      assert.equal(new URL(url).searchParams.get('fields'), 'nextPageToken,permissions(id,type,role,emailAddress)');
+      if (!new URL(url).searchParams.has('pageToken')) return json({ nextPageToken: 'fixture-person-page', permissions: [PRIVATE_PERMISSIONS[0]] });
+      assert.equal(new URL(url).searchParams.get('pageToken'), 'fixture-person-page');
+      return json({ permissions: [PRIVATE_PERMISSIONS[1]] });
+    }
+    return original.fetcher(url, options);
+  };
+  assert.equal((await uploadBackup({ file: f.file, env: f.env, fetcher })).status, 'uploaded-and-verified');
+  assert.equal(pageCalls, 6); // Folder before and after, then new file; two pages each.
+});
+
 test('all permission pages must be inspectable and free of broad sharing before any upload', async t => {
   const f = await fixture(t), original = service(f); let pageCalls = 0;
   const fetcher = async (url, options) => {
     if (url.includes('/permissions?')) {
       pageCalls++;
-      if (pageCalls === 1) return json({ nextPageToken: 'fixture-next-page', permissions: [{ id: 'owner', type: 'user', role: 'owner' }] });
+      if (pageCalls === 1) return json({ nextPageToken: 'fixture-next-page', permissions: [PRIVATE_PERMISSIONS[0]] });
       assert.equal(new URL(url).searchParams.get('pageToken'), 'fixture-next-page');
       return json({ permissions: [{ id: 'domain', type: 'domain', role: 'reader' }] });
     }
@@ -181,6 +252,32 @@ test('wrong remote checksum, wrong parent, changed privacy or an uncertain retry
   assert.equal(privacy.calls.some(call => call.options.method === 'DELETE'), false);
   const uncertain = service(f, { chunk() { throw new Error('fixture private response'); } });
   await assert.rejects(uploadBackup({ file: f.file, env: f.env, fetcher: uncertain.fetcher }), { code: 'DRIVE_UPLOAD_OUTCOME_UNCERTAIN' });
+});
+
+test('a changed folder person or unapproved person inherited by the new file never confirms a copy', async t => {
+  const f = await fixture(t);
+  const folderChanged = service(f, { postPermissions: json({ permissions: [PRIVATE_PERMISSIONS[0],
+    { ...PRIVATE_PERMISSIONS[1], emailAddress: 'replacement@example.test' }] }) });
+  await assert.rejects(uploadBackup({ file: f.file, env: f.env, fetcher: folderChanged.fetcher }), { code: 'DRIVE_FOLDER_SHARING_UNSAFE' });
+  assert.equal(folderChanged.calls.filter(call => call.url.includes('/upload/') && call.options.method === 'POST').length, 1);
+  assert.equal(folderChanged.calls.some(call => ['PATCH', 'DELETE'].includes(call.options.method)), false);
+
+  for (const permission of [{ ...PRIVATE_PERMISSIONS[1], emailAddress: 'extra@example.test' },
+    { ...PRIVATE_PERMISSIONS[1], emailAddress: undefined }, { ...PRIVATE_PERMISSIONS[1], type: 'group' }]) {
+    const original = service(f); let filePages = 0;
+    const fetcher = async (url, options) => {
+      if (url.startsWith(`https://www.googleapis.com/drive/v3/files/${FILE_ID}/permissions?`)) {
+        filePages++;
+        if (filePages === 1) return json({ nextPageToken: 'fixture-file-person-page', permissions: [PRIVATE_PERMISSIONS[0]] });
+        return json({ permissions: [permission] });
+      }
+      return original.fetcher(url, options);
+    };
+    await assert.rejects(uploadBackup({ file: f.file, env: f.env, fetcher }), { code: 'DRIVE_FOLDER_SHARING_UNSAFE' });
+    assert.equal(filePages, 2);
+    assert.equal(original.calls.filter(call => call.url.includes('/upload/') && call.options.method === 'POST').length, 1);
+    assert.equal(original.calls.some(call => ['PATCH', 'DELETE'].includes(call.options.method)), false);
+  }
 });
 
 test('redirects, oversized responses, hung fetches and private diagnostics stay bounded and redacted', async t => {
