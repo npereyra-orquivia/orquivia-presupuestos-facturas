@@ -221,7 +221,7 @@ test('versioned cloud writes are serialized and a conflict blocks further saving
     if (url.includes('/rest/v1/rpc/save_orquivia_team_state')) {
       const { p_state, p_expected_version } = JSON.parse(init.body);
       attemptedVersions.push(p_expected_version);
-      if (p_expected_version !== cloudVersion) return json({ code: '40001', message: 'VERSION_CONFLICT', details: null, hint: null }, 409);
+      if (p_expected_version !== cloudVersion) return json({ code: 'PT409', message: 'VERSION_CONFLICT', details: null, hint: null }, 409);
       stored = p_state;
       cloudVersion++;
       return json({ version: cloudVersion, updated_at: '2026-10-13T10:00:00Z' });
@@ -255,6 +255,74 @@ test('versioned cloud writes are serialized and a conflict blocks further saving
     backend?.dispose();
     globalThis.fetch = originalFetch;
   }
+});
+
+test('modern HTTP 409 and legacy serialization HTTP 500 conflicts retain the invoice draft and block stale retries', async () => {
+  const originalFetch = globalThis.fetch;
+  const user = { id: 'b1000000-0000-4000-8000-000000000012', aud: 'authenticated', email: 'owner@example.test' };
+  const access = { organization_id: 'a2000000-0000-4000-8000-000000000001', organization_name: 'Orquivia', role: 'admin', require_mfa: false };
+  const json = (body, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
+  let backend;
+  try {
+    for (const conflict of [{ code: 'PT409', status: 409 }, { code: '40001', status: 500 }]) for (const action of ['save', 'issue']) {
+      let cloudVersion = 1, failNextWrite = true, writeCalls = 0, mailCalls = 0;
+      let stored = { ...empty(), clients: [{ id: 'client-1', name: 'Cliente' }], documents: [{ id: 'invoice-draft', kind: 'invoice', status: 'draft',
+        clientId: 'client-1', date: '2026-10-27', items: [{ description: 'Servicio', quantity: 1, price: 100 }], vat: 21, discount: 0, withholding: 0 }] };
+      globalThis.fetch = async (input, init = {}) => {
+        const url = String(input);
+        if (url.includes('/auth/v1/token')) return json({ access_token: token('authenticated', { sub: user.id }), refresh_token: 'test-refresh', token_type: 'bearer', expires_in: 3600, user });
+        if (url.includes('/auth/v1/user')) return json(user);
+        if (url.includes('/rest/v1/rpc/refresh_orquivia_access')) return json(access);
+        if (url.includes('/rest/v1/rpc/load_orquivia_workspace')) return json({ ...access, state: stored, version: cloudVersion });
+        if (url.includes('/functions/v1/document-mail')) { mailCalls++; throw Error('A stale workspace must not submit a mail request'); }
+        if (url.includes('/rest/v1/rpc/save_orquivia_team_state') || url.includes('/rest/v1/rpc/issue_orquivia_document')) {
+          writeCalls++;
+          const request = JSON.parse(init.body);
+          if (failNextWrite) {
+            failNextWrite = false;
+            assert.equal(request.p_expected_version, 1);
+            return json({ code: conflict.code, message: 'VERSION_CONFLICT', details: null, hint: null }, conflict.status);
+          }
+          assert.equal(request.p_expected_version, cloudVersion, 'Only an explicit reload can adopt the current server version');
+          stored = request.p_state; cloudVersion++;
+          return json({ version: cloudVersion });
+        }
+        throw Error(`Unexpected conflict fixture request ${url}`);
+      };
+      backend = createBackend({ url: 'https://example.supabase.co', anonKey: 'sb_publishable_test' });
+      await backend.signIn(user.email, 'fictional-password');
+      const draft = await backend.loadState();
+      draft.documents[0].items[0].price = 125;
+      draft.documents[0].notes = 'Concepto adicional todavía no guardado';
+      const retainedDraft = structuredClone(draft);
+      cloudVersion = 2; // A colleague saved while this invoice was being edited.
+      stored.company.name = 'Cambio de la otra sesión';
+      const remoteState = structuredClone(stored);
+      const pending = action === 'save' ? backend.saveState(draft) : backend.issueDocument('invoice-draft');
+      const rejected = assert.rejects(pending, error => {
+        assert.equal(error.code, 'VERSION_CONFLICT'); assert.equal(error.cause.code, conflict.code);
+        assert.match(error.message, /Exporta tus cambios y recarga/);
+        return true;
+      });
+      const queuedRetry = assert.rejects(backend.saveState(draft), { code: 'STATE_NOT_LOADED' });
+      await Promise.all([rejected, queuedRetry]);
+      assert.deepEqual(draft, retainedDraft, 'A rejected save or issuance must leave the local edited draft available for recovery');
+      assert.deepEqual(stored, remoteState, 'The stale draft must not overwrite the colleague data');
+      assert.equal(writeCalls, 1, 'A queued stale save must be refused before transport');
+      const comparison = await backend.peekState();
+      assert.equal(comparison.version, 2); assert.deepEqual(comparison.state, remoteState);
+      await assert.rejects(backend.saveState(draft), { code: 'STATE_NOT_LOADED' });
+      await assert.rejects(backend.issueDocument('invoice-draft'), { code: 'STATE_NOT_LOADED' });
+      await assert.rejects(backend.mail.send('invoice-draft', { idempotencyKey: 'not-submitted' }), { code: 'STATE_NOT_LOADED' });
+      assert.equal(writeCalls, 1); assert.equal(mailCalls, 0);
+      assert.deepEqual(draft, retainedDraft, 'Comparison and blocked retries must preserve the draft as well');
+      const reloaded = await backend.loadState();
+      assert.deepEqual(reloaded, remoteState);
+      assert.equal((await backend.saveState(reloaded)).version, 3);
+      assert.equal(writeCalls, 2);
+      backend.dispose(); backend = null;
+    }
+  } finally { backend?.dispose(); globalThis.fetch = originalFetch; }
 });
 
 test('access refresh checks server MFA and membership and invalidates the loaded workspace', async () => {
@@ -563,7 +631,7 @@ test('record history binds its member identity and a read-only comparison never 
     if (url.includes('/rest/v1/rpc/load_orquivia_workspace')) return json({ ...access, state: currentState, version: saves ? 2 : 1 });
     if (url.includes('/rest/v1/rpc/save_orquivia_team_state')) {
       saves++;
-      return json({ code: '40001', message: 'VERSION_CONFLICT' }, 409);
+      return json({ code: 'PT409', message: 'VERSION_CONFLICT' }, 409);
     }
     if (url.includes('/rest/v1/rpc/load_orquivia_record_history')) {
       historyRequests++;
@@ -634,7 +702,8 @@ test('late errors from a prior login cannot clear the new login workspace or inv
           waitingFor = null;
           started();
           await new Promise((resolve) => { release = resolve; });
-          return json({ code: method === 'save' || method === 'issue' ? '40001' : '42501', message: method === 'save' || method === 'issue' ? 'VERSION_CONFLICT' : 'MFA_REQUIRED' }, 409);
+          const isConflict = method === 'save' || method === 'issue';
+          return json({ code: isConflict ? 'PT409' : '42501', message: isConflict ? 'VERSION_CONFLICT' : 'MFA_REQUIRED' }, isConflict ? 409 : 403);
         }
         if (rpc === 'refresh_orquivia_access') return json(access);
         if (rpc === 'save_orquivia_team_state') {

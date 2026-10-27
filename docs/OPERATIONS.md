@@ -10,18 +10,18 @@ La dirección del portal sigue siendo `https://npereyra-orquivia.github.io/orqui
 
 ## Estado de preparación de los puntos 1–9
 
-Estado actualizado el **27 de octubre de 2026**, con la interfaz 1.5.0 publicada y la referencia anterior 1.4.1 conservada. La presencia de código no acredita su activación ni una ejecución real satisfactoria. El detalle de la evidencia está en [SECURITY-REVIEW-2026-10-27.md](SECURITY-REVIEW-2026-10-27.md).
+Estado actualizado el **27 de octubre de 2026**. La referencia anterior 1.4.1 permanece conservada; la ampliación operativa 1.5.0 se complementa con el parche 1.5.1 para responder a conflictos sin reintentos del servicio. La presencia de código no acredita su activación ni una ejecución real satisfactoria. El detalle está en [SECURITY-REVIEW-2026-10-27.md](SECURITY-REVIEW-2026-10-27.md) y [RPC-CONFLICTS.md](RPC-CONFLICTS.md).
 
 | Punto | Preparación disponible | Activación o evidencia que falta |
 |---|---|---|
 | 1. Copias completas | Motor cifrado y workflow diario desactivado. Exportación operativa y código 1.4.1 guardados en Drive restringido, con descarga de vuelta verificada. | Preparar credenciales y autorización separada de Drive; capturar la base de datos, Auth, originales y configuración completos. La copia parcial no los sustituye. |
 | 2. Recuperación | Descifrado y extracción reales de los cuatro archivos del respaldo parcial comprobados; herramientas offline guardadas junto al contenedor. | Ensayo completo con datos reales, acceso, numeración y originales, en un destino aislado. La extracción de archivos no restaura el sistema. |
 | 3. Producción | Auth, URLs, esquemas expuestos, RLS, membresías y buckets privados comprobados mediante panel y metadatos reales. Dependencia de correo parcheada. | Revisar advertencias específicas sin retirar permisos de funciones necesarias; repetir auditoría tras cambios de servidor. |
-| 4. Cuentas técnicas | Procedimiento de acceso, bajas y recuperación. MFA de GitHub activado por la titular y comprobado en el panel. | Comprobar factores y medios de recuperación de Supabase y correo, y custodia separada de la clave de respaldo. |
+| 4. Cuentas técnicas | Procedimiento de acceso, bajas y recuperación. MFA de GitHub y Supabase activados por la titular y comprobados en sus paneles. | Comprobar recuperación de ambas cuentas, autenticador alternativo de Supabase, protección del correo y custodia separada de la clave de respaldo. |
 | 5. Remitente automático | El portal ya utiliza `acceso@orquivia.com` como remitente de acceso. | Confirmar si continúa como alias de Nicole y, si se decide separarlo, crear un buzón y configurar su credencial propia con intervención de su titular. |
 | 6. Supervisión | Workflow publicado cada seis horas; ejecución manual remota correcta para portal, recursos y Auth. | Comprobar la recepción de avisos de fallo. No cubre automáticamente errores autenticados, SMTP, cron ni copias. |
 | 7. Capacidad | Panel publicado con datos cargados, límites y tamaño declarado de archivos; diseño comprobado con datos ficticios. | Comprobar la sesión autorizada publicada. La cuota total y la última copia requieren evidencia del servicio; el panel las mantiene pendientes. |
-| 8. Pruebas separadas | Suites con datos ficticios e infraestructura en memoria. | Un backend independiente con Auth y Storage reales; configurar aislamiento y bloqueo de correos antes de usarlo. Una URL distinta contra producción no es aislamiento. |
+| 8. Pruebas separadas | Proyecto independiente creado, esquema y buckets privados aplicados, registro público bloqueado y frontend de pruebas sin correo. Ensayo real de 36 comprobaciones con cuentas y datos ficticios: Auth, MFA, RLS, originales, historial, numeración, CAS y revocación de nuevos accesos. | Preparar cuentas humanas de prueba si se necesitan. No se han copiado datos reales ni configurado SMTP, Edge de correo o cron. El ensayo no sustituye la recuperación completa de producción. |
 | 9. Publicación | CI remota correcta, revisión de secretos y dependencias, tres controles obligatorios, `main` protegido incluso para administradores y entorno de publicación restringido. | Aplicar el procedimiento de revisión y vuelta atrás en cada cambio; mantener compatibles los contratos de servidor. |
 
 ## Destino de las copias autorizado

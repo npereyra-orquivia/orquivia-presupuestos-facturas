@@ -40,11 +40,15 @@ Las herramientas de captura, verificación y recuperación documentan su alcance
 
 ## Pendiente antes de declarar completada la operación
 
-1. Comprobar personalmente los factores y medios de recuperación de Supabase y correo. No se han acreditado ni sustituido por los del portal o GitHub. Seguir [ACCESS-RECOVERY.md](ACCESS-RECOVERY.md).
+1. Comprobar los medios de recuperación de Supabase y la protección del correo. El autenticador de Supabase fue añadido por la titular y verificado posteriormente el mismo día; queda pendiente su segunda vía de recuperación. Seguir [ACCESS-RECOVERY.md](ACCESS-RECOVERY.md).
 2. Preparar por un canal seguro las credenciales y la configuración necesarias para una captura completa de PostgreSQL, Auth, Vault y archivos, y verificarla. No introducir secretos en Git ni en la documentación pública.
 3. Obtener una autorización OAuth separada y limitada para Drive si se desea automatizar las copias, comprobar el destino restringido y completar una subida y descarga reales con ese mecanismo. La autorización de la subida manual no sustituye ese consentimiento.
 4. Realizar y documentar una **restauración completa en un destino aislado**, con correo y tareas de producción bloqueados. Verificar cuentas, MFA, permisos, numeración y originales, además de la integridad del contenedor.
-5. Crear y comprobar un backend de staging independiente antes de usarlo para pruebas reales. El código de validación y el aviso visual de staging no crean ese entorno ni lo aíslan por sí solos.
+5. Mantener separado el backend de staging que ya se creó y comprobó con 36 pruebas reales y datos ficticios. No trasladar allí SMTP, cron ni usuarios reales como consecuencia de ese ensayo. Queda pendiente el ensayo distinto de restauración completa.
 6. Completar la revisión de cuentas técnicas, el eventual buzón propio para el remitente automático y el circuito de avisos de fallos. La supervisión pública no cubre por sí sola un trabajo que nunca llegó a iniciarse.
 
-Los pasos que requieren identidad, factores, credenciales o consentimiento los completa la titular mediante el canal del servicio correspondiente. Hasta que exista evidencia del ensayo y de la ejecución autorizada, no indicar que las copias completas, la recuperación o staging están operativos.
+El ensayo del backend independiente comprobó dos sesiones MFA reales, permisos, archivos, historial y una carrera de guardados con exactamente un avance y un HTTP 409 para la otra sesión. Las 47 comprobaciones SQL nuevas verifican además que la migración 016 no altera datos ni permisos. El total local es de 692 comprobaciones SQL y 386 pruebas de aplicación correctas, con una prueba de symlinks omitida por permisos de Windows.
+
+Un archivo entregado durante un acceso autorizado puede conservarse en la caché por usuaria; la revocación se comprobó con una petición nueva sin reutilizar esa respuesta y con la denegación de nuevas URLs firmadas. Las URLs ya emitidas y las copias descargadas tienen sus propios límites y no se retiran prometiendo revocación instantánea.
+
+Los pasos que requieren identidad, factores, credenciales o consentimiento los completa la titular mediante el canal del servicio correspondiente. Hasta que exista evidencia del ensayo completo y de la ejecución autorizada, no indicar que las copias completas o la recuperación del sistema están operativas.
