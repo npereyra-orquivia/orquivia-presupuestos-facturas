@@ -130,7 +130,7 @@ test('archive and key-file symlinks are rejected where platform permits creating
   await assert.rejects(main(['verify', '--file', f.file, '--key-file', keyLink], {}), { code: 'CHECKPOINT_KEY_FILE_INVALID' });
 });
 
-test('CLI refuses key values, unknown/duplicate flags, URLs and unwanted verify destinations', async t => {
+test('CLI rejects unsupported arguments, URLs and unwanted verify destinations', async t => {
   const f = await fixture(t);
   for (const argv of [[], ['create'], ['verify'], ['extract', '--file', f.file],
     ['verify', '--file', f.file, '--key', 'SECRET-DO-NOT-PRINT'],
