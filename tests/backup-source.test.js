@@ -87,10 +87,14 @@ test('tool subprocess errors never forward stderr or credentials and use no shel
   assert.deepEqual(captured.args, ['--safe']); assert.equal(captured.options.shell, false); assert.equal(captured.options.windowsHide, true);
 });
 
-test('recovery package needs explicit complete configuration and a quiet capture acknowledgement', () => {
+test('recovery package needs complete configuration and explicit drift checks or the legacy quiet acknowledgement', () => {
   const good = { edgeSecrets: {}, authSmtp: {}, storageConfiguration: {}, edgeFunctions: [], verifiedAt: '2026-10-26T12:00:00Z', confirmedComplete: true, confirmedQuietCapture: true };
   assert.deepEqual(recoveryPackage(JSON.stringify(good)), good);
+  const scheduled = { ...good, captureMode: 'drift-checked', confirmedQuietCapture: false };
+  assert.deepEqual(recoveryPackage(JSON.stringify(scheduled)), scheduled);
   for (const patch of [{ confirmedComplete: false }, { confirmedQuietCapture: false }, { edgeSecrets: null }, { verifiedAt: 'invalid' }, { authSmtp: null }, { edgeFunctions: null }]) assert.throws(() => recoveryPackage(JSON.stringify({ ...good, ...patch })), { code: 'BACKUP_RECOVERY_CONFIGURATION_REQUIRED' });
+  assert.throws(() => recoveryPackage(JSON.stringify({ ...scheduled, confirmedComplete: false })), { code: 'BACKUP_RECOVERY_CONFIGURATION_REQUIRED' });
+  assert.throws(() => recoveryPackage(JSON.stringify({ ...good, captureMode: 'skip-checks' })), { code: 'BACKUP_RECOVERY_CONFIGURATION_REQUIRED' });
 });
 
 test('source capture includes real database, roles, portable Vault values and all configuration components', async () => {

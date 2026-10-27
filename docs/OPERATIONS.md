@@ -10,19 +10,19 @@ La dirección del portal sigue siendo `https://npereyra-orquivia.github.io/orqui
 
 ## Estado de preparación de los puntos 1–9
 
-Esta tabla describe la preparación de la ampliación del **26 de octubre de 2026**. La presencia de código no acredita su activación ni una ejecución real satisfactoria. Actualizar la evidencia al terminar cada paso.
+Estado actualizado el **27 de octubre de 2026**, con la interfaz 1.5.0 publicada y la referencia anterior 1.4.1 conservada. La presencia de código no acredita su activación ni una ejecución real satisfactoria. El detalle de la evidencia está en [SECURITY-REVIEW-2026-10-27.md](SECURITY-REVIEW-2026-10-27.md).
 
 | Punto | Preparación disponible | Activación o evidencia que falta |
 |---|---|---|
-| 1. Copias completas | Herramienta cifrada y procedimiento para capturar base de datos, originales y configuración. | Configurar credenciales y clave por un canal seguro; capturar, verificar y guardar una copia real fuera del proyecto. La ejecución diaria y la subida automática no están acreditadas. |
-| 2. Recuperación | Verificación de integridad del contenedor y plan de restauración aislada. | Ensayo completo con datos reales, acceso, numeración y originales, en un destino aislado. Una verificación criptográfica no es un ensayo de recuperación. |
-| 3. Producción | Revisión parcial del panel de Supabase y controles de acceso en código. | Terminar comprobación de Auth, esquemas expuestos, Storage y permisos del proyecto. |
-| 4. Cuentas técnicas | Procedimiento de acceso, bajas y recuperación documentado. | Las titulares deben comprobar sus propios factores y medios de recuperación de GitHub, Supabase y correo. |
+| 1. Copias completas | Motor cifrado y workflow diario desactivado. Exportación operativa y código 1.4.1 guardados en Drive restringido, con descarga de vuelta verificada. | Preparar credenciales y autorización separada de Drive; capturar la base de datos, Auth, originales y configuración completos. La copia parcial no los sustituye. |
+| 2. Recuperación | Descifrado y extracción reales de los cuatro archivos del respaldo parcial comprobados; herramientas offline guardadas junto al contenedor. | Ensayo completo con datos reales, acceso, numeración y originales, en un destino aislado. La extracción de archivos no restaura el sistema. |
+| 3. Producción | Auth, URLs, esquemas expuestos, RLS, membresías y buckets privados comprobados mediante panel y metadatos reales. Dependencia de correo parcheada. | Revisar advertencias específicas sin retirar permisos de funciones necesarias; repetir auditoría tras cambios de servidor. |
+| 4. Cuentas técnicas | Procedimiento de acceso, bajas y recuperación. MFA de GitHub activado por la titular y comprobado en el panel. | Comprobar factores y medios de recuperación de Supabase y correo, y custodia separada de la clave de respaldo. |
 | 5. Remitente automático | El portal ya utiliza `acceso@orquivia.com` como remitente de acceso. | Confirmar si continúa como alias de Nicole y, si se decide separarlo, crear un buzón y configurar su credencial propia con intervención de su titular. |
-| 6. Supervisión | Comprobador público y workflow preparados. | Publicarlos en `main`, comprobar una ejecución y la recepción de avisos. No cubre automáticamente errores autenticados, SMTP, cron ni copias. |
-| 7. Capacidad | Panel de administración preparado con datos cargados, límites y tamaño declarado de archivos. | Comprobar la interfaz publicada. La cuota total de Supabase y la última copia requieren evidencia del servicio; no deben mostrarse como correctas sin ella. |
+| 6. Supervisión | Workflow publicado cada seis horas; ejecución manual remota correcta para portal, recursos y Auth. | Comprobar la recepción de avisos de fallo. No cubre automáticamente errores autenticados, SMTP, cron ni copias. |
+| 7. Capacidad | Panel publicado con datos cargados, límites y tamaño declarado de archivos; diseño comprobado con datos ficticios. | Comprobar la sesión autorizada publicada. La cuota total y la última copia requieren evidencia del servicio; el panel las mantiene pendientes. |
 | 8. Pruebas separadas | Suites con datos ficticios e infraestructura en memoria. | Un backend independiente con Auth y Storage reales; configurar aislamiento y bloqueo de correos antes de usarlo. Una URL distinta contra producción no es aislamiento. |
-| 9. Publicación | CI ampliada para propuestas, pruebas SQL, revisión de secretos y dependencias. | Comprobar su ejecución remota, protección de `main`, entorno de publicación y procedimiento de vuelta atrás. |
+| 9. Publicación | CI remota correcta, revisión de secretos y dependencias, tres controles obligatorios, `main` protegido incluso para administradores y entorno de publicación restringido. | Aplicar el procedimiento de revisión y vuelta atrás en cada cambio; mantener compatibles los contratos de servidor. |
 
 ## Destino de las copias autorizado
 
@@ -44,7 +44,7 @@ En el panel consultado el 26 de octubre de 2026:
 
 Revisar cada advertencia contra la definición y los permisos reales antes de cambiarla. `rls_auto_enable()` es una función de trigger: comprobar su tipo, los triggers que la usan y los permisos necesarios; no alterar automáticamente esos objetos. No mover extensiones ni activar opciones de pago sin analizar el impacto y obtener la autorización correspondiente.
 
-En Sign In / Providers se verificó que el registro público, el enlace manual de identidades y las sesiones anónimas estaban desactivados, y la confirmación de correo activada. Todavía no se han acreditado las URLs de recuperación, límites de Auth, caducidad de JWT, MFA de las cuentas técnicas o exposición de esquemas. `scripts/operations/audit.sql` permite obtener metadatos agregados sin extraer registros financieros ni secretos; el resto requiere revisar las pantallas pertinentes.
+El 27 de octubre se completó la comprobación de URLs, límites de Auth, JWT y exposición de esquemas. El registro público, el enlace manual de identidades y las sesiones anónimas están desactivados; la confirmación de correo está activada. Las dos membresías del portal requieren MFA y tienen un factor verificado. Los metadatos no muestran tablas públicas sin RLS, escritura directa de aplicación para `anon`/`authenticated`, RPC anónimas de aplicación ni buckets públicos. El esquema privado no está expuesto en la Data API. El detalle y las limitaciones están en el registro de revisión; no se han cambiado datos financieros.
 
 ## Publicar una ampliación
 

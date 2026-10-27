@@ -53,4 +53,8 @@ Las cuentas técnicas y los secretos no se exportan a documentación pública. U
 
 ## Estado de comprobación
 
-La revisión del 26 de octubre de 2026 confirmó un único Owner en la organización de Supabase. No comprobó ni cambió los factores de las cuentas técnicas, sus códigos de recuperación, las contraseñas de las titulares o los permisos de GitHub. Este documento es el procedimiento; no acredita que esas acciones personales se hayan completado.
+La revisión del 26 de octubre de 2026 confirmó un único Owner en la organización de Supabase. La comprobación del 27 de octubre confirmó que las dos membresías activas del portal exigen MFA y que ambas cuentas tienen un factor verificado. Son accesos distintos de los paneles técnicos.
+
+En GitHub se comprobó que `main` exige una propuesta de cambio y tres comprobaciones obligatorias con la rama actualizada, aplica la protección a administradores y prohíbe forzar o borrar la rama. **El segundo factor de la cuenta propietaria de GitHub está verificado activo:** la pantalla de seguridad muestra la aplicación autenticadora configurada y como método preferido. También muestra los códigos de recuperación como consultados; no se abrieron ni leyeron sus valores durante la comprobación. No se han acreditado los factores ni los medios de recuperación de Supabase y correo, ni se han cambiado contraseñas o códigos de las titulares como parte de esta revisión.
+
+La clave del respaldo cifrado se conserva separada de la carpeta restringida de Drive. La descarga y verificación del respaldo parcial no acredita una recuperación completa de cuentas y datos. Este procedimiento no declara completadas las acciones personales pendientes; el alcance comprobado y las limitaciones figuran en [la revisión del 27 de octubre](SECURITY-REVIEW-2026-10-27.md).
