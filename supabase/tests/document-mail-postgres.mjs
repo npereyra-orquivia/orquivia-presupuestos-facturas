@@ -246,6 +246,7 @@ try {
   const historicalJobs=await query("select id,status,encode(raw_message,'base64') raw,message_id,pdf_hash from orquivia_private.mail_jobs order by id");
   const attachmentsWorkspace=(await query('select state,version from public.orquivia_team_workspaces where organization_id=$1',[org]))[0];
   await db.exec(await readFile(new URL('../migrations/202610260015_invoice_mail_attachments.sql',import.meta.url),'utf8'));
+  await db.exec(await readFile(new URL('../migrations/202610270016_rpc_conflict_http.sql',import.meta.url),'utf8'));
   equal(await query("select id,status,encode(raw_message,'base64') raw,message_id,pdf_hash from orquivia_private.mail_jobs order by id"),historicalJobs);
   equal((await query('select state,version from public.orquivia_team_workspaces where organization_id=$1',[org]))[0],attachmentsWorkspace);
   equal((await query('select count(*)::int count from orquivia_private.mail_jobs where transient_message'))[0].count,0);

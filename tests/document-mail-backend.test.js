@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createDocumentMailBackend } from '../src/document-mail-backend.js';
+import { createDocumentMailHandler } from '../supabase/functions/_shared/document-mail-handler.js';
 
 test('a mailbox response from an old login cannot enter the new account',async()=>{
   let user={id:'owner'},release,adopted=0;
@@ -52,4 +53,33 @@ test('composer cannot invoke the function before MFA verification',async()=>{
   const mail=createDocumentMailBackend({client:{functions:{invoke:async()=>{++calls;return {data:{},error:null};}}},
     requireUser:async()=>{throw Object.assign(Error('MFA required'),{code:'MFA_REQUIRED'});},getWorkspace:()=>({organizationId:'org'}),getVersion:()=>1,enqueue:fn=>fn(),adoptWorkspace:()=>{}});
   await assert.rejects(mail.composer('quote'),error=>error.code==='MFA_REQUIRED');assert.equal(calls,0);
+});
+
+test('modern and legacy database profile conflicts keep a readable Edge error and preserve the edited signature',async()=>{
+  const user={id:'10000000-0000-4000-8000-000000000001',email:'owner@example.test'},organizationId='20000000-0000-4000-8000-000000000001';
+  const signature={name:'Owner edited locally',role:'Dirección',phone:'+34 600 000 000'};
+  const jwt=`header.${Buffer.from(JSON.stringify({sub:user.id,aal:'aal2',exp:Math.floor(Date.now()/1000)+3600})).toString('base64url')}.signature`;
+  for(const databaseCode of ['PT409','40001']){
+    const calls=[];let adopted=0;
+    const handler=createDocumentMailHandler({db:{rpc:async(name,parameters)=>{
+      calls.push({name,parameters});
+      if(name==='orquivia_mail_profile')return {data:{email:user.email,connected:true,signature:{name:'Server original',role:'',phone:''},version:2},error:null};
+      assert.equal(name,'orquivia_mail_save_profile');assert.equal(parameters.p_expected_version,1);
+      assert.deepEqual(parameters.p_signature,signature);
+      return {data:null,error:{code:databaseCode,message:'PROFILE_CONFLICT',details:'private provider data'}};
+    }},auth:{getUser:async()=>({data:{user},error:null})},mail:{},renderDocumentPdf:()=>{throw Error('A profile conflict cannot render or send a document');}});
+    const mail=createDocumentMailBackend({client:{functions:{invoke:async(_name,args)=>{
+      const response=await handler(new Request('https://example.test',{method:'POST',headers:{authorization:`Bearer ${jwt}`,origin:'https://npereyra-orquivia.github.io'},body:JSON.stringify(args.body)}));
+      assert.equal(response.status,409,'The Edge protocol exposes the same business conflict for either database SQLSTATE');
+      assert.deepEqual(await response.clone().json(),{error:'PROFILE_CONFLICT'});
+      return {data:null,error:{context:response}};
+    }}},requireUser:async()=>user,getWorkspace:()=>({organizationId}),getVersion:()=>7,enqueue:fn=>fn(),adoptWorkspace:()=>++adopted});
+    const draft={expectedVersion:1,signature:structuredClone(signature)},retained=structuredClone(draft);
+    await assert.rejects(mail.signature(draft),error=>{
+      assert.equal(error.code,'PROFILE_CONFLICT');assert.equal(error.message,'Tu configuración cambió en otra pestaña. Vuelve a cargarla.');
+      assert.ok(!error.message.includes('private provider'));return true;
+    });
+    assert.deepEqual(draft,retained);assert.equal(adopted,0);
+    assert.deepEqual(calls.map(call=>call.name),['orquivia_mail_profile','orquivia_mail_save_profile']);
+  }
 });
