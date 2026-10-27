@@ -1,6 +1,6 @@
 // Real PostgreSQL checks in local PGlite. Synthetic data only; no network or
 // production credentials. Run: node supabase/tests/prepared-quotes-postgres.mjs
-import { PGlite } from '../.verification/node_modules/@electric-sql/pglite/dist/index.js';
+import { PGlite } from '@electric-sql/pglite';
 import { readFile } from 'node:fs/promises';
 import assert from 'node:assert/strict';
 

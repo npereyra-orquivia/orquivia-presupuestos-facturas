@@ -1,0 +1,205 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { createHash, randomBytes } from 'node:crypto';
+import { mkdtemp, readFile, writeFile, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { writeArchive, bufferEntry } from '../scripts/backup/archive.mjs';
+import { DRIVE_SCOPE, DRIVE_UPLOAD_LIMITS, driveConfiguration, validateSessionURL, uploadBackup, main } from '../scripts/backup/drive-upload.mjs';
+
+const FOLDER = 'fixture_private_folder_1234', FILE_ID = 'fixture_uploaded_file_1234';
+const SESSION = 'https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable&upload_id=fixture_session_12345';
+const ENV = { ORQUIVIA_DRIVE_UPLOAD_ENABLED: 'true', ORQUIVIA_DRIVE_FOLDER_ID: FOLDER,
+  ORQUIVIA_DRIVE_CLIENT_ID: '123456789-test.apps.googleusercontent.com', ORQUIVIA_DRIVE_CLIENT_SECRET: 'fixture-only-client-secret',
+  ORQUIVIA_DRIVE_REFRESH_TOKEN: 'fixture-only-refresh-token-not-real' };
+const json = (value, status = 200) => new Response(JSON.stringify(value), { status, headers: { 'content-type': 'application/json' } });
+
+async function fixture(t, { incomplete = false, large = false } = {}) {
+  const root = await mkdtemp(join(tmpdir(), 'orquivia-drive-test-'));
+  t.after(async () => { assert.ok(root.startsWith(join(tmpdir(), 'orquivia-drive-test-'))); await rm(root, { recursive: true, force: true }); });
+  const key = randomBytes(32), file = join(root, 'orquivia-fixture.orqbackup');
+  const entries = [bufferEntry('database.dump', 'PGDMP-fake-test-only'), bufferEntry('database-roles.sql', '-- fixture'), bufferEntry('source.tar', 'source-fixture'),
+    ...['auth', 'vault-secrets', 'recovery'].map(name => bufferEntry(`configuration/${name}.json`, '{}')),
+    ...['buckets', 'inventory'].map(name => bufferEntry(`storage/${name}.json`, '[]'))];
+  if (large) entries.push(bufferEntry('large/private.dat', Buffer.alloc(7 * 1024 * 1024, 123)));
+  await writeArchive({ output: file, key, source: { projectRef: 'abcdefghijklmnopqrst', storageObjects: 0 }, entries: incomplete ? entries.slice(0, 2) : entries });
+  const bytes = await readFile(file);
+  const env = { ...ENV, ORQUIVIA_BACKUP_KEY: key.toString('base64') };
+  return { root, file, bytes, env, key };
+}
+
+function service(f, { token, folder, permissions, session = SESSION, uploaded, chunk, postPermissions, responseFailure } = {}) {
+  const calls = []; let folderCalls = 0, permissionCalls = 0, uploadCalls = 0;
+  const finished = { id: FILE_ID, name: 'orquivia-fixture.orqbackup', mimeType: 'application/octet-stream', trashed: false,
+    parents: [FOLDER], size: String(f.bytes.length), md5Checksum: createHash('md5').update(f.bytes).digest('hex'), sha256Checksum: createHash('sha256').update(f.bytes).digest('hex'), ...uploaded };
+  const fetcher = async (url, options) => {
+    calls.push({ url, options });
+    if (responseFailure) return responseFailure(url, options);
+    if (url === 'https://oauth2.googleapis.com/token') return token || json({ access_token: 'fixture-only-access-token-not-real', token_type: 'Bearer', expires_in: 3600, scope: DRIVE_SCOPE });
+    if (url.startsWith(`https://www.googleapis.com/drive/v3/files/${FOLDER}?`)) {
+      folderCalls++; return folder || json({ id: FOLDER, mimeType: 'application/vnd.google-apps.folder', trashed: false, capabilities: { canAddChildren: true } });
+    }
+    if (url.includes('/permissions?')) {
+      permissionCalls++;
+      return (permissionCalls > 1 && postPermissions) || permissions || json({ permissions: [{ id: 'fixture-owner', type: 'user', role: 'owner' }] });
+    }
+    if (url.startsWith('https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable&fields=')) return new Response(null, { status: 200, headers: { location: session } });
+    if (url === SESSION) {
+      uploadCalls++;
+      if (chunk) return chunk({ url, options, uploadCalls, finished });
+      return json(finished);
+    }
+    throw new Error('Unexpected fixture destination');
+  };
+  return { fetcher, calls, finished };
+}
+
+test('Drive helper remains disabled without explicit authorization and accepts only complete narrow config', () => {
+  assert.throws(() => driveConfiguration({ ...ENV, ORQUIVIA_DRIVE_UPLOAD_ENABLED: '' }), { code: 'DRIVE_UPLOAD_NOT_AUTHORIZED' });
+  assert.equal(driveConfiguration(ENV).folderId, FOLDER);
+  for (const extra of [{ ORQUIVIA_DRIVE_FOLDER_ID: `https://drive.google.com/${FOLDER}` }, { ORQUIVIA_DRIVE_CLIENT_SECRET: 'bad\nsecret' }, { ORQUIVIA_DRIVE_REFRESH_TOKEN: '' }]) {
+    assert.throws(() => driveConfiguration({ ...ENV, ...extra }), { code: 'DRIVE_CONFIGURATION_INVALID' });
+  }
+});
+
+test('session URLs cannot redirect the token or ciphertext to another host, path, port or query', () => {
+  assert.equal(validateSessionURL(SESSION), SESSION);
+  for (const value of [SESSION.replace('www.googleapis.com', 'evil.example'), SESSION.replace('https:', 'http:'), SESSION.replace('/upload/drive/v3/files', '/other'), `${SESSION}&other=1`, `${SESSION}&upload_id=duplicate`, `${SESSION}#fragment`, SESSION.replace('www.googleapis.com', 'user:pass@www.googleapis.com'), SESSION.replace('www.googleapis.com', 'www.googleapis.com:444')]) {
+    assert.throws(() => validateSessionURL(value), { code: 'DRIVE_SESSION_URL_INVALID' });
+  }
+});
+
+test('only a verified complete encrypted archive is uploaded to the configured folder without changing sharing', async t => {
+  const f = await fixture(t), mock = service(f);
+  const result = await uploadBackup({ file: f.file, env: f.env, fetcher: mock.fetcher });
+  assert.deepEqual(result, { status: 'uploaded-and-verified', encryptedBytes: f.bytes.length, checksumVerified: true, permissionsChecked: true, recoveryTested: false });
+  const create = mock.calls.find(call => call.options.method === 'POST' && call.url.includes('/upload/'));
+  assert.deepEqual(JSON.parse(create.options.body), { name: 'orquivia-fixture.orqbackup', mimeType: 'application/octet-stream', parents: [FOLDER] });
+  const put = mock.calls.find(call => call.options.method === 'PUT');
+  assert.deepEqual(put.options.body, f.bytes);
+  assert.equal(put.options.body.includes(Buffer.from('PGDMP-fake-test-only')), false);
+  assert.equal(put.options.body.includes(Buffer.from(f.env.ORQUIVIA_BACKUP_KEY)), false);
+  assert.ok(mock.calls.every(call => call.options.redirect === 'manual' && call.options.credentials === 'omit'));
+  assert.ok(mock.calls.every(call => !['PATCH', 'DELETE'].includes(call.options.method)));
+  assert.ok(mock.calls.filter(call => call.url.includes('/permissions')).every(call => call.options.method === 'GET'));
+  assert.doesNotMatch(JSON.stringify(result), /token|fixture_private|uploaded_file|client_secret|BACKUP_KEY/);
+});
+
+test('plaintext, invalid archives, wrong keys and incomplete recovery contents make no Google request', async t => {
+  for (const variant of ['plaintext', 'key', 'incomplete']) {
+    const f = await fixture(t, { incomplete: variant === 'incomplete' }); let calls = 0;
+    if (variant === 'plaintext') await writeFile(f.file, 'Secret fixture plaintext'.repeat(10));
+    if (variant === 'key') f.env.ORQUIVIA_BACKUP_KEY = randomBytes(32).toString('base64');
+    await assert.rejects(uploadBackup({ file: f.file, env: f.env, fetcher: () => { calls++; } }));
+    assert.equal(calls, 0);
+  }
+});
+
+test('OAuth token refresh must confirm exactly drive.file; broad, extra or missing scopes fail closed', async t => {
+  const f = await fixture(t);
+  for (const scope of [undefined, 'https://www.googleapis.com/auth/drive', `${DRIVE_SCOPE} openid`, `${DRIVE_SCOPE} ${DRIVE_SCOPE}`]) {
+    const mock = service(f, { token: json({ access_token: 'fixture-only-access-token', token_type: 'Bearer', expires_in: 3600, scope }) });
+    await assert.rejects(uploadBackup({ file: f.file, env: f.env, fetcher: mock.fetcher }), { code: 'DRIVE_SCOPE_INVALID' });
+    assert.equal(mock.calls.length, 1);
+  }
+});
+
+test('public or domain-wide folder permissions and unsupported shared-drive targets prevent upload creation', async t => {
+  const f = await fixture(t);
+  for (const type of ['anyone', 'domain', 'unknown']) {
+    const mock = service(f, { permissions: json({ permissions: [{ id: 'broad', type, role: 'reader' }] }) });
+    await assert.rejects(uploadBackup({ file: f.file, env: f.env, fetcher: mock.fetcher }), { code: 'DRIVE_FOLDER_SHARING_UNSAFE' });
+    assert.equal(mock.calls.some(call => call.url.includes('/upload/')), false);
+  }
+  const mock = service(f, { folder: json({ id: FOLDER, mimeType: 'application/vnd.google-apps.folder', trashed: false, driveId: 'shared-drive', capabilities: { canAddChildren: true } }) });
+  await assert.rejects(uploadBackup({ file: f.file, env: f.env, fetcher: mock.fetcher }), { code: 'DRIVE_FOLDER_INVALID' });
+});
+
+test('all permission pages must be inspectable and free of broad sharing before any upload', async t => {
+  const f = await fixture(t), original = service(f); let pageCalls = 0;
+  const fetcher = async (url, options) => {
+    if (url.includes('/permissions?')) {
+      pageCalls++;
+      if (pageCalls === 1) return json({ nextPageToken: 'fixture-next-page', permissions: [{ id: 'owner', type: 'user', role: 'owner' }] });
+      assert.equal(new URL(url).searchParams.get('pageToken'), 'fixture-next-page');
+      return json({ permissions: [{ id: 'domain', type: 'domain', role: 'reader' }] });
+    }
+    return original.fetcher(url, options);
+  };
+  await assert.rejects(uploadBackup({ file: f.file, env: f.env, fetcher }), { code: 'DRIVE_FOLDER_SHARING_UNSAFE' });
+  assert.equal(pageCalls, 2);
+  assert.equal(original.calls.some(call => call.url.includes('/upload/')), false);
+  const hidden = service(f, { permissions: json({ error: { message: 'private diagnostic' } }, 403) });
+  await assert.rejects(uploadBackup({ file: f.file, env: f.env, fetcher: hidden.fetcher }), { code: 'DRIVE_METADATA_UNAVAILABLE' });
+});
+
+test('a resumable session at an unapproved destination never receives Authorization or file bytes', async t => {
+  const f = await fixture(t), mock = service(f, { session: 'https://evil.example/upload?token=fixture' });
+  await assert.rejects(uploadBackup({ file: f.file, env: f.env, fetcher: mock.fetcher }), { code: 'DRIVE_SESSION_URL_INVALID' });
+  assert.ok(mock.calls.every(call => !call.url.includes('evil.example')));
+  assert.ok(mock.calls.every(call => call.options.method !== 'PUT'));
+});
+
+test('network uncertainty asks the same session for the accepted offset before continuing ciphertext', async t => {
+  const f = await fixture(t, { large: true });
+  assert.ok(f.bytes.length > DRIVE_UPLOAD_LIMITS.chunk);
+  const accepted = 4 * 1024 * 1024;
+  const mock = service(f, { chunk({ options, uploadCalls, finished }) {
+    if (uploadCalls === 1) throw new Error('fixture secret diagnostic');
+    if (uploadCalls === 2) {
+      assert.equal(options.headers['Content-Range'], `bytes */${f.bytes.length}`);
+      assert.equal(options.body.length, 0);
+      return new Response(null, { status: 308, headers: { range: `bytes=0-${accepted - 1}` } });
+    }
+    assert.equal(options.headers['Content-Range'], `bytes ${accepted}-${f.bytes.length - 1}/${f.bytes.length}`);
+    assert.deepEqual(options.body, f.bytes.subarray(accepted));
+    return json(finished);
+  } });
+  assert.equal((await uploadBackup({ file: f.file, env: f.env, fetcher: mock.fetcher })).status, 'uploaded-and-verified');
+  assert.equal(mock.calls.filter(call => call.options.method === 'POST' && call.url.includes('/upload/')).length, 1);
+});
+
+test('invalid upload ranges and stalled progress fail instead of skipping or duplicating ciphertext', async t => {
+  const f = await fixture(t);
+  for (const range of [`bytes=0-${f.bytes.length + 10}`, 'bytes=1-10', 'bytes=0-not-a-number']) {
+    const mock = service(f, { chunk: () => new Response(null, { status: 308, headers: { range } }) });
+    await assert.rejects(uploadBackup({ file: f.file, env: f.env, fetcher: mock.fetcher }), { code: 'DRIVE_UPLOAD_RANGE_INVALID' });
+  }
+  const stalled = service(f, { chunk: () => new Response(null, { status: 308 }) });
+  await assert.rejects(uploadBackup({ file: f.file, env: f.env, fetcher: stalled.fetcher }), { code: 'DRIVE_UPLOAD_STALLED' });
+  assert.equal(stalled.calls.filter(call => call.options.method === 'PUT').length, 3);
+});
+
+test('wrong remote checksum, wrong parent, changed privacy or an uncertain retry never confirms success', async t => {
+  const f = await fixture(t);
+  for (const uploaded of [{ md5Checksum: '0'.repeat(32) }, { parents: ['different_folder_1234'] }, { sha256Checksum: '0'.repeat(64) }]) {
+    const mock = service(f, { uploaded });
+    await assert.rejects(uploadBackup({ file: f.file, env: f.env, fetcher: mock.fetcher }), { code: 'DRIVE_UPLOAD_VERIFICATION_FAILED' });
+  }
+  const privacy = service(f, { postPermissions: json({ permissions: [{ type: 'anyone', role: 'reader' }] }) });
+  await assert.rejects(uploadBackup({ file: f.file, env: f.env, fetcher: privacy.fetcher }), { code: 'DRIVE_FOLDER_SHARING_UNSAFE' });
+  assert.equal(privacy.calls.some(call => call.options.method === 'DELETE'), false);
+  const uncertain = service(f, { chunk() { throw new Error('fixture private response'); } });
+  await assert.rejects(uploadBackup({ file: f.file, env: f.env, fetcher: uncertain.fetcher }), { code: 'DRIVE_UPLOAD_OUTCOME_UNCERTAIN' });
+});
+
+test('redirects, oversized responses, hung fetches and private diagnostics stay bounded and redacted', async t => {
+  const f = await fixture(t);
+  const failures = [
+    () => new Response(null, { status: 302, headers: { location: 'https://evil.example/?private=fixture' } }),
+    () => new Response('x', { headers: { 'content-type': 'application/json', 'content-length': String(DRIVE_UPLOAD_LIMITS.json + 1) } }),
+    () => { throw new Error('PRIVATE_DO_NOT_PRINT https://evil.example/?token=fixture'); },
+    () => new Promise(() => {}),
+  ];
+  for (const responseFailure of failures) {
+    const mock = service(f, { responseFailure });
+    await assert.rejects(uploadBackup({ file: f.file, env: f.env, fetcher: mock.fetcher, timeoutMs: 20 }), failure => {
+      assert.match(failure.code, /^DRIVE_[A-Z_]+$/); assert.doesNotMatch(failure.message, /PRIVATE|https:|token=|fixture/); return true;
+    });
+    assert.equal(mock.calls.length, 1);
+  }
+});
+
+test('CLI accepts only an explicit file argument, never secrets on the command line', async () => {
+  for (const args of [[], ['--key', 'private'], ['--file', '/path', '--token', 'private']]) await assert.rejects(main(args, ENV), { code: 'DRIVE_ARGUMENT_INVALID' });
+});

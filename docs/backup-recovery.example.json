@@ -1,0 +1,9 @@
+{
+  "edgeFunctions": ["document-mail", "send-push-reminders"],
+  "edgeSecrets": {},
+  "authSmtp": {},
+  "storageConfiguration": {},
+  "verifiedAt": "2026-10-26T00:00:00Z",
+  "confirmedComplete": false,
+  "confirmedQuietCapture": false
+}

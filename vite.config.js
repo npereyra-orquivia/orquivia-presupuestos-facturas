@@ -1,11 +1,14 @@
-import { defineConfig } from 'vite';
+import { defineConfig, loadEnv } from 'vite';
+import { browserSecurityPolicy } from './scripts/security-policy.mjs';
 import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 
 // This endpoint exists only in the loopback development server. It is never
 // copied to GitHub Pages, and exposes no arbitrary filesystem paths.
+let configuredMode = 'production';
 const localImport = {
   name: 'orquivia-private-local-preview',
+  configResolved(config) { configuredMode = config.mode; },
   configureServer(server) {
     server.middlewares.use(async (req, res, next) => {
       if (req.url?.split('?')[0] !== '/__local-import') return next();
@@ -21,8 +24,8 @@ const localImport = {
   },
   transformIndexHtml(html, ctx) {
     const dev = !!ctx.server;
-    const connect = dev ? "'self' http://127.0.0.1:* ws://127.0.0.1:*" : "'self'";
-    const csp = `default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src ${connect} https://*.supabase.co wss://*.supabase.co; object-src 'none'; base-uri 'self'; form-action 'none'; frame-src 'none'; worker-src 'self' blob:; manifest-src 'self'`;
+    const env = loadEnv(configuredMode, process.cwd(), 'VITE_');
+    const csp = browserSecurityPolicy({ development:dev, supabaseURL:process.env.VITE_SUPABASE_URL || env.VITE_SUPABASE_URL || '' });
     return html.replace('<!-- SECURITY_POLICY -->', `<meta http-equiv="Content-Security-Policy" content="${csp}">`);
   },
 };

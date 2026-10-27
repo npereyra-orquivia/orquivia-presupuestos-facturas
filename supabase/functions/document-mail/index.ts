@@ -1,5 +1,5 @@
 import { createClient } from 'npm:@supabase/supabase-js@2';
-import nodemailer from 'npm:nodemailer@10.1.1';
+import nodemailer from 'npm:nodemailer@10.2.1';
 import { ImapFlow } from 'npm:imapflow@2.4.3';
 import { createArsysMail } from '../_shared/arsys-mail.js';
 import { createDocumentMailHandler } from '../_shared/document-mail-handler.js';

@@ -1,0 +1,24 @@
+.operations-health-heading{display:flex;align-items:baseline;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:12px}
+.operations-health-heading>span{font-size:10px;color:#788873;white-space:nowrap}
+.operations-health .settings-copy{margin-bottom:18px}
+.operations-health-resource>div{display:flex;align-items:baseline;justify-content:space-between;flex-wrap:wrap;gap:6px;font-size:11px}
+.operations-health-resource>div>strong{font-weight:500}
+.operations-health-resource>div>span{font-variant-numeric:tabular-nums;color:#64735d}
+.operations-health-resource meter{display:block;width:100%;height:12px;margin:9px 0 5px;accent-color:#608155}
+.operations-health-resource>small,.operations-health-note{display:block;font-size:10px;line-height:1.7;color:#788873}
+.operations-health-warning{padding:10px 12px;margin-top:12px;background:#fcf5e6;border:1px solid #e9dcb7;border-radius:7px;color:#826428;font-size:10px;line-height:1.7}
+.operations-health [data-capacity="warning"]>div>span,.operations-health [data-capacity="full"]>div>span,.operations-health [data-capacity="warning"] dd>small,.operations-health [data-capacity="full"] dd>small{color:#9c5733}
+.operations-health-details{border-top:1px solid var(--border);margin-top:16px;padding-top:13px}
+.operations-health-details>summary{font-size:11px;font-weight:500;cursor:pointer;color:#315c46;line-height:1.7}
+.operations-health-details dl{margin:12px 0}
+.operations-health-details dl>div{display:flex;justify-content:space-between;gap:12px;padding:8px 0;border-bottom:1px solid #edf0e9;font-size:10px;line-height:1.5}
+.operations-health-details dt{max-width:60%;overflow-wrap:anywhere}
+.operations-health-details dd{margin:0;text-align:right;font-variant-numeric:tabular-nums}
+.operations-health-details dd>small{display:block;color:#788873;font-size:9px}
+.operations-health-files{display:grid;gap:5px;font-size:11px;margin:15px 0 6px}
+.operations-health-files>strong{font-weight:500}
+.operations-health-files>span{font-size:10px;color:#64735d;font-variant-numeric:tabular-nums}
+.operations-health-verification{border-top:1px solid var(--border);margin-top:16px;padding-top:14px;font-size:11px;line-height:1.7}
+.operations-health-verification>strong{display:block;font-weight:500}
+.operations-health-verification>span{display:inline-block;color:#826428;background:#fcf5e6;border-radius:5px;padding:2px 7px;margin:7px 0}
+.operations-health-verification>p{font-size:10px;color:#788873}

@@ -1,7 +1,7 @@
 // Executes the real schema, CAS, audit and Storage policies in local PostgreSQL
 // (PGlite/WASM). All identities, amounts and receipt metadata are synthetic.
 // No network, production credentials, live Storage objects or live writes.
-import { PGlite } from '../.verification/node_modules/@electric-sql/pglite/dist/index.js';
+import { PGlite } from '@electric-sql/pglite';
 import { readFile } from 'node:fs/promises';
 import assert from 'node:assert/strict';
 
