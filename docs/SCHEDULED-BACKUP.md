@@ -7,7 +7,7 @@ El destino elegido hoy mediante una pestaña de Google Drive no autoriza acceso 
 ## Antes de activar
 
 1. Revisar y proteger el environment GitHub `orquivia-backup`, limitado a despliegues de `main` y a las personas autorizadas a gestionar sus secretos. La guarda del workflow y el wrapper también rechazan ramas, forks, eventos PR y ejecuciones fuera de Actions. No hay permiso de escritura en GitHub.
-2. Aprobar la conexión OAuth anterior y comprobar la carpeta My Drive restringida, sin acceso público ni compartición por dominio. La herramienta comprueba sus permisos antes y después; no los cambia. Conservar una lista de las personas autorizadas. No usar una carpeta de unidad compartida ni suponer que un enlace restringido basta para el cliente OAuth.
+2. Aprobar la conexión OAuth anterior y comprobar la carpeta My Drive restringida exclusivamente a las personas autorizadas, sin grupos ni acceso público o por dominio. Guardar su lista canónica en `ORQUIVIA_DRIVE_ALLOWED_EMAILS`: 1–20 direcciones ASCII en minúsculas, separadas por comas, sin espacios ni duplicados. La herramienta exige que el conjunto de permisos de personas coincida exactamente con esa lista; revisa la carpeta antes de la subida y la carpeta más el archivo al terminar, sin cambiar permisos. No usar una carpeta de unidad compartida ni suponer que un enlace restringido basta para el cliente OAuth.
 3. Preparar las credenciales de lectura privilegiada de Supabase, conexión directa o session pooler y paquete de recuperación completo. Mantener `verifiedAt` y secretos externos actualizados tras cada cambio; el paquete debe declarar `captureMode: "drift-checked"`. Nunca añadirlos al código ni al chat.
 4. Generar una clave independiente y guardar una segunda vía de recuperación en el gestor de contraseñas, separada de Drive. Cargar la clave de ejecución mediante GitHub Secrets. No puede recuperarse el archivo perdiendo esa clave.
 5. Realizar primero una captura manual, verificarla, subirla al destino autorizado y completar **un ensayo real de restauración aislada** conforme a [BACKUP-RECOVERY.md](BACKUP-RECOVERY.md). Registrar fecha, commit, duración, alcance, diferencias y resultado fuera del repositorio público. Una verificación del archivo o un plan de restauración no cumple este paso.
@@ -34,6 +34,7 @@ Secretos **del environment `orquivia-backup`**, no variables `VITE_`:
 - `ORQUIVIA_BACKUP_KEY`, `ORQUIVIA_BACKUP_DATABASE_URL`, `ORQUIVIA_BACKUP_SERVICE_ROLE_KEY` y `ORQUIVIA_BACKUP_ACCESS_TOKEN`.
 - `ORQUIVIA_BACKUP_RECOVERY_JSON`, con el paquete de recuperación real y revisado.
 - `ORQUIVIA_DRIVE_CLIENT_ID`, `ORQUIVIA_DRIVE_CLIENT_SECRET` y `ORQUIVIA_DRIVE_REFRESH_TOKEN`.
+- `ORQUIVIA_DRIVE_ALLOWED_EMAILS`, con la lista privada completa de personas autorizadas. No guardar sus direcciones reales en Git; no se admiten grupos aunque su dirección aparezca en la lista.
 
 Los secretos se inyectan únicamente en el paso de captura/subida. La preparación de herramientas y checkout no los reciben. El URL de origen está fijado al proyecto de producción esperado y el wrapper lo comprueba. TLS usa `verify-full` con la confianza del sistema; un fallo de certificado exige revisar la confianza, nunca desactivar TLS.
 

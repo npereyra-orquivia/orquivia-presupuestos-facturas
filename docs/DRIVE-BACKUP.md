@@ -22,12 +22,15 @@ Guardar estas variables en el almacén privado de secretos del ejecutor de copia
 | --- | --- |
 | `ORQUIVIA_DRIVE_UPLOAD_ENABLED` | Debe ser exactamente `true`, después de la autorización. |
 | `ORQUIVIA_DRIVE_FOLDER_ID` | Identificador de la carpeta de copias autorizada; no se admite una URL. |
+| `ORQUIVIA_DRIVE_ALLOWED_EMAILS` | Lista privada obligatoria de 1–20 personas: correos ASCII en minúsculas, separados por comas, sin espacios ni duplicados. |
 | `ORQUIVIA_DRIVE_CLIENT_ID` | Identificador de la aplicación OAuth de copias. |
 | `ORQUIVIA_DRIVE_CLIENT_SECRET` | Secreto de esa aplicación. |
 | `ORQUIVIA_DRIVE_REFRESH_TOKEN` | Token de actualización delegado por la titular. |
 | `ORQUIVIA_BACKUP_KEY` | Clave base64 de 32 bytes usada por la herramienta de copia. |
 
 La clave de recuperación debe conservarse también por separado en el medio privado elegido por la titular. No subirla junto con los archivos cifrados. No introducir secretos en argumentos de la línea de comandos.
+
+La lista de personas se guarda como secreto del ejecutor, nunca con direcciones reales en el repositorio. Su formato canónico es, por ejemplo, `owner@example.test,reviewer@example.test` (direcciones ficticias). Incluir a todas las personas que deban aparecer en los permisos, incluida la propietaria y la cuenta que sube el archivo. La carpeta y el archivo deben tener **exactamente ese conjunto**; una persona extra o una autorizada ausente impiden confirmar la copia. Si cambian las personas autorizadas, revisar tanto los permisos como la lista por el procedimiento de operadora; el helper no los ajusta.
 
 Ejecutar con Node.js 22 o posterior, usando un archivo generado por `scripts/backup/cli.mjs`:
 
@@ -40,7 +43,7 @@ El programa no crea la carpeta, no mueve archivos y no altera sus permisos. Solo
 ## Controles de destino y de subida
 
 - Comprueba que el destino existe, es una carpeta de Mi unidad, no está en la papelera y permite añadir archivos. Las unidades compartidas no están admitidas por este helper.
-- Comprueba todas las páginas visibles de permisos antes de crear el archivo y vuelve a revisar la carpeta y el archivo al terminar. Rechaza acceso `anyone`, de dominio, tipos desconocidos y permisos que no pueda comprobar. Conserva las personas y grupos que ya tengan acceso; no verifica quién pertenece a esos grupos.
+- Comprueba todas las páginas de permisos de la carpeta antes de crear el archivo y vuelve a revisar la carpeta y el archivo al terminar. Cada permiso debe ser de tipo `user`, incluir un `emailAddress` ASCII válido de la lista y tener rol `owner`, `writer`, `commenter` o `reader`. Normaliza a minúsculas las direcciones que devuelve Drive, sin colapsar alias. Al completar todas las páginas, el conjunto debe coincidir con la lista completa. Rechaza grupos, acceso `anyone`, de dominio, direcciones ausentes, personas extra, roles de unidades compartidas y cualquier permiso no comprobable. No concede, elimina ni corrige permisos. El archivo nuevo solo puede inspeccionarse después de existir; antes de su creación se comprueba la carpeta de la que heredará permisos.
 - Renueva credenciales solo en el endpoint OAuth oficial de Google. Envía el contenido cifrado únicamente al endpoint de subida de Drive autorizado y rechaza redirecciones y otras ubicaciones de sesión.
 - Usa una sesión reanudable, fragmentos de hasta 8 MiB y límites de tiempo, solicitudes y tamaño. Tras una respuesta de subida incierta pregunta a la misma sesión qué bytes recibió antes de continuar. Nunca crea automáticamente un segundo archivo como respuesta al fallo.
 - Contrasta el nombre, padre, tamaño y checksum binario devueltos por Drive con el archivo local. El MD5 se utiliza como checksum de transporte ofrecido por Drive; la autenticidad del respaldo procede de AES-GCM y de las verificaciones SHA-256 del contenedor. Contrasta también el SHA-256 de Drive cuando esté disponible.

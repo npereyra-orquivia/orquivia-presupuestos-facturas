@@ -16,8 +16,26 @@ const discard = body => { try { void body?.cancel().catch(() => {}); } catch {} 
 const equalHash = (a, b, size) => typeof a === 'string' && typeof b === 'string' && new RegExp(`^[a-f0-9]{${size}}$`).test(a)
   && new RegExp(`^[a-f0-9]{${size}}$`).test(b) && timingSafeEqual(Buffer.from(a, 'hex'), Buffer.from(b, 'hex'));
 
+function canonicalEmail(value) {
+  if (typeof value !== 'string' || value.length > 254 || /[^\x21-\x7e]/.test(value)) return null;
+  const email = value.toLowerCase(), parts = email.split('@'), local = parts[0], domain = parts[1];
+  if (parts.length !== 2 || !local || local.length > 64 || local.startsWith('.') || local.endsWith('.') || local.includes('..')
+    || !/^[a-z0-9.!#$%&'*+/=?^_`{|}~-]+$/.test(local) || !domain || domain.length > 253 || !domain.includes('.')
+    || !domain.split('.').every(label => /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(label))) return null;
+  return email;
+}
+
+function allowedEmailConfiguration(value) {
+  if (typeof value !== 'string' || value.length > 5099) throw error('DRIVE_ALLOWED_EMAILS_INVALID');
+  const emails = value.split(','), allowedEmails = new Set(emails);
+  if (emails.length < 1 || emails.length > 20 || allowedEmails.size !== emails.length
+    || emails.some(email => canonicalEmail(email) !== email)) throw error('DRIVE_ALLOWED_EMAILS_INVALID');
+  return allowedEmails;
+}
+
 export function driveConfiguration(env = {}) {
   if (env.ORQUIVIA_DRIVE_UPLOAD_ENABLED !== 'true') throw error('DRIVE_UPLOAD_NOT_AUTHORIZED');
+  const allowedEmails = allowedEmailConfiguration(env.ORQUIVIA_DRIVE_ALLOWED_EMAILS);
   const folderId = env.ORQUIVIA_DRIVE_FOLDER_ID, clientId = env.ORQUIVIA_DRIVE_CLIENT_ID;
   const clientSecret = env.ORQUIVIA_DRIVE_CLIENT_SECRET, refreshToken = env.ORQUIVIA_DRIVE_REFRESH_TOKEN;
   if (typeof folderId !== 'string' || !ID.test(folderId)
@@ -26,7 +44,7 @@ export function driveConfiguration(env = {}) {
     || typeof refreshToken !== 'string' || refreshToken.length < 20 || refreshToken.length > 8192 || /[^\x21-\x7e]/.test(refreshToken)) {
     throw error('DRIVE_CONFIGURATION_INVALID');
   }
-  return { folderId, clientId, clientSecret, refreshToken };
+  return { folderId, clientId, clientSecret, refreshToken, allowedEmails };
 }
 
 /** A resumable URL is a credential. It is followed only on this exact Google endpoint. */
@@ -105,17 +123,24 @@ const successJson = async response => {
   return jsonBody(response);
 };
 
-async function assertNoBroadSharing(id, token, request) {
-  let pageToken = ''; const seen = new Set();
+async function assertAllowedSharing(id, allowedEmails, token, request) {
+  let pageToken = ''; const seen = new Set(), actualEmails = new Set();
   for (let pages = 0; pages < 20; pages++) {
     const url = new URL(`${API}/files/${id}/permissions`);
-    url.searchParams.set('fields', 'nextPageToken,permissions(id,type,role)'); url.searchParams.set('pageSize', '100');
+    url.searchParams.set('fields', 'nextPageToken,permissions(id,type,role,emailAddress)'); url.searchParams.set('pageSize', '100');
     if (pageToken) url.searchParams.set('pageToken', pageToken);
     const data = await request(url.href, { method: 'GET', headers: authorized(token) }, successJson);
     if (!Array.isArray(data.permissions) || data.permissions.length > 100 || data.permissions.length < 1
-      || data.permissions.some(permission => !permission || !['user', 'group'].includes(permission.type)
-        || !['owner', 'organizer', 'fileOrganizer', 'writer', 'commenter', 'reader'].includes(permission.role))) throw error('DRIVE_FOLDER_SHARING_UNSAFE');
-    if (!data.nextPageToken) return;
+      || data.permissions.some(permission => !permission || permission.type !== 'user'
+        || !['owner', 'writer', 'commenter', 'reader'].includes(permission.role)
+        || !allowedEmails.has(canonicalEmail(permission.emailAddress)))) throw error('DRIVE_FOLDER_SHARING_UNSAFE');
+    for (const permission of data.permissions) actualEmails.add(canonicalEmail(permission.emailAddress));
+    if (!data.nextPageToken) {
+      // The full principal set must match, not merely be a subset of the list.
+      // Do not add, remove or repair permissions to make the comparison pass.
+      if (actualEmails.size !== allowedEmails.size || [...allowedEmails].some(email => !actualEmails.has(email))) throw error('DRIVE_FOLDER_SHARING_UNSAFE');
+      return;
+    }
     if (typeof data.nextPageToken !== 'string' || data.nextPageToken.length > 4096 || /[\p{Cc}]/u.test(data.nextPageToken) || seen.has(data.nextPageToken)) throw error('DRIVE_PERMISSION_LIST_INVALID');
     seen.add(data.nextPageToken); pageToken = data.nextPageToken;
   }
@@ -127,7 +152,7 @@ async function assertFolder(config, token, request) {
   const data = await request(url, { method: 'GET', headers: authorized(token) }, successJson);
   if (data.id !== config.folderId || data.mimeType !== 'application/vnd.google-apps.folder' || data.trashed !== false
     || data.driveId || data.capabilities?.canAddChildren !== true) throw error('DRIVE_FOLDER_INVALID');
-  await assertNoBroadSharing(config.folderId, token, request);
+  await assertAllowedSharing(config.folderId, config.allowedEmails, token, request);
 }
 
 const unchanged = (before, after) => before.dev === after.dev && before.ino === after.ino && before.size === after.size
@@ -217,10 +242,10 @@ export async function uploadBackup({ file, env = process.env, fetcher = globalTh
       }
       if (!completed || !unchanged(original, await handle.stat())) throw error('DRIVE_UPLOAD_OUTCOME_UNCERTAIN');
       assertUploaded(completed, config, basename(input), original.size, hashes);
-      // Check inherited broad sharing again after creation. Do not try to fix
+      // Check the exact allowed users again after creation. Do not try to fix
       // sharing or delete a file automatically if the permissions changed.
       await assertFolder(config, token, request);
-      await assertNoBroadSharing(completed.id, token, request);
+      await assertAllowedSharing(completed.id, config.allowedEmails, token, request);
       return { status: 'uploaded-and-verified', encryptedBytes: original.size, checksumVerified: true, permissionsChecked: true, recoveryTested: false };
     } finally { token = null; }
   } finally { key.fill(0); await handle?.close(); }
