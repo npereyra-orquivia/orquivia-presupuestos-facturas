@@ -31,9 +31,9 @@ No basta con exportar JSON del portal ni con descargar la base de datos: las cop
 3. Credenciales de operadora introducidas por un canal seguro. No pegarlas en el chat, el código, comandos con valores literales, capturas, logs ni documentos públicos.
 4. Clave aleatoria independiente de 32 bytes en Base64 canónico. Guardar la recuperación en el gestor de contraseñas elegido y comprobar que una segunda vía autorizada permite recuperarla. Perderla hace irrecuperable la copia.
 5. Directorio de destino **fuera del repositorio**, no `public/`, `dist/`, `private/` ni una carpeta sincronizada sin revisar sus permisos. La captura se cifra antes de escribir el contenedor a disco.
-6. Paquete de configuración revisado y ventana tranquila de captura: no cambiar credenciales, configuración ni documentos durante la operación. El dump es transaccional, pero Auth API, Vault y Storage se leen por mecanismos distintos; no se promete una instantánea atómica de todos los servicios.
+6. Paquete de configuración revisado y modo `captureMode: "drift-checked"`: el motor verifica huellas del origen antes y después y aborta si cambian. Es preferible una ventana de poco uso. El dump es transaccional, pero Auth API, Vault y Storage se leen por mecanismos distintos; no se promete una instantánea atómica de todos los servicios.
 
-La herramienta compara antes y después: inventario completo de Storage, configuración Auth y una huella calculada dentro de PostgreSQL de las tablas de aplicación, Auth, Vault, Storage y cron. PostgreSQL solo devuelve el SHA-256; no envía su contenido al registro de ejecución. Cualquier cambio detectado o permiso insuficiente aborta la publicación. Esto reduce inconsistencias, pero no equivale a una instantánea atómica entre servicios: un cambio y reversión durante la captura puede no detectarse. Las confirmaciones del paquete son declaraciones de la operadora y no prueban por sí mismas una ventana tranquila ni la vigencia de secretos externos. No activarlas una vez para dar por garantizadas futuras ejecuciones diarias.
+La herramienta compara antes y después: inventario completo de Storage, configuración Auth y una huella calculada dentro de PostgreSQL de las tablas de aplicación, Auth, Vault, Storage y cron. PostgreSQL solo devuelve el SHA-256; no envía su contenido al registro de ejecución. Cualquier cambio detectado o permiso insuficiente aborta la publicación. Esto reduce inconsistencias, pero no equivale a una instantánea atómica entre servicios: un cambio y reversión durante la captura puede no detectarse. El modo `drift-checked` exige estas comprobaciones en cada captura; no supone que el origen esté bloqueado. Por compatibilidad, la CLI manual también acepta el antiguo `confirmedQuietCapture: true`, pero sus comprobaciones siguen activas y el workflow diario exige el modo nuevo. La confirmación de integridad del paquete es una declaración de la operadora, no prueba la vigencia de secretos externos: hay que revisarla tras cada cambio de configuración.
 
 ## Variables de ejecución
 
@@ -51,7 +51,7 @@ Configurar las variables mediante un mecanismo seguro del operador o un almacén
 | `ORQUIVIA_BACKUP_PG_SSL_ROOT_CERT` | Opcional: archivo de certificado raíz; el valor por defecto es `system` |
 | `ORQUIVIA_BACKUP_PG_DUMP`, `ORQUIVIA_BACKUP_PG_DUMPALL`, `ORQUIVIA_BACKUP_PSQL` | Opcional: rutas a las herramientas oficiales |
 
-El paquete de recuperación debe contener `edgeSecrets`, `edgeFunctions`, `authSmtp`, `storageConfiguration`, `verifiedAt` UTC, `confirmedComplete: true` y `confirmedQuietCapture: true`. El archivo `backup-recovery.example.json` es solo un esquema vacío y **no cumple los requisitos de captura**: sus confirmaciones son falsas. La operadora verifica valores reales y vigencia antes de activarlas. Confirmar no significa que el software haya verificado secretos externos ni ensayado su recuperación.
+El paquete de recuperación debe contener `edgeSecrets`, `edgeFunctions`, `authSmtp`, `storageConfiguration`, `verifiedAt` UTC, `confirmedComplete: true` y `captureMode: "drift-checked"`. El archivo `backup-recovery.example.json` es solo un esquema vacío y **no cumple los requisitos de captura**: su confirmación de integridad es falsa. La operadora verifica valores reales y vigencia antes de confirmarla. Confirmar no significa que el software haya verificado secretos externos ni ensayado su recuperación.
 
 Los errores de subprocesos y respuestas remotas se sustituyen por códigos genéricos para evitar exponer credenciales o contenido. No habilitar trazas de shell ni imprimir el entorno.
 
@@ -110,3 +110,5 @@ Un cambio de interfaz se revierte usando la versión estable del código; no se 
 - Revisar accesos de operadora y guardar claves por separado, con un procedimiento de recuperación autorizado.
 
 La periodicidad y los avisos no quedan activos por publicar esta documentación. Deben configurarse y comprobarse con las credenciales y el destino elegidos.
+
+El workflow diario queda preparado y desactivado por defecto. Su autorización, secretos, pruebas y límites se describen en [SCHEDULED-BACKUP.md](SCHEDULED-BACKUP.md).

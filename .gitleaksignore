@@ -1,3 +1,5 @@
 # Synthetic cron secret in an old test fixture, reviewed on 2026-10-26.
 # Only this exact historical finding is ignored; tests and future changes are scanned.
 56bc24dd15c022cd05edc9382ad3c76c40183983:supabase/tests/backend.test.js:generic-api-key:71
+# Natural-language test title, not a credential; exact historical finding only.
+b00a2094033032c91a7592f114c4a048b7ab91d5:tests/export-checkpoint.test.js:generic-api-key:133

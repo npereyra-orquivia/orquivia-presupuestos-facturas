@@ -142,7 +142,9 @@ export function recoveryPackage(value) {
   let config; try { config = JSON.parse(value); } catch { throw fail('BACKUP_RECOVERY_CONFIGURATION_REQUIRED'); }
   if (!config || typeof config !== 'object' || Array.isArray(config)
     || !config.edgeSecrets || typeof config.edgeSecrets !== 'object' || Array.isArray(config.edgeSecrets)
-    || config.confirmedComplete !== true || config.confirmedQuietCapture !== true
+    || config.confirmedComplete !== true
+    || (config.captureMode !== 'drift-checked' && config.confirmedQuietCapture !== true)
+    || (config.captureMode !== undefined && config.captureMode !== 'drift-checked')
     || typeof config.verifiedAt !== 'string' || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z$/.test(config.verifiedAt)
     || !Number.isFinite(Date.parse(config.verifiedAt))
     || !config.authSmtp || typeof config.authSmtp !== 'object' || Array.isArray(config.authSmtp)

@@ -201,9 +201,9 @@ export function bufferEntry(name, value, metadata = {}) {
 }
 
 /** Explicit offline recovery export only. It never executes SQL or contacts a service. */
-export async function extractArchive({ file, key, directory, repositoryRoot, limits, openFile = open }) {
+export async function extractArchive({ file, key, directory, repositoryRoot, limits, openFile = open, validateManifest = assertRecoveryContents }) {
   const manifest = await verifyArchive({ file, key, limits });
-  assertRecoveryContents(manifest);
+  await validateManifest(manifest);
   if (!isAbsolute(directory)) throw fail('BACKUP_DESTINATION_MUST_BE_ABSOLUTE');
   const destination = resolve(directory);
   const parent = await assertPrivateDestination(dirname(destination), repositoryRoot);
