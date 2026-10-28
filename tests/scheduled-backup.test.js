@@ -1,12 +1,22 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, writeFile, rm } from 'node:fs/promises';
+import { mkdtemp, writeFile, rm, readFile, readdir } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { scheduledConfiguration, runScheduled, scheduledFailure } from '../scripts/backup/run-scheduled.mjs';
 
 const RECOVERY = { edgeSecrets: {}, edgeFunctions: [], authSmtp: {}, storageConfiguration: {},
   verifiedAt: '2026-10-27T12:00:00Z', confirmedComplete: true, captureMode: 'drift-checked' };
+
+test('public application workflows cannot receive private backup or mailbox credentials', async () => {
+  await assert.rejects(readFile(new URL('../.github/workflows/backup.yml', import.meta.url)), { code: 'ENOENT' });
+  const directory = new URL('../.github/workflows/', import.meta.url);
+  for (const filename of await readdir(directory)) {
+    if (!/\.ya?ml$/.test(filename)) continue;
+    const workflow = await readFile(new URL(filename, directory), 'utf8');
+    assert.doesNotMatch(workflow, /secrets\.(?:ORQUIVIA_(?:BACKUP|DRIVE|READER)|SMTP_)/i);
+  }
+});
 const ENV = { GITHUB_ACTIONS: 'true', GITHUB_REPOSITORY: 'npereyra-orquivia/orquivia-presupuestos-facturas',
   GITHUB_REF: 'refs/heads/main', GITHUB_EVENT_NAME: 'schedule', ORQUIVIA_BACKUPS_ENABLED: 'true',
   ORQUIVIA_BACKUP_RESTORE_REHEARSED: 'true', ORQUIVIA_BACKUP_SUPABASE_URL: 'https://tfaglecwycbamibnhqmq.supabase.co',
