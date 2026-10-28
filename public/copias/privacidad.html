@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="Cómo Orquivia Copias utiliza el permiso limitado de Google Drive para guardar y verificar respaldos cifrados de la empresa.">
+    <meta name="referrer" content="no-referrer">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'self'; img-src 'self'; base-uri 'none'; form-action 'none'; object-src 'none'">
+    <title>Privacidad · Orquivia Copias</title>
+    <link rel="icon" href="../orquivia-logo-mark.svg" type="image/svg+xml">
+    <link rel="stylesheet" href="./styles.css">
+  </head>
+  <body>
+    <a class="skip-link" href="#contenido">Ir al contenido</a>
+    <header class="site-header">
+      <a class="brand" href="./" aria-label="Orquivia Copias, inicio">
+        <img src="../orquivia-logo-full.svg" alt="Orquivia" width="1079" height="275">
+        <span>Copias</span>
+      </a>
+      <nav aria-label="Navegación principal">
+        <a href="./">Sobre la conexión</a>
+        <a href="../">Ir al portal <span aria-hidden="true">↗</span></a>
+      </nav>
+    </header>
+    <main id="contenido" class="privacy">
+      <header class="intro">
+        <p class="eyebrow">Información de la conexión con Google</p>
+        <h1>Privacidad de Orquivia Copias</h1>
+        <p class="lead">Esta información se refiere a la conexión privada de respaldo con Google Drive de ORQUIVIA GLOBAL SL. No describe un servicio público de almacenamiento ni autoriza el acceso a documentos.</p>
+        <p class="updated">Actualizada el <time datetime="2026-10-28">28 de octubre de 2026</time>.</p>
+      </header>
+      <section aria-labelledby="responsable">
+        <h2 id="responsable">Quién gestiona esta conexión</h2>
+        <p>ORQUIVIA GLOBAL SL utiliza Orquivia Copias para respaldar información de su propio portal de presupuestos, facturas y gastos. La configuración y el acceso a las copias quedan bajo el control de la titular de la cuenta y de las personas que la empresa autorice.</p>
+        <p>Contacto para consultas o solicitudes sobre los datos de esta conexión: <a href="mailto:acceso@orquivia.com">acceso@orquivia.com</a>.</p>
+      </section>
+      <section aria-labelledby="permiso">
+        <h2 id="permiso">Qué permiso de Google se solicita</h2>
+        <p>Se solicita únicamente <code>https://www.googleapis.com/auth/drive.file</code>. Este permiso permite trabajar con los archivos creados por Orquivia Copias y con aquellos que la titular seleccione o comparta expresamente con la aplicación.</p>
+        <p>No se solicita acceso general a la unidad de Google Drive, ni acceso a Gmail, Contactos o Calendario. La autorización de esta conexión es independiente del conector de Google Drive del chat.</p>
+      </section>
+      <section aria-labelledby="datos">
+        <h2 id="datos">Qué datos utiliza y para qué</h2>
+        <ul>
+          <li><strong>Archivo de respaldo cifrado.</strong> Se envía a Google Drive para conservar una copia de la información de la empresa. Según el alcance de cada respaldo, su contenido puede incluir registros, documentos y configuración necesarios para la recuperación.</li>
+          <li><strong>Metadatos de archivos y carpetas autorizados.</strong> Se usan identificadores, nombres, tipo de archivo, tamaño y sumas de comprobación para localizar el destino y comprobar la transferencia.</li>
+          <li><strong>Permisos del destino y del archivo.</strong> Se comprueban los correos electrónicos, tipos de permiso y roles que devuelve Google para contrastarlos con la lista de personas autorizadas. Si el conjunto no coincide, el ejecutor no confirma la copia como válida.</li>
+          <li><strong>Credencial de autorización.</strong> Cuando se concede acceso sin una sesión de navegador abierta, Google proporciona una credencial delegada de actualización. Se utiliza para obtener accesos temporales a la API y realizar las operaciones de copia autorizadas.</li>
+        </ul>
+        <p>Estos datos se utilizan para configurar, realizar y verificar el respaldo y atender su recuperación. No se venden, no se usan para publicidad ni para entrenar modelos de inteligencia artificial.</p>
+      </section>
+      <section aria-labelledby="proteccion">
+        <h2 id="proteccion">Dónde se guardan y cómo se protegen</h2>
+        <p>El archivo de respaldo se cifra con AES-256-GCM antes de la subida y se guarda en una carpeta autorizada de la cuenta de Google Drive elegida por la titular. La clave de recuperación se conserva por separado; la conexión no la adjunta al respaldo de Drive.</p>
+        <p>Las credenciales de la conexión se conservan en la configuración privada del operador o del ejecutor autorizado, separadas del código público y del portal. La conexión no publica documentos ni modifica los permisos de la carpeta para ampliar el acceso.</p>
+        <p>Google recibe el archivo cifrado y los metadatos necesarios para su almacenamiento y transferencia. Las personas con acceso a la carpeta pueden acceder al archivo cifrado; para descifrarlo necesitan además la clave de recuperación. Las personas autorizadas que operan el respaldo pueden necesitar acceso a los datos de origen o recuperados.</p>
+      </section>
+      <section aria-labelledby="conservacion">
+        <h2 id="conservacion">Conservación y eliminación</h2>
+        <p>Esta conexión no establece un borrado automático de las copias. La titular controla su conservación y puede eliminar los archivos de Drive mediante sus funciones habituales. Eliminar un archivo de Drive no elimina otras copias que se hayan descargado o conservado por separado.</p>
+        <p>La retirada de una conexión no borra por sí sola los respaldos existentes. La eliminación de la configuración privada y de sus credenciales debe realizarse también en el ejecutor donde se hubiera configurado.</p>
+      </section>
+      <section aria-labelledby="retirar">
+        <h2 id="retirar">Cómo retirar el acceso</h2>
+        <p>Puedes retirar la autorización de Orquivia Copias desde el apartado de conexiones con aplicaciones de terceros de tu Cuenta de Google. Esto impide que la conexión siga renovando el acceso delegado, de acuerdo con el funcionamiento de revocación de Google.</p>
+        <p>Para detener las copias programadas, si se hubieran habilitado, también debe desactivarse su ejecución. Puedes solicitar ayuda, información o la revisión y eliminación de la configuración de la conexión escribiendo a <a href="mailto:acceso@orquivia.com">acceso@orquivia.com</a>.</p>
+      </section>
+      <section aria-labelledby="pagina">
+        <h2 id="pagina">Esta página informativa</h2>
+        <p>Esta página no contiene formularios, analítica ni rastreadores y no inicia una autorización de Google. Su consulta no da acceso al portal ni a las copias. El alojamiento web puede tratar los datos técnicos de una solicitud de página conforme a sus propias condiciones.</p>
+      </section>
+    </main>
+    <footer class="site-footer">
+      <p>ORQUIVIA GLOBAL SL · Orquivia Copias</p>
+      <a href="./">Sobre la conexión</a>
+    </footer>
+  </body>
+</html>
