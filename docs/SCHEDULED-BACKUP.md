@@ -2,7 +2,9 @@
 
 `.github/workflows/backup.yml` declara una ejecución diaria a las 02:43 UTC y una ejecución manual. **Publicar este archivo no activa ninguna copia.** El trabajo se omite mientras las variables de repositorio `ORQUIVIA_BACKUPS_ENABLED` y `ORQUIVIA_BACKUP_RESTORE_REHEARSED` no sean exactamente `true`. No se han creado credenciales, autorizado OAuth ni configurado estas variables por añadir el código.
 
-El destino elegido hoy mediante una pestaña de Google Drive no autoriza acceso automatizado. La conexión permanente requiere una aprobación separada de la operadora, un cliente OAuth propio con el único alcance `https://www.googleapis.com/auth/drive.file` y la selección de la carpeta para ese cliente mediante Picker o un flujo compatible. No se usa el conector general del chat. Pegar el ID o abrir la carpeta no concede acceso a ese cliente.
+La titular ya autorizó la conexión OAuth separada con el único alcance `https://www.googleapis.com/auth/drive.file`. La carpeta propia de la aplicación, sus permisos, la transferencia real y la recuperación operativa aislada se comprobaron el 28 de octubre de 2026. **Los secretos no se han instalado en GitHub Actions ni se ha activado la programación.** Ese ejecutor necesita una aprobación concreta: tendrá acceso administrativo a la base de datos de origen, a originales y configuración privada —incluidas conexiones de correo—, a la clave de cifrado y a los archivos de Drive autorizados para la aplicación. El token Auth limitado no convierte toda la ejecución en solo lectura.
+
+La contraseña de la base de datos de pruebas está separada y queda fuera del paquete preparado para el ejecutor. Este solo selecciona los campos necesarios del origen; nunca se debe copiar el contenedor completo de credenciales de la operadora a GitHub. La clave de recuperación debe custodiarse además por una vía privada independiente de Drive y del ordenador.
 
 ## Antes de activar
 
@@ -36,7 +38,7 @@ Secretos **del environment `orquivia-backup`**, no variables `VITE_`:
 - `ORQUIVIA_DRIVE_CLIENT_ID`, `ORQUIVIA_DRIVE_CLIENT_SECRET` y `ORQUIVIA_DRIVE_REFRESH_TOKEN`.
 - `ORQUIVIA_DRIVE_ALLOWED_EMAILS`, con la lista privada completa de personas autorizadas. No guardar sus direcciones reales en Git; no se admiten grupos aunque su dirección aparezca en la lista.
 
-Los secretos se inyectan únicamente en el paso de captura/subida. La preparación de herramientas y checkout no los reciben. El URL de origen está fijado al proyecto de producción esperado y el wrapper lo comprueba. TLS usa `verify-full` con la confianza del sistema; un fallo de certificado exige revisar la confianza, nunca desactivar TLS.
+Los secretos se inyectan únicamente en el paso de captura/subida. La preparación de herramientas y checkout no los reciben. El URL de origen está fijado al proyecto de producción esperado y el wrapper lo comprueba. TLS usa `verify-full` con la CA pública de Supabase fijada y verificada antes de cargar credenciales; un fallo exige revisar la confianza, nunca desactivar TLS. Ver [BACKUP-EVIDENCE.md](BACKUP-EVIDENCE.md).
 
 ## Ejecución y límites
 

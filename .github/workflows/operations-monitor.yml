@@ -3,6 +3,12 @@ on:
   schedule:
     - cron: '17 */6 * * *'
   workflow_dispatch:
+    inputs:
+      test_failure_notification:
+        description: 'Prueba controlada del aviso de fallo; no cambia el portal'
+        required: false
+        type: boolean
+        default: false
 permissions: {}
 concurrency:
   group: operations-monitor
@@ -32,3 +38,18 @@ jobs:
       # A failed run is visible in GitHub Actions. Each maintainer controls their
       # own GitHub failure notifications; this workflow sends no client emails.
       # Success is not evidence that a backup, the database or SMTP was tested.
+  notification-test:
+    name: Prueba controlada del aviso (el portal no está caído)
+    needs: public-availability
+    if: >-
+      github.repository == 'npereyra-orquivia/orquivia-presupuestos-facturas' &&
+      github.ref == 'refs/heads/main' &&
+      github.event_name == 'workflow_dispatch' && inputs.test_failure_notification
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    permissions: {}
+    steps:
+      - name: Generar únicamente el fallo de prueba solicitado
+        run: |
+          echo 'Prueba controlada para comprobar los avisos de GitHub Actions. El portal no se ha modificado ni se ha simulado una caída.'
+          exit 1
