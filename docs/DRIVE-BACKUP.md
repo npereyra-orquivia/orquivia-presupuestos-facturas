@@ -2,7 +2,7 @@
 
 ## Estado de esta integración
 
-El helper está preparado y probado con respuestas simuladas. No se ha autorizado ni activado una conexión automática con Google Drive. No usa el conector del chat ni las cookies de una pestaña. La subida manual mediante la carpeta abierta en el navegador es un procedimiento independiente.
+El helper está preparado y probado con respuestas simuladas. El 28 de octubre de 2026 la titular completó el consentimiento real para una conexión técnica independiente con el único permiso `drive.file`. La credencial se guarda cifrada fuera del repositorio. Se creó una carpeta propia de la aplicación dentro del destino de contabilidad autorizado y se comprobó por API que sus permisos coinciden exactamente con las dos personas autorizadas. **No se ha activado la copia automática ni confirmado todavía una transferencia real de un respaldo completo con este helper.** No usa el conector del chat ni las cookies de una pestaña.
 
 Una ejecución terminada con éxito confirma la autenticación del archivo local, sus componentes de recuperación, la subida de sus bytes cifrados, el tamaño y la suma de comprobación devuelta por Drive. No confirma que se haya ensayado la restauración de la base de datos.
 

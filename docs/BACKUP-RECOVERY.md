@@ -2,9 +2,9 @@
 
 ## Estado y alcance
 
-El código prepara, verifica y extrae una copia cifrada. **Su presencia en el repositorio no activa copias periódicas ni acredita una restauración real de Supabase.** Las pruebas automatizadas emplean datos ficticios; el ensayo real queda pendiente de herramientas PostgreSQL, credenciales de operadora y destino aislado.
+El código prepara, verifica y extrae una copia cifrada. **Su presencia en el repositorio no activa copias periódicas ni acredita una restauración real de Supabase.** El 28 de octubre de 2026 se comprobaron las herramientas PostgreSQL 17, las credenciales de producción y del destino aislado, y la conexión cifrada de ambos proyectos. La captura completa y el ensayo con esa captura siguen pendientes.
 
-Nicole ha elegido subir los archivos cifrados a la carpeta de Google Drive que ha abierto en el navegador. No se configura el conector de Google Drive del chat ni se concede acceso OAuth adicional. La subida mediante una pestaña requiere una sesión activa; no constituye automatización diaria independiente. Para programarla habrá que autorizar y verificar un acceso de ejecución separado al destino, o acordar una subida manual.
+La titular autorizó una conexión técnica separada de Google Drive con el único permiso `drive.file`; su credencial se guarda cifrada fuera del repositorio. La carpeta de copias fue creada por esa aplicación y situada en el destino de contabilidad autorizado. Sus permisos reales se comprobaron frente a las dos personas autorizadas, sin acceso público, de dominio ni de grupos. Esto no conecta Drive al chat ni activa el workflow diario. La subida y descarga reales del nuevo respaldo completo y el ensayo aislado siguen siendo requisitos para activarlo.
 
 El código estable anterior es `v1.4.1` (`1625e0494638fb6c782e4f8cbdf02b08ec4d3bb2`). Un tag o bundle Git respalda código; no contiene automáticamente la base de datos, cuentas ni documentos privados.
 

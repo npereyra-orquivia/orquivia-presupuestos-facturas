@@ -43,13 +43,17 @@ jobs:
           pg_dump --version
           pg_dumpall --version
           psql --version
+          node scripts/backup/verify-certificate.mjs
       - name: Cifrar, comprobar y subir una sola vez
         env:
           ORQUIVIA_BACKUPS_ENABLED: ${{ vars.ORQUIVIA_BACKUPS_ENABLED }}
           ORQUIVIA_BACKUP_RESTORE_REHEARSED: ${{ vars.ORQUIVIA_BACKUP_RESTORE_REHEARSED }}
           ORQUIVIA_BACKUP_SUPABASE_URL: https://tfaglecwycbamibnhqmq.supabase.co
+          ORQUIVIA_BACKUP_HEALTH_REPORT_ENABLED: ${{ vars.ORQUIVIA_BACKUP_HEALTH_REPORT_ENABLED }}
+          ORQUIVIA_BACKUP_ORGANIZATION_ID: ${{ secrets.ORQUIVIA_BACKUP_ORGANIZATION_ID }}
           ORQUIVIA_BACKUP_KEY: ${{ secrets.ORQUIVIA_BACKUP_KEY }}
           ORQUIVIA_BACKUP_DATABASE_URL: ${{ secrets.ORQUIVIA_BACKUP_DATABASE_URL }}
+          ORQUIVIA_BACKUP_PG_SSL_ROOT_CERT: ${{ github.workspace }}/scripts/backup/certs/supabase-root-2021.crt
           ORQUIVIA_BACKUP_SERVICE_ROLE_KEY: ${{ secrets.ORQUIVIA_BACKUP_SERVICE_ROLE_KEY }}
           ORQUIVIA_BACKUP_ACCESS_TOKEN: ${{ secrets.ORQUIVIA_BACKUP_ACCESS_TOKEN }}
           ORQUIVIA_BACKUP_RECOVERY_JSON: ${{ secrets.ORQUIVIA_BACKUP_RECOVERY_JSON }}

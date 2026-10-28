@@ -119,3 +119,26 @@ test('success requires destination checks and never infers a tested restoration'
   const summary = scheduledFailure({ code: 'UNKNOWN_FIXTURE_SECRET', message: 'fixture-only-secret' });
   assert.equal(summary.code, 'SCHEDULED_BACKUP_FAILED'); assert.equal(JSON.stringify(summary).includes('fixture-only-secret'), false);
 });
+
+test('evidence starts before capture and records success only after all upload checks',async t=>{
+  const f=await fixture(t),order=[],env={...f.env,ORQUIVIA_BACKUP_HEALTH_REPORT_ENABLED:'true',
+    ORQUIVIA_BACKUP_ORGANIZATION_ID:'f7200000-0000-4000-8000-000000000001',ORQUIVIA_BACKUP_SERVICE_ROLE_KEY:'fixture-only-service-credential-not-real'};
+  const reporter={started:async()=>order.push('started'),succeeded:async(c,u)=>{order.push('succeeded');assert.equal(u.permissionsChecked,true);assert.equal(c.sourceCommit,COMMIT);},failed:async()=>order.push('failed')};
+  await runScheduled(env,{...f,createReporter:()=>reporter,
+    capture:async(...args)=>{order.push('capture');return f.capture(...args);},
+    upload:async(options)=>{order.push('upload');assert.equal(options.includeEvidence,true);return f.upload(options);}});
+  assert.deepEqual(order,['started','capture','upload','succeeded']);
+});
+
+test('an invalid upload or evidence failure never records success or repeats a capture/upload',async t=>{
+  const f=await fixture(t),events=[];
+  const reporter={started:async()=>events.push('started'),succeeded:async()=>events.push('succeeded'),failed:async code=>events.push(code)};
+  await assert.rejects(runScheduled(f.env,{...f,createReporter:()=>reporter,
+    upload:async options=>({...await f.upload(options),permissionsChecked:false})}),{code:'SCHEDULED_BACKUP_UPLOAD_INVALID'});
+  assert.deepEqual(events,['started','SCHEDULED_BACKUP_UPLOAD_INVALID']);
+  assert.equal(f.calls.filter(call=>call.kind==='upload').length,1);
+  let captures=0;
+  await assert.rejects(runScheduled(f.env,{...f,createReporter:()=>({...reporter,started:async()=>{throw Object.assign(new Error('private'),{code:'SCHEDULED_BACKUP_EVIDENCE_FAILED'});}}),
+    capture:async()=>{captures++;}}),{code:'SCHEDULED_BACKUP_EVIDENCE_FAILED'});
+  assert.equal(captures,0);
+});
