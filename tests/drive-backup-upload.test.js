@@ -5,7 +5,7 @@ import { mkdtemp, readFile, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { writeArchive, bufferEntry } from '../scripts/backup/archive.mjs';
-import { DRIVE_SCOPE, DRIVE_UPLOAD_LIMITS, driveConfiguration, validateSessionURL, uploadBackup, main } from '../scripts/backup/drive-upload.mjs';
+import { DRIVE_SCOPE, DRIVE_UPLOAD_LIMITS, DRIVE_UPLOAD_FIELDS, driveConfiguration, validateSessionURL, uploadBackup, main } from '../scripts/backup/drive-upload.mjs';
 
 const FOLDER = 'fixture_private_folder_1234', FILE_ID = 'fixture_uploaded_file_1234';
 const SESSION = 'https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable&upload_id=fixture_session_12345';
@@ -48,8 +48,8 @@ function service(f, { token, folder, permissions, session = SESSION, uploaded, c
       permissionCalls++;
       return ((permissionCalls > 1 && postPermissions) || permissions)?.clone() || json({ permissions: PRIVATE_PERMISSIONS });
     }
-    if (url.startsWith('https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable&fields=')) return new Response(null, { status: 200, headers: { location: session } });
-    if (url === SESSION) {
+    if (options.method === 'POST' && url.startsWith('https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable&fields=')) return new Response(null, { status: 200, headers: { location: session } });
+    if (url === session) {
       uploadCalls++;
       if (chunk) return chunk({ url, options, uploadCalls, finished });
       return json(finished);
@@ -65,6 +65,20 @@ test('Drive helper remains disabled without explicit authorization and accepts o
   for (const extra of [{ ORQUIVIA_DRIVE_FOLDER_ID: `https://drive.google.com/${FOLDER}` }, { ORQUIVIA_DRIVE_CLIENT_SECRET: 'bad\nsecret' }, { ORQUIVIA_DRIVE_REFRESH_TOKEN: '' }]) {
     assert.throws(() => driveConfiguration({ ...ENV, ...extra }), { code: 'DRIVE_CONFIGURATION_INVALID' });
   }
+});
+
+test('provider session projection and opaque session credential retain the fixed destination and never leak in results', async t => {
+  const session = `${SESSION}&fields=${encodeURIComponent(DRIVE_UPLOAD_FIELDS)}&session_crd=fixture_private_session_credential`;
+  assert.equal(validateSessionURL(session),session);
+  for (const extra of ['&fields=*','&session_crd=other_secret','&uploadType=resumable','&upload_id=other_id','&other=1'])
+    assert.throws(()=>validateSessionURL(session+extra),{code:'DRIVE_SESSION_URL_INVALID'});
+  assert.throws(()=>validateSessionURL(SESSION+'&fields=*'),{code:'DRIVE_SESSION_URL_INVALID'});
+  assert.throws(()=>validateSessionURL(SESSION+'&session_crd=https%3A%2F%2Fevil.example'),{code:'DRIVE_SESSION_URL_INVALID'});
+  const f=await fixture(t),mock=service(f,{session});
+  const result=await uploadBackup({file:f.file,env:f.env,fetcher:mock.fetcher});
+  assert.equal(result.status,'uploaded-and-verified');
+  assert.ok(mock.calls.some(call=>call.url===session&&call.options.method==='PUT'));
+  assert.ok(!JSON.stringify(result).includes('fixture_private_session_credential'));
 });
 
 test('allowed people are a mandatory canonical ASCII list of one to twenty unique addresses', () => {

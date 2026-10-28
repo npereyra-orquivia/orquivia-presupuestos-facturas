@@ -7,7 +7,8 @@ import { readKey, verifyArchive, assertRecoveryContents } from './archive.mjs';
 export const DRIVE_SCOPE = 'https://www.googleapis.com/auth/drive.file';
 const TOKEN_URL = 'https://oauth2.googleapis.com/token';
 const API = 'https://www.googleapis.com/drive/v3';
-const CREATE_URL = 'https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable&fields=id,name,size,md5Checksum,sha256Checksum,parents,mimeType,trashed';
+export const DRIVE_UPLOAD_FIELDS = 'id,name,size,md5Checksum,sha256Checksum,parents,mimeType,trashed';
+const CREATE_URL = `https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable&fields=${DRIVE_UPLOAD_FIELDS}`;
 export const DRIVE_UPLOAD_LIMITS = Object.freeze({ bytes: 40_000_000_000, chunk: 8 * 1024 * 1024, json: 131_072, requests: 8192, requestMs: 60_000, totalMs: 60 * 60 * 1000 });
 const ID = /^[A-Za-z0-9_-]{10,128}$/;
 const FILENAME = /^[A-Za-z0-9][A-Za-z0-9._-]{0,180}\.orqbackup$/;
@@ -49,13 +50,19 @@ export function driveConfiguration(env = {}) {
 
 /** A resumable URL is a credential. It is followed only on this exact Google endpoint. */
 export function validateSessionURL(value) {
-  if (typeof value !== 'string' || /[\s\p{Cc}]/u.test(value)) throw error('DRIVE_SESSION_URL_INVALID');
+  if (typeof value !== 'string' || value.length > 8192 || /[\s\p{Cc}]/u.test(value)) throw error('DRIVE_SESSION_URL_INVALID');
   let url; try { url = new URL(value); } catch { throw error('DRIVE_SESSION_URL_INVALID'); }
+  const keys = [...url.searchParams.keys()];
+  // The real Drive response retains our exact projection and can add an opaque
+  // session_crd capability. Keep both private, scoped to this fixed HTTPS path.
+  // Do not rewrite that capability or allow arbitrary query parameters.
   if (url.origin !== 'https://www.googleapis.com' || url.username || url.password || url.port || url.hash
     || url.pathname !== '/upload/drive/v3/files' || url.searchParams.get('uploadType') !== 'resumable'
     || !/^[A-Za-z0-9._~-]{10,2048}$/.test(url.searchParams.get('upload_id') || '')
-    || [...url.searchParams.keys()].some(key => !['uploadType', 'upload_id'].includes(key))
-    || [...url.searchParams.keys()].length !== 2) throw error('DRIVE_SESSION_URL_INVALID');
+    || keys.some(key => !['uploadType', 'upload_id', 'fields', 'session_crd'].includes(key))
+    || new Set(keys).size !== keys.length
+    || (url.searchParams.has('fields') && url.searchParams.get('fields') !== DRIVE_UPLOAD_FIELDS)
+    || (url.searchParams.has('session_crd') && !/^[A-Za-z0-9._~-]{8,2048}$/.test(url.searchParams.get('session_crd') || ''))) throw error('DRIVE_SESSION_URL_INVALID');
   return url.href;
 }
 
