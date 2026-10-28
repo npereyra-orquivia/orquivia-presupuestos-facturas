@@ -609,6 +609,23 @@ export function createBackend({ url, anonKey }) {
       if (error) throw backendError('No se pudo cargar el historial.', 'LOAD_ERROR', error);
       return data;
     },
+    async operationsHealth() {
+      const generation = authGeneration;
+      const user = await requireUser(generation);
+      if (!workspace) throw backendError('Carga primero la empresa.', 'STATE_NOT_LOADED');
+      if (workspace.role !== 'admin') throw backendError('Solo la administradora puede consultar el estado de las copias.', 'ADMIN_REQUIRED');
+      const organizationId = workspace.organizationId;
+      const { data, error } = await client.rpc('load_orquivia_backup_health', {
+        p_organization_id: organizationId, p_expected_user_id: user.id,
+      }).abortSignal(AbortSignal.timeout(15000));
+      assertSession(user, generation, organizationId);
+      // Old compatible servers keep the evidence panel pending until migration
+      // 017 is deliberately installed; this must never interrupt normal work.
+      if (error && ['PGRST202', '42883'].includes(error.code)) return null;
+      if (error) throw rpcError(error, 'No se pudo comprobar el estado de las copias.');
+      if (!data || typeof data !== 'object' || Array.isArray(data)) throw backendError('El estado de las copias recibido no es válido.', 'LOAD_ERROR');
+      return data;
+    },
     async recordHistory(entityType, entityId, limit = 50) {
       const generation = authGeneration;
       if (!HISTORY_ENTITY_TYPES.has(entityType) || typeof entityId !== 'string'

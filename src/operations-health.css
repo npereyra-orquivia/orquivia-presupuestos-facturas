@@ -22,3 +22,15 @@
 .operations-health-verification>strong{display:block;font-weight:500}
 .operations-health-verification>span{display:inline-block;color:#826428;background:#fcf5e6;border-radius:5px;padding:2px 7px;margin:7px 0}
 .operations-health-verification>p{font-size:10px;color:#788873}
+.operations-health-verification[data-evidence-status="recent"]>span{color:#315f3d;background:#eaf1e5}
+.operations-health-verification[data-evidence-status="failed"]>span,.operations-health-verification[data-evidence-status="stale"]>span,.operations-health-verification[data-evidence-status="unfinished"]>span{color:#91492f;background:#fbede5}
+.operations-health-verification[data-evidence-status="loading"]>span,.operations-health-verification[data-evidence-status="running"]>span{color:#526b77;background:#edf2f4}
+.operations-health-evidence{margin:12px 0;font-size:10px}
+.operations-health-evidence>div{display:flex;justify-content:space-between;gap:14px;padding:7px 0;border-bottom:1px solid #edf0e9}
+.operations-health-evidence dt{max-width:52%;overflow-wrap:anywhere}
+.operations-health-evidence dd{margin:0;text-align:right;font-variant-numeric:tabular-nums;color:#64735d;overflow-wrap:anywhere}
+.operations-health-restore{margin-top:14px;padding:11px 12px;border:1px solid var(--border);border-radius:7px}
+.operations-health-restore>strong,.operations-health-restore>span{display:block}
+.operations-health-restore>strong{font-size:11px;font-weight:500}
+.operations-health-restore>span{font-size:10px;color:#64735d;margin-top:3px}
+.operations-health-restore>p{font-size:10px;color:#788873;line-height:1.7;margin:6px 0 0}

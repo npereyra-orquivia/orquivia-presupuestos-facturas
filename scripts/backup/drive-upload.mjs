@@ -205,11 +205,12 @@ function assertUploaded(data, config, name, size, hashes) {
 }
 
 /** Dormant until the owner explicitly authorizes a narrow, separate backup connection. */
-export async function uploadBackup({ file, env = process.env, fetcher = globalThis.fetch, timeoutMs = DRIVE_UPLOAD_LIMITS.requestMs, maxRunMs = DRIVE_UPLOAD_LIMITS.totalMs } = {}) {
+export async function uploadBackup({ file, env = process.env, fetcher = globalThis.fetch, timeoutMs = DRIVE_UPLOAD_LIMITS.requestMs, maxRunMs = DRIVE_UPLOAD_LIMITS.totalMs, includeEvidence = false } = {}) {
   const config = driveConfiguration(env);
   if (typeof file !== 'string' || !isAbsolute(file) || !FILENAME.test(basename(file)) || typeof fetcher !== 'function'
     || !Number.isSafeInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > DRIVE_UPLOAD_LIMITS.requestMs
-    || !Number.isSafeInteger(maxRunMs) || maxRunMs < 1 || maxRunMs > DRIVE_UPLOAD_LIMITS.totalMs) throw error('DRIVE_CONFIGURATION_INVALID');
+    || !Number.isSafeInteger(maxRunMs) || maxRunMs < 1 || maxRunMs > DRIVE_UPLOAD_LIMITS.totalMs
+    || typeof includeEvidence !== 'boolean') throw error('DRIVE_CONFIGURATION_INVALID');
   const input = resolve(file), pathInfo = await lstat(input);
   if (!pathInfo.isFile() || pathInfo.isSymbolicLink() || pathInfo.size < 40 || pathInfo.size > DRIVE_UPLOAD_LIMITS.bytes) throw error('DRIVE_FILE_INVALID');
   const key = readKey(env.ORQUIVIA_BACKUP_KEY); let handle;
@@ -218,6 +219,12 @@ export async function uploadBackup({ file, env = process.env, fetcher = globalTh
     const original = await handle.stat();
     if (!unchanged(pathInfo, original)) throw error('DRIVE_FILE_CHANGED');
     const manifest = await verifyArchive({ file: input, key }); assertRecoveryContents(manifest);
+    // This aggregate comes from the authenticated archive, never from a browser
+    // flag or unverified source response. Validate it before contacting Drive.
+    const objects = manifest.entries.filter(entry => entry.metadata?.kind === 'storage-object');
+    const storageBytes = objects.reduce((total, entry) => total + entry.size, 0);
+    if (includeEvidence && (!/^[a-f0-9]{40}$/.test(manifest.source?.commit || '')
+      || !Number.isSafeInteger(storageBytes))) throw error('DRIVE_ARCHIVE_METADATA_INVALID');
     if (!unchanged(original, await stat(input)) || !unchanged(original, await handle.stat())) throw error('DRIVE_FILE_CHANGED');
     const hashes = await digests(handle, original), request = requester({ fetcher, timeoutMs, maxRunMs });
     let token = await accessToken(config, request);
@@ -246,7 +253,8 @@ export async function uploadBackup({ file, env = process.env, fetcher = globalTh
       // sharing or delete a file automatically if the permissions changed.
       await assertFolder(config, token, request);
       await assertAllowedSharing(completed.id, config.allowedEmails, token, request);
-      return { status: 'uploaded-and-verified', encryptedBytes: original.size, checksumVerified: true, permissionsChecked: true, recoveryTested: false };
+      return { status: 'uploaded-and-verified', encryptedBytes: original.size, checksumVerified: true, permissionsChecked: true, recoveryTested: false,
+        ...(includeEvidence ? { operationalEvidence:{sourceCommit:manifest.source.commit,storageObjects:objects.length,storageBytes,archiveSha256:hashes.sha256} } : {}) };
     } finally { token = null; }
   } finally { key.fill(0); await handle?.close(); }
 }

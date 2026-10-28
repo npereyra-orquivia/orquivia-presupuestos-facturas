@@ -18,7 +18,7 @@ const ENV = { ORQUIVIA_DRIVE_UPLOAD_ENABLED: 'true', ORQUIVIA_DRIVE_FOLDER_ID: F
   ORQUIVIA_DRIVE_REFRESH_TOKEN: 'fixture-only-refresh-token-not-real' };
 const json = (value, status = 200) => new Response(JSON.stringify(value), { status, headers: { 'content-type': 'application/json' } });
 
-async function fixture(t, { incomplete = false, large = false } = {}) {
+async function fixture(t, { incomplete = false, large = false, sourceCommit, original = false } = {}) {
   const root = await mkdtemp(join(tmpdir(), 'orquivia-drive-test-'));
   t.after(async () => { assert.ok(root.startsWith(join(tmpdir(), 'orquivia-drive-test-'))); await rm(root, { recursive: true, force: true }); });
   const key = randomBytes(32), file = join(root, 'orquivia-fixture.orqbackup');
@@ -26,7 +26,8 @@ async function fixture(t, { incomplete = false, large = false } = {}) {
     ...['auth', 'vault-secrets', 'recovery'].map(name => bufferEntry(`configuration/${name}.json`, '{}')),
     ...['buckets', 'inventory'].map(name => bufferEntry(`storage/${name}.json`, '[]'))];
   if (large) entries.push(bufferEntry('large/private.dat', Buffer.alloc(7 * 1024 * 1024, 123)));
-  await writeArchive({ output: file, key, source: { projectRef: 'abcdefghijklmnopqrst', storageObjects: 0 }, entries: incomplete ? entries.slice(0, 2) : entries });
+  if (original) entries.push(bufferEntry('storage/objects/receipts/org/test.pdf', 'stub', {kind:'storage-object',bucket:'receipts',name:'org/test.pdf',size:4}));
+  await writeArchive({ output: file, key, source: { projectRef: 'abcdefghijklmnopqrst', storageObjects: original ? 1 : 0, ...(sourceCommit ? {commit:sourceCommit} : {}) }, entries: incomplete ? entries.slice(0, 2) : entries });
   const bytes = await readFile(file);
   const env = { ...ENV, ORQUIVIA_BACKUP_KEY: key.toString('base64') };
   return { root, file, bytes, env, key };
@@ -108,6 +109,15 @@ test('only a verified complete encrypted archive is uploaded to the configured f
   assert.ok(mock.calls.filter(call => call.url.includes('/permissions')).every(call => call.options.method === 'GET'));
   assert.ok(mock.calls.filter(call => call.url.includes('/permissions')).every(call => new URL(call.url).searchParams.get('fields').includes('emailAddress')));
   assert.doesNotMatch(JSON.stringify(result), /token|fixture_private|uploaded_file|client_secret|BACKUP_KEY/);
+});
+
+test('optional health evidence is derived from the authenticated archive only after verified upload', async t => {
+  const commit='a'.repeat(40), f=await fixture(t,{sourceCommit:commit,original:true}),mock=service(f);
+  const result=await uploadBackup({file:f.file,env:f.env,fetcher:mock.fetcher,includeEvidence:true});
+  assert.deepEqual(result.operationalEvidence,{sourceCommit:commit,storageObjects:1,storageBytes:4,archiveSha256:createHash('sha256').update(f.bytes).digest('hex')});
+  const missing=await fixture(t);let calls=0;
+  await assert.rejects(uploadBackup({file:missing.file,env:missing.env,fetcher:()=>{calls++;},includeEvidence:true}),{code:'DRIVE_ARCHIVE_METADATA_INVALID'});
+  assert.equal(calls,0);
 });
 
 test('one authorized owner or exactly two authorized people with supported roles can receive a copy', async t => {

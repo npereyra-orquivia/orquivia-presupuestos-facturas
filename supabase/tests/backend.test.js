@@ -10,6 +10,45 @@ const token = (role = 'anon', extra = {}) => [
   { alg: 'HS256', typ: 'JWT' }, { role, exp: Math.floor(Date.now() / 1000) + 3600, ...extra },
 ].map((part) => Buffer.from(JSON.stringify(part)).toString('base64url')).concat('test-signature').join('.');
 
+test('backup evidence binds admin reads to the captured session and gracefully supports an older server',async()=>{
+  const originalFetch=globalThis.fetch;
+  const first={id:'f7100000-0000-4000-8000-000000000001',aud:'authenticated',email:'admin@example.test'};
+  const second={id:'f7100000-0000-4000-8000-000000000002',aud:'authenticated',email:'other@example.test'};
+  const org='f7200000-0000-4000-8000-000000000001';
+  const access={organization_id:org,organization_name:'Synthetic company',role:'admin',require_mfa:true};
+  const evidence={serverTime:'2026-10-28T10:00:00.000Z',lastAttempt:null,lastSuccess:null,lastRestore:null};
+  const json=(value,status=200)=>new Response(JSON.stringify(value),{status,headers:{'Content-Type':'application/json'}});
+  let signedIn=first,missing=true,healthRequests=0,delayed=null,release,backend;
+  globalThis.fetch=async(input,init={})=>{
+    const url=String(input);
+    if(url.includes('/auth/v1/token')){
+      signedIn=JSON.parse(init.body).email===second.email?second:first;
+      return json({access_token:token('authenticated',{sub:signedIn.id,aal:'aal2'}),refresh_token:'fixture-refresh',token_type:'bearer',expires_in:3600,user:signedIn});
+    }
+    if(url.includes('/auth/v1/user'))return json(signedIn);
+    if(url.includes('/rest/v1/rpc/refresh_orquivia_access'))return json(access);
+    if(url.includes('/rest/v1/rpc/load_orquivia_workspace'))return json({...access,state:empty(),version:1});
+    if(url.includes('/rest/v1/rpc/load_orquivia_backup_health')){
+      healthRequests++;assert.deepEqual(JSON.parse(init.body),{p_organization_id:org,p_expected_user_id:first.id});
+      if(delayed){delayed();await new Promise(done=>{release=done;});}
+      return missing?json({code:'PGRST202',message:'Function unavailable'},404):json(evidence);
+    }
+    throw new Error('Unexpected fixture request');
+  };
+  try{
+    backend=createBackend({url:'https://example.supabase.co',anonKey:'sb_publishable_test'});
+    await backend.signIn(first.email,'fictional-password');await backend.loadState();
+    assert.equal(await backend.operationsHealth(),null);
+    missing=false;assert.deepEqual(await backend.operationsHealth(),evidence);
+    access.role='editor';await assert.rejects(backend.operationsHealth(),{code:'ADMIN_REQUIRED'});
+    assert.equal(healthRequests,2,'An editor cannot call the private evidence RPC');
+    access.role='admin';
+    const started=new Promise(done=>{delayed=done;});const pending=backend.operationsHealth();await started;
+    await backend.signIn(second.email,'fictional-password');release();
+    await assert.rejects(pending,{code:'AUTH_CHANGED'});
+  }finally{backend?.dispose();globalThis.fetch=originalFetch;}
+});
+
 test('cloud validation snapshots records and rejects invalid/orphaned financial data', () => {
   const original = empty();
   original.clients.push({ id: 'c1', name: 'Cliente' });

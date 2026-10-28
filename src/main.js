@@ -64,6 +64,7 @@ let personalDevice={capability:pushCapability(),ready:false,active:false,config:
 let sidebarCollapsed=localStorage.getItem('orquivia.sidebar.collapsed')==='true';
 let pendingAlertView=false;
 let workspaceConflict=null;
+let operationsEvidence=null,operationsEvidenceReceivedAt=null,operationsEvidenceLoading=false,operationsEvidenceError='',operationsEvidenceRequestedAt=null,operationsEvidenceTimer=null;
 let config={url:import.meta.env.VITE_SUPABASE_URL||'',anonKey:import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY||''};
 const mailFeature=mailEnabled?createMailFeature({getUser:()=>user,getMode:()=>mode,getBackend:()=>backend,scope:operationScope,
   root:modalRoot,logoUrl:documentLogo,openModal,closeModal,header:modalHeader,cleanup:registerModalCleanup,
@@ -74,7 +75,7 @@ if(!production)try{const saved=JSON.parse(localStorage.getItem('orquivia.connect
 const labels={dashboard:'Resumen',quotes:'Presupuestos',invoices:'Facturas',expenses:'Gastos',reports:'Informes y gestor',statements:'Estados financieros',clients:'Clientes',reminders:'Recordatorios',settings:'Configuración',personal:'Mi espacio'};
 function lockPrivate(message='',{restoring=false}={}){
   const generation=++accessGeneration,activeBackend=backend;
-  appControlsCleanup?.();appControlsCleanup=null;resetPersonal();
+  appControlsCleanup?.();appControlsCleanup=null;resetPersonal();resetOperationsEvidence();
   state=emptyState();user=null;mode='locked';editor=null;busy=false;workspaceConflict=null;viewState=defaultViewState(todayISO());closeModal(true);
   accessUI=renderAccess(app,{backend,logo,brandLogo,message,restoring,recoveryRedirectTo:recoveryRedirectURL.href,onAuthenticated:async({user:account,state:loaded,restored})=>{
     if(generation!==accessGeneration||backend!==activeBackend)return;
@@ -179,7 +180,7 @@ function render(){
   app.innerHTML=`<aside class="sidebar ${sidebarCollapsed?'is-collapsed':''}" id="primary-sidebar"><a class="brand" href="#" data-nav="dashboard" aria-label="Orquivia · Resumen"><img class="brand-full" src="${brandLogo}" alt="Orquivia"><img class="brand-mark" src="${markLogo}" alt=""></a><button class="icon-btn sidebar-toggle" data-action="sidebar-toggle" aria-controls="primary-sidebar" aria-expanded="${!sidebarCollapsed}" aria-label="${sidebarCollapsed?'Desplegar barra lateral':'Plegar barra lateral'}" title="${sidebarCollapsed?'Desplegar barra lateral':'Plegar barra lateral'}">${icon('chevron')}</button><div class="workspace-label">TU ESPACIO DE TRABAJO</div><nav aria-label="Navegación principal">${Object.entries(labels).filter(([id])=>id!=='personal').map(([id,label])=>`<button data-nav="${id}" aria-label="${label}" title="${label}" class="nav-item ${page===id?'active':''}">${icon({dashboard:'grid',quotes:'quote',invoices:'invoice',expenses:'euro',reports:'report',statements:'report',clients:'clients',reminders:'bell',settings:'settings'}[id])}<span>${label}</span>${id==='reminders'&&due.length?`<b>${due.length}</b>`:''}</button>`).join('')}</nav><div class="sidebar-bottom"><div class="help-card">${icon('shield')}<strong>Todo tiene su seguimiento</strong><p>Fechas, contratos y cobros en un mismo lugar.</p><button data-nav="reminders">Ver recordatorios ${icon('arrow')}</button></div><div class="profile"><button class="profile-main" data-nav="personal" aria-label="Mi espacio · ${esc(name)}" title="Mi espacio · ${esc(name)}">${avatarMarkup(name,personalPhotoUrl)}<span class="profile-copy"><strong>${esc(name)}</strong><small>${esc(normalizeOrquivia(state.company.name||'Orquivia'))}</small></span></button>${mode==='cloud'?`<button class="icon-btn" data-action="logout" aria-label="Cerrar sesión">${icon('logout')}</button>`:''}</div></div></aside><div class="shell ${sidebarCollapsed?'is-collapsed':''}"><header class="topbar"><div class="breadcrumb"><button class="icon-btn mobile-menu" data-action="menu" aria-label="Abrir menú">${icon('menu')}</button><span>Mi empresa</span>${icon('chevron')}<strong>${labels[page]}</strong></div><div class="topbar-right"><span class="connection ${mode==='cloud'?'connected':''}"><i></i>${mode==='cloud'?'Conectado a Supabase':mode==='demo'?'Modo de prueba':'Preparación local'}</span><button class="notification-btn icon-btn" data-nav="reminders" aria-label="Ver ${due.length} recordatorios">${icon('bell')}${due.length?'<i></i>':''}</button><button class="topbar-profile" data-nav="personal" aria-label="Abrir mi espacio · ${esc(name)}" title="Mi espacio">${avatarMarkup(name,personalPhotoUrl,'small')}</button></div></header><main><div class="demo-strip ${mode==='cloud'?'hidden':''}">${icon('info')}<span>${mode==='demo'?'Datos de ejemplo.':'Datos reales en preparación local. Todavía no están publicados.'}</span><button data-nav="settings">Preparar mi empresa ${icon('arrow')}</button></div>${page==='dashboard'?dashboard():page==='quotes'||page==='invoices'?documentsPage():page==='expenses'?expensesPage(state,viewState.expenses):page==='reports'?reportsPage(state,viewState.reports):page==='statements'?statementsPage(state,viewState.statements):page==='clients'?clientsPage():page==='reminders'?remindersPage():page==='personal'?personalPage({profile:personalProfile,user,photoUrl:personalPhotoUrl,mode,loading:personalLoading,error:personalError,device:personalDevice,account:mode==='cloud'?accountMarkup():''}):settingsPage()}</main><footer class="app-footer"><span>Orquivia · Un poco menos de administración, un poco más de calma.</span><span>${mode==='cloud'?'Sesión privada · '+esc(user?.email||''):'Preparación en este ordenador'}</span></footer></div>`;
   app.querySelector('.app-footer > span').append(` · v${appVersion}`);
   if(mailEnabled&&page==='personal'){const host=document.createElement('div');app.querySelector('main').append(host);mailFeature.mountSettings(host);}
-  bindApp();bindExpenses(app,expenseContext());bindReports(app,expenseContext());bindStatements(app,expenseContext());personalBindingCleanup=bindPersonal(app,personalContext());appControlsCleanup=enhanceControls(app);mountConflictNotice();
+  bindApp();bindExpenses(app,expenseContext());bindReports(app,expenseContext());bindStatements(app,expenseContext());personalBindingCleanup=bindPersonal(app,personalContext());appControlsCleanup=enhanceControls(app);mountConflictNotice();mountOperationsEvidence();
 }
 function heading(eyebrow,title,description,action=''){return `<div class="page-heading"><div><div class="eyebrow">${eyebrow}</div><h1>${title}</h1><p>${description}</p></div>${action}</div>`}
 const newButton=(kind='quote')=>`<button class="button primary" data-action="new" data-kind="${kind}">${icon('plus')}${kind==='invoice'?'Nueva factura':'Nuevo presupuesto'}</button>`;
@@ -225,7 +226,33 @@ function settingsPage(){
   '<section class="card settings-card"><div class="card-header"><h2>Conectar el proyecto de Supabase</h2>'+icon('shield')+'</div><form id="connection-form">'+field('URL de tu proyecto','url',config.url,'url','required placeholder="https://tu-proyecto.supabase.co"')+field('Clave pública (publishable)','anonKey',config.anonKey,'password','required autocomplete="off" placeholder="sb_publishable_…"')+'<p class="field-hint">La importación definitiva se realizará desde el servidor. Las claves secretas se rechazan en este formulario.</p><button class="button secondary full">Conectar e iniciar sesión</button></form></section>')+
   '<section class="card settings-card"><h2>Copias de seguridad</h2><p class="settings-copy">La copia JSON contiene datos privados y las referencias de los justificantes. Los archivos se descargan desde Informes y gestor, por trimestre, año o todo el histórico.</p><div class="backup-actions"><button class="button secondary" data-action="backup">'+icon('download')+'Descargar copia</button>'+
   (mode==='cloud'?'<p class="field-hint">Las restauraciones de la empresa se realizan mediante el procedimiento de administración, conservando la numeración y el historial.</p>':'<label class="button secondary">'+icon('upload')+'Restaurar copia<input id="restore-input" class="visually-hidden" type="file" accept=".json,application/json"></label>')+
-  '</div></section>'+renderOperationsHealth(state,{role:mode==='cloud'?backend.workspaceInfo()?.role:null,version:appVersion})+'</div></div>';
+  '</div></section>'+operationsHealthMarkup()+'</div></div>';
+}
+function operationsHealthMarkup(){return renderOperationsHealth(state,{role:mode==='cloud'?backend.workspaceInfo()?.role:null,version:appVersion,evidence:operationsEvidence,evidenceReceivedAt:operationsEvidenceReceivedAt,now:performance.now(),evidenceLoading:operationsEvidenceLoading,evidenceError:operationsEvidenceError})}
+function resetOperationsEvidence(){clearTimeout(operationsEvidenceTimer);operationsEvidenceTimer=null;operationsEvidence=null;operationsEvidenceReceivedAt=null;operationsEvidenceLoading=false;operationsEvidenceError='';operationsEvidenceRequestedAt=null}
+function refreshOperationsEvidencePanel(){
+  const panel=app.querySelector('.operations-health');if(!panel||page!=='settings'||mode!=='cloud')return;
+  const detailsOpen=Boolean(panel.querySelector('details')?.open);panel.outerHTML=operationsHealthMarkup();
+  const details=app.querySelector('.operations-health details');if(details&&detailsOpen)details.open=true;
+}
+function mountOperationsEvidence(){
+  clearTimeout(operationsEvidenceTimer);operationsEvidenceTimer=null;
+  if(page!=='settings'||mode!=='cloud'||backend?.workspaceInfo()?.role!=='admin')return;
+  refreshOperationsEvidencePanel();
+  // Refresh just this read-only panel. A late response must not replace an open
+  // company form, reset its unsaved fields, or cross an account/session change.
+  const scope=operationScope();operationsEvidenceTimer=setTimeout(()=>{if(scope())mountOperationsEvidence()},60000);
+  const now=performance.now();
+  if(operationsEvidenceLoading||(operationsEvidenceRequestedAt!==null&&now-operationsEvidenceRequestedAt<60000))return;
+  operationsEvidenceLoading=true;operationsEvidenceError='';operationsEvidenceRequestedAt=now;refreshOperationsEvidencePanel();
+  const activeBackend=backend;
+  void activeBackend.operationsHealth().then(evidence=>{
+    if(!scope())return;operationsEvidence=evidence;operationsEvidenceReceivedAt=performance.now();
+  }).catch(()=>{
+    if(!scope())return;operationsEvidence=null;operationsEvidenceReceivedAt=null;operationsEvidenceError='No se ha podido comprobar la evidencia del servidor.';
+  }).finally(()=>{
+    if(!scope())return;operationsEvidenceLoading=false;refreshOperationsEvidencePanel();
+  });
 }
 function bindApp(){
   app.querySelectorAll('[data-nav]').forEach(b=>b.onclick=e=>{e.preventDefault();navTo(b.dataset.nav)});
