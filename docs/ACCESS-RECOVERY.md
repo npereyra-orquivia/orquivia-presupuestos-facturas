@@ -24,6 +24,8 @@ Utilizar «¿Has olvidado la contraseña?» en la dirección oficial. La titular
 
 Si no llega el mensaje, comprobar primero el remitente, el estado de SMTP y el correo no deseado. Si `acceso@orquivia.com` sigue siendo un alias, una nueva contraseña del buzón personal puede requerir actualizar por separado la credencial SMTP guardada en Supabase. No cambiar las conexiones personales de envío de documentos como sustituto de esa comprobación.
 
+El 28 de octubre de 2026 la titular confirmó que no dispone de más buzones en su plan y eligió mantener el buzón personal existente como autenticación SMTP y el alias de acceso como remitente. Se comprobó que esa es la configuración actual, sin crear cuentas adicionales ni contratar capacidad. Una contraseña nueva del buzón debe actualizarse en cada conexión que la utilice y en el paquete privado de recuperación; el alias no dispone de una contraseña independiente.
+
 El cambio de contraseña debe introducirlo y confirmarlo la titular. Comprobar después el inicio normal y la verificación del portal. El cierre de sesiones y la expiración de JWT tienen sus propios plazos; no prometer revocación instantánea de todas las copias de tokens ya emitidos.
 
 ## Pérdida del móvil o del autenticador

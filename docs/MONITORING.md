@@ -28,6 +28,10 @@ El proceso devuelve código `0` si pasan todas las comprobaciones configuradas y
 
 El workflow técnico puede ejecutar este comando cada seis horas en la rama operativa y manualmente. Los avisos de fallo los proporciona GitHub Actions según las preferencias de notificación de la cuenta; configurar la recepción de ejecuciones fallidas y comprobarla. No se habilita un envío automático desde el correo personal o el remitente de acceso de Orquivia.
 
+El 28 de octubre de 2026 se comprobó en la cuenta operadora que los avisos de Actions están activados en GitHub y por correo, solo para ejecuciones fallidas. La dirección de destino coincide con la cuenta de la titular. Esto verifica la configuración, no la entrega efectiva.
+
+Para comprobar el circuito con autorización de la destinataria, la ejecución manual admite `test_failure_notification=true`. Primero se realiza la comprobación normal del portal; después un trabajo independiente sin secretos ni permisos genera un fallo etiquetado expresamente como prueba. No se ejecuta en el horario automático, no modifica la aplicación ni comunica datos de la empresa. La destinataria debe confirmar que recibe el aviso antes de considerar verificado ese canal.
+
 Un fallo exige revisar la ejecución y distinguir un problema transitorio de un despliegue incompleto. Si falla una entrada, revisar el último despliegue; si falla el servicio de acceso, revisar la disponibilidad del proyecto de Supabase. No repetir envíos comerciales ni cambiar datos para resolver un fallo del monitor.
 
 ## Qué no acredita
