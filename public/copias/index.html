@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="Información de Orquivia Copias, la conexión privada de respaldo cifrado del portal de Orquivia con Google Drive.">
+    <meta name="referrer" content="no-referrer">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'self'; img-src 'self'; base-uri 'none'; form-action 'none'; object-src 'none'">
+    <title>Orquivia Copias · Respaldo privado</title>
+    <link rel="icon" href="../orquivia-logo-mark.svg" type="image/svg+xml">
+    <link rel="stylesheet" href="./styles.css">
+  </head>
+  <body>
+    <a class="skip-link" href="#contenido">Ir al contenido</a>
+    <header class="site-header">
+      <a class="brand" href="./" aria-label="Orquivia Copias, inicio">
+        <img src="../orquivia-logo-full.svg" alt="Orquivia" width="1079" height="275">
+        <span>Copias</span>
+      </a>
+      <nav aria-label="Navegación principal">
+        <a href="./privacidad.html">Privacidad</a>
+        <a href="../">Ir al portal <span aria-hidden="true">↗</span></a>
+      </nav>
+    </header>
+    <main id="contenido">
+      <section class="intro" aria-labelledby="titulo">
+        <p class="eyebrow">Una conexión privada de Orquivia</p>
+        <h1 id="titulo">Tus copias, en tu Google Drive.</h1>
+        <p class="lead">Orquivia Copias conecta el sistema de respaldo del portal de Orquivia con una carpeta autorizada de Google Drive. Su finalidad es guardar y comprobar copias cifradas de la información de la empresa.</p>
+        <p class="context">Es una herramienta de uso interno de ORQUIVIA GLOBAL SL. Esta página explica la conexión; no permite iniciar sesión, consultar documentos ni acceder a las copias.</p>
+      </section>
+      <section class="steps" aria-label="Cómo funciona la conexión">
+        <article class="step">
+          <span class="step-number" aria-hidden="true">01</span>
+          <h2>Autorización limitada</h2>
+          <p>La titular elige su cuenta y autoriza personalmente el permiso de Google <code>drive.file</code>. Solo alcanza los archivos creados por la aplicación o los que se comparten expresamente con ella.</p>
+        </article>
+        <article class="step">
+          <span class="step-number" aria-hidden="true">02</span>
+          <h2>Respaldo cifrado</h2>
+          <p>La herramienta prepara el archivo de respaldo cifrado con AES-256-GCM antes de subirlo. La clave de recuperación se conserva por separado del archivo de Drive.</p>
+        </article>
+        <article class="step">
+          <span class="step-number" aria-hidden="true">03</span>
+          <h2>Destino comprobado</h2>
+          <p>El ejecutor contrasta los permisos de la carpeta con la lista de personas autorizadas y verifica el tamaño y la suma de comprobación del archivo subido.</p>
+        </article>
+      </section>
+      <section class="notice" aria-labelledby="control">
+        <div>
+          <p class="eyebrow">Control de la titular</p>
+          <h2 id="control">La autorización no activa las copias por sí sola.</h2>
+        </div>
+        <div>
+          <p>El destino, la conexión y el procedimiento de recuperación deben comprobarse antes de habilitar una programación automática. Una subida verificada acredita el archivo transferido; por sí sola no demuestra que se haya restaurado todo el sistema.</p>
+          <p>Esta conexión no solicita acceso general a Google Drive, Gmail, Contactos o Calendario, ni conecta la unidad al chat. Puedes consultar cómo se usan los datos y cómo retirar el acceso en la <a href="./privacidad.html">información de privacidad</a>.</p>
+        </div>
+      </section>
+      <section class="contact" aria-labelledby="contacto">
+        <h2 id="contacto">Contacto</h2>
+        <p>Para consultas sobre esta conexión o sus datos: <a href="mailto:acceso@orquivia.com">acceso@orquivia.com</a>.</p>
+      </section>
+    </main>
+    <footer class="site-footer">
+      <p>ORQUIVIA GLOBAL SL · Orquivia Copias</p>
+      <a href="./privacidad.html">Privacidad de la conexión</a>
+    </footer>
+  </body>
+</html>
