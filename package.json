@@ -21,7 +21,7 @@
     "pdfjs-dist": "^6.4.299"
   },
   "devDependencies": {
-    "@electric-sql/pglite": "0.5.9",
+    "@electric-sql/pglite": "0.5.12",
     "imapflow": "2.4.3",
     "nodemailer": "10.2.1",
     "vite": "^7.0.0"
