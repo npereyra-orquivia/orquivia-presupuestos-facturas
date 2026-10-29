@@ -2,7 +2,7 @@
 
 Portal en español para **GitHub Pages + Supabase**. Nicole y Liliana trabajan con los mismos clientes, presupuestos, facturas, cobros y gastos, cada una con su cuenta. Nicole administra la empresa y el saldo inicial; Liliana puede editar documentos, registrar cobros y gestionar gastos y justificantes. La página pública contiene la interfaz y la pantalla de acceso; los datos y los archivos privados de la empresa se cargan desde Supabase después de verificar la cuenta y el segundo factor.
 
-La versión es **1.5.2**, con la referencia estable anterior **1.4.1** conservada. La migración 016 evita reintentos del servicio al comunicar conflictos entre ediciones; conserva los bloqueos, permisos y datos. Incluye envío de presupuestos y facturas desde el correo de cada usuaria, firma personal, destinatarios en copia e historial combinado de cambios y envíos. La ampliación añade herramientas operativas y comprobaciones, sin cambiar los documentos ni importar datos. Consulta [el despliegue y el respaldo de la 1.0](EMAIL-V1.1.md) y [la referencia de operación](docs/OPERATIONS.md).
+La versión es **1.6.0**, con la referencia estable anterior **1.4.1** conservada. La migración 016 evita reintentos del servicio al comunicar conflictos entre ediciones; conserva los bloqueos, permisos y datos. Incluye envío de presupuestos y facturas desde el correo de cada usuaria, firma personal, destinatarios en copia e historial combinado de cambios y envíos. La ampliación añade herramientas operativas y comprobaciones, sin cambiar los documentos ni importar datos. Consulta [el despliegue y el respaldo de la 1.0](EMAIL-V1.1.md) y [la referencia de operación](docs/OPERATIONS.md).
 
 ## Seguridad, copias y operación
 
@@ -176,3 +176,11 @@ npm run build:production
 ```
 
 La carpeta `dist` es el resultado estático. Las pruebas de PostgreSQL y sus límites se describen en [supabase/README.md](supabase/README.md); las pruebas locales no verifican Supabase Auth, el gateway, el correo ni la concurrencia real del proyecto desplegado.
+
+## Cierre del gestor y previsión
+
+Estados financieros admite una referencia contable acumulada desde enero, importada por administración en JSON validado. Se comprueban NIF, fechas, sumas del resultado, igualdad del balance, fuentes con SHA-256 y períodos fiscales. Los informes originales y los importes de empresa no se incluyen en el código público. La importación modifica solo los datos contables de empresa, conserva los registros operativos y pasa por el control de versiones e historial existente.
+
+A la fecha exacta del cierre, las cuentas muestran la referencia aportada. En períodos acumulados posteriores se utiliza el cierre una vez y se añaden únicamente facturas y costes posteriores; el balance posterior sigue siendo provisional. La comparación con los justificantes permanece visible: un cierre agregado no acredita por sí solo el tratamiento individual del IVA ni resuelve sus revisiones. Las declaraciones se conservan como referencias y no crean nuevos pagos.
+
+La previsión permite guardar ventas y costes futuros no registrados, coste adicional de nómina y una provisión opcional de Impuesto sobre Sociedades. Los importes pendientes permanecen separados y el resultado después de provisión queda sin completar si faltan el impuesto o revisiones posteriores. No calcula una retribución personal óptima ni dividendos disponibles. CSV y PDF conservan el origen, las fechas y las hipótesis. La referencia estable anterior permanece en la etiqueta v1.5.3.
