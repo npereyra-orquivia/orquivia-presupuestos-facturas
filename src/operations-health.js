@@ -3,7 +3,8 @@ import { escapeHTML } from './domain.js';
 // These are application validation limits, not a Supabase subscription quota.
 export const WORKSPACE_STATE_LIMIT_BYTES = 5_000_000;
 export const WORKSPACE_COLLECTION_LIMIT = 10_000;
-export const BACKUP_STALE_AFTER_MS = 36 * 60 * 60 * 1000;
+// Weekly Sunday copies allow one extra day before reporting missing evidence.
+export const BACKUP_STALE_AFTER_MS = 8 * 24 * 60 * 60 * 1000;
 export const BACKUP_ATTEMPT_UNFINISHED_AFTER_MS = 3 * 60 * 60 * 1000;
 const collections = Object.freeze([
   ['clients', 'Clientes'],
@@ -164,7 +165,7 @@ const evidenceMessages = Object.freeze({
   running: ['Copia en curso', 'Hay un intento iniciado. Solo se confirmará cuando termine la captura, la subida y sus verificaciones.'],
   unfinished: ['Intento sin finalizar', 'Han pasado tres horas o más desde el inicio y no consta un resultado final. Revisa la ejecución antes de dar la copia por terminada.'],
   failed: ['Último intento fallido', 'El último intento no se confirma como copia válida. Una copia anterior, si consta, se muestra debajo.'],
-  stale: ['Copia sin actualizar', 'Han pasado 36 horas o más sin una nueva copia verificada. Revisa la ejecución programada.'],
+  stale: ['Copia sin actualizar', 'Han pasado 8 días o más sin una nueva copia verificada. Revisa la ejecución semanal.'],
   recent: ['Copia verificada reciente', 'La captura y la subida constan verificadas, incluido el contenido transferido y las personas autorizadas en Drive.'],
 });
 
@@ -177,10 +178,11 @@ function renderEvidence(value, options) {
   const attempt = evidence?.lastAttempt, success = evidence?.lastSuccess, restore = evidence?.lastRestore;
   const attempts = { started: result.attemptUnfinished ? 'Sin finalizar' : status === 'running' ? 'En curso' : 'Sin final registrado', succeeded: 'Finalizado', failed: 'Fallido' };
   return `<div class="operations-health-verification" data-evidence-status="${status}"><strong>Copias y recuperación</strong><span role="status">${label}</span><p>${message}</p>
+    <p class="operations-health-note">Programación: domingos. Aviso de antigüedad a partir de 8 días.</p>
     ${evidence ? `<dl class="operations-health-evidence"><div><dt>Último intento</dt><dd>${attempt ? `${attempts[attempt.status]} · ${date(attempt.finishedAt ?? attempt.startedAt)}` : 'Sin registrar'}</dd></div>
       <div><dt>Última copia verificada</dt><dd>${success ? date(success.finishedAt) : 'Sin registrar'}</dd></div>
       ${success ? `<div><dt>Archivo cifrado</dt><dd>${formatCapacityBytes(success.encryptedBytes)}</dd></div><div><dt>Originales del respaldo</dt><dd>${numbers.format(success.storageObjects)} archivos · ${formatCapacityBytes(success.storageBytes)}</dd></div><div><dt>Código del respaldo</dt><dd><code>${success.sourceCommit.slice(0, 8)}</code></dd></div>` : ''}</dl>` : ''}
-    ${result.backupStale && status !== 'stale' ? '<p class="operations-health-warning">Han pasado 36 horas o más sin una nueva copia verificada.</p>' : ''}
+    ${result.backupStale && status !== 'stale' ? '<p class="operations-health-warning">Han pasado 8 días o más sin una nueva copia verificada.</p>' : ''}
     <div class="operations-health-restore"><strong>Recuperación</strong><span>${restore ? 'Último ensayo registrado' : 'Pendiente de comprobar'}</span>
       ${restore ? `<p>${date(restore.verifiedAt)} · código <code>${restore.sourceCommit.slice(0, 8)}</code>. ${restore.scope === 'full-system' ? 'El informe acredita un ensayo del sistema completo para esa versión.' : 'El informe acredita la recuperación de datos y originales. No acredita la recuperación de las cuentas ni del segundo factor.'}</p>` : '<p>Una copia verificada no demuestra que se haya probado su recuperación. Este apartado solo cambia cuando existe un informe de un ensayo real.</p>'}</div>
     <p class="operations-health-note">Esta evidencia no mide las cuotas totales del proveedor ni confirma los avisos de supervisión pública.</p></div>`;
