@@ -1,3 +1,5 @@
+import { alignStatements } from './accountant-close.js';
+import { accountantPanel, bindAccountant } from './accountant-ui.js';
 import { todayISO, money, escapeHTML as esc } from './domain.js';
 import { profitLossReport } from './profit-loss.js';
 import { balanceSheetReport } from './balance-sheet.js';
@@ -29,7 +31,7 @@ export function buildStatements(state, preferences = {}, options = {}) {
     if(known(declared.bankBalance)){reportOptions.bankBalance=declared.bankBalance;reportOptions.bankSource=declared.source;}
     reportOptions.capitalFundingPending=declared.capitalFundingPending===true;
   }
-  return { period, profitLoss: profitLossReport(state,period,reportOptions), balance: balanceSheetReport(state,{asOf:period.to},reportOptions) };
+  return { period, ...alignStatements(state,period,profitLossReport(state,period,reportOptions),balanceSheetReport(state,{asOf:period.to},reportOptions),reportOptions) };
 }
 
 export function statementInputs(values){
@@ -62,17 +64,18 @@ const issueHTML = row => `<li><span><strong>${esc(row.label || row.description |
 
 /** This view displays recorded subtotals and missing information without inventing a closing entry. */
 export function statementsPage(state, preferences = {}, options = {}) {
-  const {period,profitLoss:p,balance:b} = buildStatements(state,preferences,options);
+  const {period,profitLoss:p,balance:b,alignment} = buildStatements(state,preferences,options);
   activePeriod = period;
   const pending = p.pending || [], missing = [...(b.missing || []),...(b.pending || [])], exclusions = p.excluded || [];
   const limitations = [...new Set([...(p.limitations || []),...(b.limitations || [])])];
   return `<div class="page-heading"><div><div class="eyebrow">ESTADOS FINANCIEROS</div><h1>La situación de tu empresa, en un informe.</h1><p>Consulta pérdidas y ganancias y balance de situación con los registros disponibles.</p></div></div>
     <section class="card statement-toolbar"><form id="statement-period-form"><label class="field"><span>Desde · pérdidas y ganancias</span><input type="date" name="statementFrom" value="${period.from}" required></label><label class="field"><span>Fecha de corte</span><input type="date" name="statementTo" value="${period.to}" required></label><button type="submit" class="button secondary">Aplicar fechas</button></form><div class="statement-downloads"><button type="button" class="button secondary" id="statements-csv">${icon('download')}Descargar detalle CSV</button><button type="button" class="button primary" id="statements-pdf">${icon('download')}Descargar los dos en PDF</button></div></section>
-    <div class="statement-notice" role="note">${icon('info')}<div><strong>Informe provisional · elaborado con los registros de la aplicación</strong><p>El resultado final y el balance completo requieren revisar las partidas pendientes y los datos contables que faltan. El PDF conserva estas indicaciones.</p></div></div>
-    <section class="statement-metrics" aria-label="Importes registrados"><article class="card"><span>Ventas sin IVA</span><strong>${esc(money(p.summary.salesBase))}</strong><small>Facturas emitidas del período, cobradas o no</small></article><article class="card"><span>Gastos con coste identificado</span><strong>${esc(money(p.summary.knownExpenses))}</strong><small>Las partidas sin valoración figuran pendientes</small></article><article class="card statement-metric-pending"><span>Resultado contable completo</span><strong>Por completar</strong><small>El subtotal antes de pendientes se muestra en la cuenta</small></article><article class="card"><span>Información pendiente</span><strong>${pending.length + missing.length}</strong><small>Revisiones de la cuenta y del balance</small></article></section>
-    <div class="statement-grid"><section class="card statement-section"><div class="card-header"><div><h2>Cuenta de pérdidas y ganancias</h2><p>Del ${dateLabel(period.from)} al ${dateLabel(period.to)} · criterio de devengo</p></div></div>${rowsTable('Cuenta de pérdidas y ganancias',p.lines || [],'No hay partidas registradas.')}<p class="statement-footnote">Los presupuestos, las aportaciones de socios y los cobros de facturas no se cuentan como ventas adicionales. El resultado final permanece pendiente mientras falte información.</p></section>
+    ${accountantPanel(alignment)}
+    <div class="statement-notice" role="note">${icon('info')}<div><strong>${p.accountantClose?'Referencia del gestor y operaciones posteriores':'Informe provisional · elaborado con los registros de la aplicación'}</strong><p>${p.accountantClose?'El cierre se utiliza una sola vez. El balance solo corresponde al gestor cuando coincide la fecha de corte; los períodos posteriores permanecen provisionales.':'El resultado final y el balance completo requieren revisar las partidas pendientes y los datos contables que faltan.'} El PDF conserva estas indicaciones.</p></div></div>
+    <section class="statement-metrics" aria-label="Importes registrados"><article class="card"><span>Ventas sin IVA</span><strong>${esc(money(p.summary.salesBase))}</strong><small>Facturas emitidas del período, cobradas o no</small></article><article class="card"><span>Gastos con coste identificado</span><strong>${esc(money(p.summary.knownExpenses))}</strong><small>${p.accountantClose?'Cierre del gestor más costes posteriores identificados':'Las partidas sin valoración figuran pendientes'}</small></article><article class="card statement-metric-pending"><span>${p.status==='accountant-reference'?'Resultado según informe del gestor':'Resultado contable completo'}</span><strong>${p.status==='accountant-reference'?esc(money(p.summary.netResult)):'Por completar'}</strong><small>${p.status==='accountant-reference'?'Resultado mostrado por el gestor; revisar impuestos y aplicación del beneficio':'El subtotal antes de pendientes se muestra en la cuenta'}</small></article><article class="card"><span>Información pendiente</span><strong>${p.status==='accountant-reference'?'Ver observaciones':pending.length + missing.length}</strong><small>${p.status==='accountant-reference'?'Composición de cuentas y conciliación de justificantes':'Revisiones de la cuenta y del balance'}</small></article></section>
+    <div class="statement-grid"><section class="card statement-section"><div class="card-header"><div><h2>Cuenta de pérdidas y ganancias</h2><p>Del ${dateLabel(period.from)} al ${dateLabel(period.to)} · criterio de devengo</p></div></div>${rowsTable('Cuenta de pérdidas y ganancias',p.lines || [],'No hay partidas registradas.')}<p class="statement-footnote">${p.accountantClose?'El informe conserva el cierre del gestor como referencia. Las partidas posteriores sin valoración no se han descontado y los importes no acreditan un dividendo disponible.':'Los presupuestos, las aportaciones de socios y los cobros de facturas no se cuentan como ventas adicionales. El resultado final permanece pendiente mientras falte información.'}</p></section>
     <section class="card statement-section"><div class="card-header"><div><h2>Balance de situación</h2><p>Situación a ${dateLabel(period.to)}</p></div></div><h3 class="statement-subheading">Activos identificados</h3>${rowsTable('Activos identificados',b.assets || [],'No hay activos identificados.')}<div class="statement-subtotal"><span>Suma de activos identificados</span><strong>${esc(amount(b.summary.knownAssets))}</strong></div><h3 class="statement-subheading">Pasivos identificados</h3>${rowsTable('Pasivos identificados',b.liabilities || [],'No hay deudas identificadas en los registros disponibles.')}<div class="statement-subtotal"><span>Suma de pasivos identificados</span><strong>${esc(amount(b.summary.knownLiabilities))}</strong></div><h3 class="statement-subheading">Patrimonio neto</h3>${rowsTable('Patrimonio neto',b.equity || [],'Pendiente de completar con los datos contables de la empresa.')}<p class="statement-footnote">${b.summary.balanced ? 'La comprobación aritmética no sustituye la revisión contable de las partidas.' : 'La igualdad entre activo, patrimonio neto y pasivo no puede verificarse con los datos disponibles. No se añade una partida artificial para cuadrarla.'}</p></section></div>
-    ${accountingForm(state,period)}
+    ${b.status==='accountant-reference'?'':accountingForm(state,period)}
     <section class="card statement-review"><div class="card-header"><div><h2>Información para completar el informe</h2><p>Estas partidas también se incluyen en el PDF y en el detalle descargable.</p></div></div><div class="statement-review-grid"><div><h3>Pérdidas y ganancias · ${pending.length} revisiones</h3><ul class="statement-issues">${pending.map(issueHTML).join('') || '<li>Sin revisiones específicas registradas para este período.</li>'}</ul></div><div><h3>Balance · ${missing.length} datos por completar</h3><ul class="statement-issues">${missing.map(issueHTML).join('') || '<li>Sin datos adicionales identificados.</li>'}</ul></div></div></section>
     ${exclusions.length ? `<details class="card statement-details"><summary>Movimientos separados del resultado · ${exclusions.length}</summary><ul class="statement-issues">${exclusions.map(issueHTML).join('')}</ul></details>` : ''}
     <details class="card statement-details"><summary>Criterios y alcance del informe</summary><ul class="statement-method">${limitations.map(value=>`<li>${esc(value)}</li>`).join('')}</ul><p class="statement-footnote">El saldo bancario refleja los registros disponibles a la fecha de corte. Un extracto y la contabilidad del gestor permiten comprobar la integridad y el tratamiento de las partidas.</p></details>`;
@@ -85,9 +88,10 @@ function csvCell(value) {
 }
 
 /** A traceable support export: blank amounts remain missing, rather than becoming zero. */
-export function statementsCSV({period,profitLoss:p,balance:b}) {
+export function statementsCSV({period,profitLoss:p,balance:b,alignment}) {
   const rows = [['Estado financiero','Tipo de registro','Fecha','Concepto','Importe EUR','Criterio / situación']];
   rows.push(['General','Período',period.to,`Desde ${period.from} hasta ${period.to}`,'','Estados financieros provisionales · registros de la aplicación']);
+  if(p.accountantClose) rows.push(['General','Referencia gestor',p.accountantClose.asOf,p.accountantClose.source,'','Los registros anteriores al cierre no se vuelven a sumar']);
   for (const row of p.lines || []) rows.push(['Pérdidas y ganancias','Partida',period.to,row.label,known(row.amount)?row.amount:'',known(row.amount)?'Importe identificado':'Por completar']);
   for (const row of p.invoices || []) rows.push(['Pérdidas y ganancias','Factura emitida',row.date,[row.number,row.description].filter(Boolean).join(' · '),known(row.amount)?row.amount:'','Venta sin IVA; criterio de devengo']);
   for (const row of p.expenses || []) rows.push(['Pérdidas y ganancias','Gasto de soporte',row.date,[row.description,row.supplier].filter(Boolean).join(' · '),known(row.costKnown)?row.costKnown:'',`Total del documento: ${known(row.grossTotal)?row.grossTotal.toFixed(2):'pendiente'} EUR. ${known(row.costKnown)?'Coste identificado':'Coste pendiente de confirmar'}`]);
@@ -96,6 +100,14 @@ export function statementsCSV({period,profitLoss:p,balance:b}) {
   for (const [group,entries] of [['Activo',b.assets],['Pasivo',b.liabilities],['Patrimonio neto',b.equity]]) for (const row of entries || []) rows.push(['Balance de situación',group,b.asOf,row.label,known(row.amount)?row.amount:'',row.source || 'Partida identificada']);
   for (const row of b.missing || []) rows.push(['Balance de situación','Dato pendiente',b.asOf,row.label,'','Por completar; no equivale a cero']);
   for (const row of b.pending || []) rows.push(['Balance de situación','Revisión pendiente',b.asOf,row.label,known(row.amount)?row.amount:'','Importe de referencia por comprobar']);
+  if(alignment){
+    const a=alignment;rows.push(['Previsión','Referencia',a.close.asOf,a.close.source,a.close.profitLoss.resultBeforeTax,'Resultado antes de impuestos según gestor']);
+    for(const row of a.comparison) rows.push(['Conciliación','Diferencia',a.close.asOf,row.label,row.difference,`Gestor: ${row.accountant.toFixed(2)} EUR; portal identificado: ${row.application.toFixed(2)} EUR`]);
+    for(const [key,label] of [['futureSales','Ventas futuras sin IVA'],['futureCosts','Costes futuros'],['payrollCost','Coste adicional de nómina'],['taxProvision','Provisión estimada IS']]) rows.push(['Previsión','Hipótesis',a.through,label,a.forecast[key]??'','No es una operación real ni un impuesto presentado']);
+    rows.push(['Previsión','Estimación',a.through,'Resultado antes de impuestos y partidas pendientes',a.beforeTax,'Provisional; no equivale al dividendo repartible']);
+    rows.push(['Previsión','Pendientes',a.through,'Importes posteriores pendientes de valoración',a.pendingGross,'No descontados del subtotal']);
+    rows.push(['Previsión','Estimación',a.through,'Después de provisión indicada',a.afterTax??'','Por completar si falta impuesto o hay revisiones pendientes']);
+  }
   for (const text of [...new Set([...(p.limitations || []),...(b.limitations || [])])]) rows.push(['General','Criterio',period.to,text,'','Alcance del informe']);
   return '\ufeff' + rows.map(row=>row.map(csvCell).join(';')).join('\r\n');
 }
@@ -112,6 +124,7 @@ async function logoData(url) {
 
 export function bindStatements(root,ctx) {
   const form=root.querySelector('#statement-period-form');if(!form)return;
+  bindAccountant(root,ctx,activePeriod);
   form.onsubmit=event=>{
     event.preventDefault();
     const from=form.elements.statementFrom.value,to=form.elements.statementTo.value;
@@ -141,8 +154,8 @@ export function bindStatements(root,ctx) {
     try{
       const [{createStatementsPDF},logo]=await Promise.all([import('./statements-pdf.js'),logoData(ctx.logo)]);
       if((isCurrent&&!isCurrent())||ctx.getMode()!==mode||(backend&&ctx.getBackend()!==backend))throw new Error('La sesión ha cambiado. Vuelve a abrir el informe.');
-      const {profitLoss,balance}=buildStatements(state,selected,options);
-      const pdf=createStatementsPDF({company:state.company,profitLoss,balance,logoData:logo,demo:mode==='demo'});
+      const {profitLoss,balance,alignment}=buildStatements(state,selected,options);
+      const pdf=createStatementsPDF({company:state.company,profitLoss,balance,alignment,logoData:logo,demo:mode==='demo'});
       save(pdf.output('blob'),`Orquivia_Estados_financieros_${selected.from}_${selected.to}.pdf`);
       ctx.toast('PDF preparado con los dos estados y sus partidas pendientes de revisión.');
     }catch(error){ctx.toast(error.message,true)}finally{ctx.setBusy(false);ctx.render();}

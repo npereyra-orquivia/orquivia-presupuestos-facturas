@@ -4,3 +4,5 @@
 
 .statement-source{display:block;font-size:10px;font-weight:400;color:var(--muted);line-height:1.65;margin-top:5px}.statement-metric-pending strong{font-size:21px;color:#836b35}.statement-accounting{margin-bottom:26px}.statement-accounting form{padding:0 26px 24px}.statement-accounting fieldset{border:0;margin:0;padding:0}.statement-accounting .field-hint{font-size:11px;line-height:1.7}.statement-accounting .form-footer{margin-top:16px}@media(max-width:650px){.statement-accounting form{padding:0 18px 20px}.statement-metric-pending strong{font-size:18px}}
 .statement-checkbox{display:flex;align-items:center;gap:10px;font-size:12px;line-height:1.7;margin:14px 0}.statement-checkbox input{width:auto;margin:0;flex-shrink:0}
+
+.accountant-body{padding:0 26px 24px}.accountant-body .statement-method{overflow-wrap:anywhere}.accountant-body form{padding:18px 0}.accountant-body .field-hint{font-size:11px;line-height:1.8;color:var(--muted)}.accountant-body details{padding-top:15px}.accountant-body .statement-notice{margin-top:15px}@media(max-width:650px){.accountant-body{padding:0 18px 20px}}

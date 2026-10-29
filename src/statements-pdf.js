@@ -9,7 +9,7 @@ const date=value=>/^\d{4}-\d{2}-\d{2}$/.test(value || '')?value.split('-').rever
 const ink=[27,48,42],muted=[104,118,110],pale=[241,245,239],amber=[116,92,43];
 
 /** Vector report. Missing data never becomes zero or a balancing equity entry. */
-export function createStatementsPDF({company={},profitLoss:p,balance:b,logoData,generatedAt=todayISO(),demo=false}) {
+export function createStatementsPDF({company={},profitLoss:p,balance:b,alignment,logoData,generatedAt=todayISO(),demo=false}) {
   if(!p?.range||!Array.isArray(p.lines)||!b?.summary||!Array.isArray(b.assets)||!Array.isArray(b.liabilities))throw new Error('Faltan datos para preparar los estados financieros.');
   company={...company,name:normalizeOrquivia(company.name),legalName:normalizeOrquivia(company.legalName)};
   const pdf=new jsPDF({unit:'mm',format:'a4',compress:true}),left=19,right=191,width=172,bottom=271;
@@ -57,8 +57,9 @@ export function createStatementsPDF({company={},profitLoss:p,balance:b,logoData,
   if(company.taxId)paragraph(`NIF: ${company.taxId}`,{size:8,gap:3});
   pdf.setFillColor(248,244,233);pdf.rect(left,y-3,width,18,'F');
   text('ESTADOS FINANCIEROS PROVISIONALES',left+4,y+2,9,{style:'bold',color:amber});
-  text('Elaborados con los registros de la aplicación. Partidas pendientes en el anexo.',left+4,y+8,8,{color:amber});y+=25;
+  text(p.accountantClose?'Referencia del gestor y registros posteriores; alcance y fuentes en el anexo.':'Elaborados con los registros de la aplicación. Partidas pendientes en el anexo.',left+4,y+8,8,{color:amber});y+=25;
   section('Cuenta de pérdidas y ganancias',`Del ${date(p.range.from)} al ${date(p.range.to)}. Importes en euros. Criterio de devengo: fecha de factura o gasto, independiente de su cobro o pago.`);
+  if(p.accountantClose)paragraph(`Referencia contable: ${p.accountantClose.source} Corte: ${date(p.accountantClose.asOf)}.`,{size:8});
   for(const entry of p.lines)row(entry.label,entry.amount,{total:/result|final|total/.test(entry.id || '')});
   y+=5;paragraph('El resultado antes de pendientes es un subtotal de las partidas identificadas. No representa el resultado definitivo del ejercicio. Los importes sin desglose o tratamiento confirmado no se han sustituido por cero.',{size:8});
   paragraph(`Gastos pendientes de valoración: ${amount(p.summary?.pendingExpenseGross)}. IVA pendiente de tratamiento: ${amount(p.summary?.pendingVATAmount)}. Importes adicionales pendientes: ${amount(p.summary?.pendingAdditionalAmount)}.`,{size:8});
@@ -77,6 +78,18 @@ export function createStatementsPDF({company={},profitLoss:p,balance:b,logoData,
   const balancePending=[...(b.missing || []),...(b.pending || [])];
   if(balancePending.length)paragraph(`${balancePending.length} comprobaciones contables pendientes, detalladas en el anexo. El balance completo permanece por completar.`,{size:8,color:amber});
 
+  if(alignment){
+    const a=alignment;nextPage();section('Referencia del gestor y previsión',`Cierre del gestor: ${date(a.close.asOf)}. Operaciones posteriores consideradas hasta ${date(a.through)}. Previsión a 31/12/${a.close.asOf.slice(0,4)}.`);
+    paragraph(a.close.source,{size:8});
+    for(const entry of a.comparison){row(`${entry.label}: gestor`,entry.accountant);row(`${entry.label}: portal identificado`,entry.application);row(`${entry.label}: diferencia por conciliar`,entry.difference);}
+    y+=5;subheading('Hipótesis de operaciones todavía no registradas');
+    row('Ventas futuras previstas, sin IVA',a.forecast.futureSales);row('Costes futuros previstos',a.forecast.futureCosts);row('Coste adicional de nómina para la empresa',a.forecast.payrollCost);row('Provisión estimada de Impuesto sobre Sociedades',a.forecast.taxProvision);
+    row('Estimación antes de impuestos y partidas pendientes',a.beforeTax,{total:true});row('Importes posteriores pendientes de valoración o tratamiento',a.pendingGross);row('Estimación después de la provisión indicada',a.afterTax,{total:true});
+    paragraph('Las partidas posteriores pendientes no se han descontado. El resultado después de impuestos queda pendiente si falta la provisión o hay revisiones. Los pagos bancarios necesitan confirmar su devengo y pueden liquidar deudas ya contabilizadas. La previsión no determina el dividendo repartible ni la retribución neta personal.',{size:8,color:amber});
+    subheading('Documentos de origen');for(const original of a.close.sources)paragraph(`${original.name} - SHA-256: ${original.sha256}`,{size:7,step:3.7,gap:3});
+    for(const filing of a.close.taxFilings)row(`Referencia fiscal: modelo ${filing.model}, ${filing.quarter}T ${filing.year}`,filing.result);
+    for(const note of a.close.notes)paragraph(note,{size:8});
+  }
   const pending=p.pending || [],excluded=p.excluded || [];
   nextPage();section('Anexo de revisión y alcance','Las partidas siguientes permiten identificar qué falta antes de considerar cerrados los estados financieros. Los importes de referencia pueden ser brutos y no equivalen a costes netos confirmados.');
   if(balancePending.length){subheading(`Balance: ${balancePending.length} comprobaciones`);for(const entry of balancePending)issue(entry);y+=5;}
