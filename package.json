@@ -22,7 +22,7 @@
   },
   "devDependencies": {
     "@electric-sql/pglite": "0.5.9",
-    "imapflow": "2.4.3",
+    "imapflow": "2.9.1",
     "nodemailer": "10.2.1",
     "vite": "^7.0.0"
   }
