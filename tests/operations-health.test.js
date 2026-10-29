@@ -96,8 +96,15 @@ test('reaching either record or byte limits produces a visible planning warning'
   assert.equal(collectOperationsHealth(bytes).stateLevel, 'full');
 });
 
-test('recency uses server time plus elapsed receipt time and expires exactly at 36 hours', () => {
+test('weekly recency uses server time plus elapsed receipt time and expires exactly at eight days', () => {
   assert.equal(classifyOperationsEvidence(evidence(), receipt).status, 'recent');
+  assert.equal(BACKUP_STALE_AFTER_MS, 8 * 24 * 60 * 60 * 1000);
+  for (const backupAgeHours of [36, 7 * 24]) {
+    const elapsed = (backupAgeHours - 1) * 60 * 60 * 1000;
+    const result = classifyOperationsEvidence(evidence(), { ...receipt, now: 100 + elapsed });
+    assert.equal(result.status, 'recent');
+    assert.equal(result.backupAgeMs, backupAgeHours * 60 * 60 * 1000);
+  }
   const elapsedUntilStale = BACKUP_STALE_AFTER_MS - 60 * 60 * 1000;
   assert.equal(classifyOperationsEvidence(evidence(), { ...receipt, now: 100 + elapsedUntilStale - 1 }).status, 'recent');
   const stale = classifyOperationsEvidence(evidence(), { ...receipt, now: 100 + elapsedUntilStale });
@@ -106,6 +113,8 @@ test('recency uses server time plus elapsed receipt time and expires exactly at 
   assert.equal(classifyOperationsEvidence(evidence(), { evidenceReceivedAt: 1, now: 1 }).status, 'recent');
   assert.equal(classifyOperationsEvidence(evidence(), { ...receipt, now: 99 }).status, 'unconfirmed');
   assert.equal(classifyOperationsEvidence(evidence()).status, 'unconfirmed');
+  const markup = renderOperationsHealth(snapshot(), { role: 'admin', evidence: evidence(), ...receipt });
+  assert.match(markup, /Programación: domingos\. Aviso de antigüedad a partir de 8 días\./);
 });
 
 test('a failed or running attempt never inherits a green state from an earlier successful copy', () => {
@@ -120,7 +129,7 @@ test('a failed or running attempt never inherits a green state from an earlier s
   assert.equal(classifyOperationsEvidence(running, receipt).status, 'running');
   assert.equal(classifyOperationsEvidence(running, { ...receipt, now: 100 + BACKUP_STALE_AFTER_MS }).status, 'stale');
   const staleFailure = renderOperationsHealth(snapshot(), { role: 'admin', evidence: failed, ...receipt, now: 100 + BACKUP_STALE_AFTER_MS });
-  assert.match(staleFailure, /Último intento fallido/); assert.match(staleFailure, /Han pasado 36 horas o más/);
+  assert.match(staleFailure, /Último intento fallido/); assert.match(staleFailure, /Han pasado 8 días o más/);
 });
 
 test('an unfinished attempt becomes an alert at three hours and never remains in progress indefinitely', () => {
