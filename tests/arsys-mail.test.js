@@ -94,6 +94,23 @@ const invoiceMessage = () => ({ email: account.email, to: ['client@example.test'
   logoBytes: new Uint8Array([1, 2, 3]), filename: 'factura-F-001.pdf', documentKind: 'invoice',
   jobId: '10000000-0000-4000-8000-000000000001', date: '2026-10-26T09:00:00Z' });
 
+test('official alternative quote PDFs share one MIME without enabling arbitrary quote uploads', async () => {
+  const mail = createArsysMail({ createTransport: options => nodemailer.createTransport(options) });
+  const related = { name: 'presupuesto-PR-002.pdf', contentType: 'application/pdf', bytes: new TextEncoder().encode('%PDF-1.7 canonical alternative') };
+  const input = { ...invoiceMessage(), documentKind: 'quote', filename: 'presupuesto-PR-001.pdf', relatedQuotePdfs: [related] };
+  const result = await mail.buildMessage(input);
+  const raw = new TextDecoder().decode(result.raw);
+  assert.equal((raw.match(/Content-Type: application\/pdf/gi) || []).length, 2);
+  assert.match(raw, /filename=presupuesto-PR-002.pdf/);
+  assert.equal((raw.match(/Message-ID:/gi) || []).length, 1);
+  for (const changed of [
+    { documentKind: 'invoice' }, { relatedQuotePdfs: [{ ...related, name: input.filename }] },
+    { relatedQuotePdfs: [{ ...related, contentType: 'image/png' }] },
+    { relatedQuotePdfs: Array.from({ length: 5 }, (_, i) => ({ ...related, name: `quote-${i}.pdf` })) },
+    { attachments: [related] },
+  ]) await assert.rejects(mail.buildMessage({ ...input, ...changed }));
+});
+
 test('an invoice MIME keeps its generated PDF and inline signature logo and attaches exact additional document bytes', async () => {
   const pdf = new TextEncoder().encode('%PDF-1.4 supporting document\n%%EOF');
   const jpg = new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 1, 2, 0xff, 0xd9]);

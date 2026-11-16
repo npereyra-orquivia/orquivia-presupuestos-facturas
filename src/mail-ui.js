@@ -1,6 +1,12 @@
 import { escapeHTML as esc } from './domain.js';
 import { MAIL_PROVIDERS, defaultMailDraft, defaultMailProfile, mailAttachmentName, mailStatus, mailRecipientSuggestions, renderMailSignature, validateMailDraft, validateMailSignature } from './mail-domain.js';
 import { MAIL_ATTACHMENT_LIMITS, MAIL_ATTACHMENT_ACCEPT, readMailAttachments, encodeMailAttachments, formatMailAttachmentSize } from './mail-attachments.js';
+import { renderRelatedQuotes, validateRelatedQuotes } from './mail-related-quotes.js';
+
+function relatedHistory(job) {
+  const values = Array.isArray(job.relatedDocuments) ? job.relatedDocuments.filter(value => typeof value?.number === 'string').slice(0, 4) : [];
+  return values.length ? `<span>Presupuestos adicionales: ${values.map(value => esc(value.number)).join(' · ')}</span>` : '';
+}
 
 function attachmentHistory(attachments) {
   const values = Array.isArray(attachments) ? attachments.slice(0, MAIL_ATTACHMENT_LIMITS.count).filter(value => typeof value?.name === 'string' && Number.isSafeInteger(value.size) && value.size > 0) : [];
@@ -70,7 +76,7 @@ export function bindMailSettings(root, ctx) {
 function historyMarkup(history, { currentArchiveId } = {}) {
   return history.length ? history.map(job => {
     const s = mailStatus(job.status), date = new Date(job.createdAt || job.created_at);
-    return `<li><div><strong>${esc(job.errorCode === 'SMTP_PARTIAL' ? 'Envío parcial · por revisar' : s.label)}</strong><span>Para: ${esc(recipientText(job.to))}</span>${job.cc?.length ? `<span>CC: ${esc(recipientText(job.cc))}</span>` : ''}${attachmentHistory(job.attachments)}${['MAIL_STORAGE_LIMIT', 'MAIL_MESSAGE_TOO_LARGE', 'MAIL_PREPARATION_FAILED'].includes(job.errorCode) ? `<span>${esc(jobDescription(job))}</span>` : ''}${job.errorCode === 'SMTP_PARTIAL' ? `<span>Aceptados por el servidor: ${esc(recipientText(job.accepted) || 'Por confirmar')}</span><span>Rechazados: ${esc(recipientText(job.rejected) || 'Por confirmar')}</span>` : ''}<small>${esc(job.sender || job.from || '')} · ${Number.isFinite(date.valueOf()) ? esc(date.toLocaleString('es-ES', { timeZone: 'Europe/Madrid' })) : 'Fecha por comprobar'}</small></div>${job.status === 'archive_pending' && job.id !== currentArchiveId ? `<button type="button" class="text-button" data-retry-archive="${esc(job.id)}">Guardar solo la copia</button>` : ''}</li>`;
+    return `<li><div><strong>${esc(job.errorCode === 'SMTP_PARTIAL' ? 'Envío parcial · por revisar' : s.label)}</strong><span>Para: ${esc(recipientText(job.to))}</span>${job.cc?.length ? `<span>CC: ${esc(recipientText(job.cc))}</span>` : ''}${relatedHistory(job)}${attachmentHistory(job.attachments)}${['MAIL_STORAGE_LIMIT', 'MAIL_MESSAGE_TOO_LARGE', 'MAIL_PREPARATION_FAILED'].includes(job.errorCode) ? `<span>${esc(jobDescription(job))}</span>` : ''}${job.errorCode === 'SMTP_PARTIAL' ? `<span>Aceptados por el servidor: ${esc(recipientText(job.accepted) || 'Por confirmar')}</span><span>Rechazados: ${esc(recipientText(job.rejected) || 'Por confirmar')}</span>` : ''}<small>${esc(job.sender || job.from || '')} · ${Number.isFinite(date.valueOf()) ? esc(date.toLocaleString('es-ES', { timeZone: 'Europe/Madrid' })) : 'Fecha por comprobar'}</small></div>${job.status === 'archive_pending' && job.id !== currentArchiveId ? `<button type="button" class="text-button" data-retry-archive="${esc(job.id)}">Guardar solo la copia</button>` : ''}</li>`;
   }).join('') : '<li>Todavía no hay envíos registrados desde la aplicación.</li>';
 }
 
@@ -103,7 +109,7 @@ function messagePreview(draft, profile, logoUrl) {
   return `<div class="mail-message-headers"><div><strong>Para</strong><span>${esc(recipientText(draft.to))}</span></div>${recipientText(draft.cc) ? `<div><strong>CC</strong><span>${esc(recipientText(draft.cc))}</span></div>` : ''}<div><strong>Asunto</strong><span>${esc(draft.subject || '')}</span></div></div><div class="mail-message-body">${esc(draft.message || '').replaceAll('\r\n', '\n').replaceAll('\n', '<br>')}</div><div class="mail-signature-preview">${renderMailSignature(profile.signature, { email: profile.email, logoUrl })}</div>`;
 }
 
-export function renderMailComposer({ document, client, profile, history = [], preview = '', draft, job, error = '', logoUrl = '' }) {
+export function renderMailComposer({ document, client, profile, history = [], preview = '', relatedQuotes = [], relatedPreviews = '', draft, job, error = '', logoUrl = '' }) {
   const value = draft || defaultMailDraft(document, client), p = profile || defaultMailProfile();
   const suggestions = mailRecipientSuggestions(history);
   const readonly = job ? 'readonly' : '';
@@ -116,11 +122,12 @@ export function renderMailComposer({ document, client, profile, history = [], pr
     <label class="field"><span>Mensaje</span><textarea name="message" rows="9" maxlength="20000" required ${readonly}>${esc(value.message)}</textarea></label>
     <section class="mail-message-preview" aria-label="Vista previa del correo"><h3>Así llegará tu mensaje</h3><div data-mail-message-preview>${messagePreview(value, p, logoUrl)}</div></section>
     <div class="mail-attachment">PDF adjunto · <strong>${esc(mailAttachmentName(document))}</strong></div>
+    ${!job ? renderRelatedQuotes(document, relatedQuotes, value.relatedDocumentIds || []) : ''}
     ${extraAttachments(document, value, job)}
     ${!p.connected && !job ? '<p class="note-banner">Conecta primero tu correo en Mi espacio.</p><button type="button" class="button secondary" data-configure-mail>Configurar mi correo</button>' : ''}
     <div class="mail-job-status" role="status" aria-live="polite" data-mail-feedback>${esc(error || (job ? jobDescription(job) : 'Revisa los destinatarios, el mensaje completo con tu firma y el PDF antes de enviar.'))}</div>
-    <div class="mail-actions">${!job ? `<button type="button" class="button primary" data-send-mail ${!p.connected ? 'disabled' : ''}>Enviar correo con el PDF</button>` : ''}${allowsNewMail(job) ? '<button type="button" class="button secondary" data-new-mail>Preparar otro envío</button>' : ''}<button class="button secondary" type="button" data-close>${['sent', 'archive_pending'].includes(job?.status) ? 'Cerrar' : 'Cancelar'}</button></div>
-    </form>${historySection(document, history)}</section><aside class="mail-document-preview"><h3>PDF que se adjuntará</h3>${preview}</aside></div>`;
+    <div class="mail-actions">${!job ? `<button type="button" class="button primary" data-send-mail ${!p.connected ? 'disabled' : ''}>${value.relatedDocumentIds?.length ? `Enviar correo con ${value.relatedDocumentIds.length + 1} PDF` : 'Enviar correo con el PDF'}</button>` : ''}${allowsNewMail(job) ? '<button type="button" class="button secondary" data-new-mail>Preparar otro envío</button>' : ''}<button class="button secondary" type="button" data-close>${['sent', 'archive_pending'].includes(job?.status) ? 'Cerrar' : 'Cancelar'}</button></div>
+    </form>${historySection(document, history)}</section><aside class="mail-document-preview"><h3>PDF que se adjuntará</h3>${preview}<div data-related-mail-previews>${relatedPreviews}</div></aside></div>`;
 }
 
 export function renderMailResult({ job, document, history = [] }) {
@@ -145,11 +152,12 @@ function bindMailSurface(root, ctx) {
   const readonly = form?.dataset.mailReadonly === 'true';
   let active = true, pending = false, attempted = false;
   let attachments = fileInput && Array.isArray(ctx.draft?.attachments) ? ctx.draft.attachments : [];
+  let relatedIds = ctx.draft?.relatedDocumentIds || [];
   const isActive = () => active && (!ctx.isCurrent || ctx.isCurrent());
   const token = ctx.draft?.idempotencyKey || (form && !readonly ? crypto.randomUUID() : undefined);
   const feedback = message => { const target = root.querySelector('[data-mail-feedback]'); if (isActive() && target) target.textContent = message; };
   const draft = () => ({ ...ctx.draft, to: form.elements.to.value, cc: form.elements.cc.value,
-    subject: form.elements.subject.value, message: form.elements.message.value, ...(fileInput ? { attachments } : {}), idempotencyKey: token });
+    subject: form.elements.subject.value, message: form.elements.message.value, ...(fileInput ? { attachments } : {}), ...(ctx.document?.kind === 'quote' ? { relatedDocumentIds: relatedIds } : {}), idempotencyKey: token });
   const rememberDraft = () => {
     if (!form || readonly || attempted) return ctx.draft;
     ctx.draft = draft();
@@ -197,6 +205,19 @@ function bindMailSurface(root, ctx) {
     drawAttachments();
   }
   const enter = event => { if (event.key === 'Enter' && event.target.tagName === 'INPUT') event.preventDefault(); };
+  root.querySelectorAll('[data-related-quote]').forEach(input => {
+    input.onchange = () => {
+      if (!isActive() || pending || readonly || attempted) return;
+      const selected = [...root.querySelectorAll('[data-related-quote]')].filter(value => value.checked).map(value => value.value);
+      try { relatedIds = validateRelatedQuotes(selected, ctx.document, ctx.relatedQuotes); }
+      catch (error) { input.checked = !input.checked; feedback(error.message); return; }
+      rememberDraft();
+      if (send) send.textContent = relatedIds.length ? `Enviar correo con ${relatedIds.length + 1} PDF` : 'Enviar correo con el PDF';
+      const previews = root.querySelector('[data-related-mail-previews]');
+      if (previews) previews.innerHTML = ctx.relatedPreview?.(relatedIds) || '';
+      feedback(`${relatedIds.length + 1} PDF preparados para un único correo.`);
+    };
+  });
   if (form) {
     form.addEventListener('keydown', enter);
     form.onsubmit = event => event.preventDefault();
@@ -210,15 +231,15 @@ function bindMailSurface(root, ctx) {
     if (!isActive() || pending || attempted || send.disabled) return;
     const value = rememberDraft(), validated = validateMailDraft(value);
     if (!validated.ok) return feedback(Object.values(validated.errors)[0]);
-    let encoded;
-    try { encoded = encodeMailAttachments(attachments); }
+    let encoded, selectedIds;
+    try { encoded = encodeMailAttachments(attachments); selectedIds = validateRelatedQuotes(relatedIds, ctx.document, ctx.relatedQuotes); }
     catch (error) { return feedback(error.message); }
     await run(async () => {
       attempted = true;
       for (const input of form.querySelectorAll('input,textarea')) input.readOnly = true;
       send.remove();
       feedback('Enviando… No repitas el envío mientras se comprueba el resultado.');
-      try { const result = await ctx.send({ ...validated.value, ...(fileInput ? { attachments: encoded } : {}), idempotencyKey: token }); if (isActive()) await ctx.onResult?.(result); }
+      try { const result = await ctx.send({ ...validated.value, ...(selectedIds.length ? { relatedDocumentIds: selectedIds } : {}), ...(fileInput ? { attachments: encoded } : {}), idempotencyKey: token }); if (isActive()) await ctx.onResult?.(result); }
       catch (error) { feedback(`${error?.message || 'No hay una confirmación definitiva del envío.'} Actualiza el estado y comprueba tu correo antes de volver a enviar.`); }
     });
   };

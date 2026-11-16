@@ -3,6 +3,7 @@ import { defaultMailProfile, normalizeMailProfile, defaultMailDraft } from './ma
 import { createMailContextCache, mergeMailJob } from './mail-context-cache.js';
 import { resolveMailComposeEntry } from './mail-compose-entry.js';
 import { normalizeOrquivia } from './brand.js';
+import { relatedQuoteOptions, renderRelatedQuotePreviews } from './mail-related-quotes.js';
 
 export function createMailFeature(ctx) {
   let profile = null, identity = null, cleanup = null, mountRequest = 0, composerRequest = 0;
@@ -95,7 +96,7 @@ export function createMailFeature(ctx) {
       if (job?.errorCode !== 'SMTP_PARTIAL' && ['sent', 'archive_pending', 'failed'].includes(job?.status)) {
         draft = { ...draft, attachments: [] }; drafts.set(document.id, draft);
       }
-      data = { ...data, history: mergeMailJob(data.history, job) }; remember();
+      data = { ...data, history: mergeMailJob(data.history, job) }; contexts.clear(); remember();
       draw();
     }
     async function send(fields) {
@@ -115,12 +116,14 @@ export function createMailFeature(ctx) {
       dispose?.();
       modal.classList.toggle('wide', !job);
       const title = job ? `Envío ${invoice ? 'de la' : 'del'} ${kind}` : `Enviar ${kind}`;
+      const relatedQuotes = relatedQuoteOptions(documentNow(), ctx.getDocuments?.() || []);
+      const relatedPreview = ids => renderRelatedQuotePreviews(relatedQuotes.filter(value => ids.includes(value.id)), ctx.preview);
       modal.innerHTML = ctx.header(title, document.number) + (job
         ? renderMailResult({ job, document: documentNow(), history: data.history })
-        : renderMailComposer({ document: documentNow(), client: ctx.clientFor(documentNow()), profile: data.profile, history: data.history, preview: ctx.preview(documentNow()), draft, logoUrl: ctx.logoUrl }));
+        : renderMailComposer({ document: documentNow(), client: ctx.clientFor(documentNow()), profile: data.profile, history: data.history, preview: ctx.preview(documentNow()), relatedQuotes, relatedPreviews: relatedPreview(draft.relatedDocumentIds || []), draft, logoUrl: ctx.logoUrl }));
       bindClose();
       const bindings = {
-        draft, document: documentNow(), profile: data.profile, logoUrl: ctx.logoUrl, send, onResult, retryArchive, reloadHistory, onNewMail: newMail, isCurrent: valid,
+        draft, document: documentNow(), relatedQuotes, relatedPreview, profile: data.profile, logoUrl: ctx.logoUrl, send, onResult, retryArchive, reloadHistory, onNewMail: newMail, isCurrent: valid,
         onDraftChange: value => { if (valid()) { draft = value; drafts.set(document.id, value); } },
         configure: () => { ctx.closeModal(true); ctx.navigate('personal'); },
       };
@@ -138,6 +141,10 @@ export function createMailFeature(ctx) {
       ({ draft, job } = resolveMailComposeEntry({ savedDraft: saved, history: data.history,
         defaultDraft: defaultMailDraft(latest, client),
         preferDefaultRecipients: latest.kind === 'invoice' && Boolean(latest.billingEmail || client?.billingEmail) }));
+      if (!saved && latest.kind === 'quote' && !job) {
+        const previous = data.history[0]?.relatedDocumentIds?.length ? data.history[0] : null;
+        if (previous) draft.relatedDocumentIds = [...new Set([previous.documentId, ...previous.relatedDocumentIds])].filter(id => id && id !== latest.id);
+      }
       drafts.set(document.id, draft);
       draw();
     } catch (error) {

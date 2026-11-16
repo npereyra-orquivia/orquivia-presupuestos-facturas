@@ -59,6 +59,14 @@ const timestamp = value => {
 };
 const addressKey = value => text(value).trim().toLowerCase();
 const recipientText = value => Array.isArray(value) ? value.filter(item => typeof item === 'string').join(', ') : text(value);
+const historyDocumentId = value => typeof value === 'string' && value.trim() && value.length <= 160 && !/[\u0000-\u001f\u007f]/.test(value);
+function relatedQuoteHistory(job) {
+  const relatedDocumentIds = [...new Set((Array.isArray(job.relatedDocumentIds) ? job.relatedDocumentIds : []).filter(historyDocumentId))].slice(0, 4);
+  const relatedDocuments = (Array.isArray(job.relatedDocuments) ? job.relatedDocuments : [])
+    .filter(value => value?.kind === 'quote' && relatedDocumentIds.includes(value.id) && text(value.number).trim())
+    .slice(0, 4).map(value => ({ id: value.id, number: value.number.slice(0, 100), kind: 'quote' }));
+  return { relatedDocumentIds, relatedDocuments };
+}
 
 /** Project only the public history fields; credentials and raw MIME never enter the view model. */
 export function mergeRecordHistory(entries = [], jobs = []) {
@@ -74,7 +82,8 @@ export function mergeRecordHistory(entries = [], jobs = []) {
     if (typeof job?.id !== 'string' || !job.id.trim() || job.id.length > 160 || /[\u0000-\u001f\u007f]/.test(job.id)) throw new Error('El historial de envíos recibido no es válido.');
     if (mailById.has(job.id)) continue;
     mailById.set(job.id, {
-      kind: 'mail', id: `mail:${job.id}`, jobId: job.id, documentId: text(job.documentId),
+      kind: 'mail', id: `mail:${job.id}`, jobId: job.id, documentId: text(job.documentId), documentNumber: text(job.documentNumber).slice(0, 100),
+      ...relatedQuoteHistory(job),
       sender: text(job.sender || job.from), to: recipientText(job.to), cc: recipientText(job.cc), subject: text(job.subject),
       status: text(job.status), partial: job.errorCode === 'SMTP_PARTIAL', accepted: recipientText(job.accepted), rejected: recipientText(job.rejected),
       errorCode: text(job.errorCode), attachments: (Array.isArray(job.attachments) ? job.attachments : []).slice(0, 5)
@@ -90,7 +99,7 @@ export function mergeRecordHistory(entries = [], jobs = []) {
       || !addressKey(change.actorEmail) || !text(change.entityId).trim() || timestamp(change.createdAt) === null) continue;
     const candidates = mail.filter(entry => !entry.stateChange && !entry.partial && ['sent', 'archive_pending'].includes(entry.status)
       && addressKey(entry.sender) === addressKey(change.actorEmail)
-      && entry.documentId === change.entityId
+      && (entry.documentId === change.entityId || entry.relatedDocumentIds.includes(change.entityId))
       && timestamp(entry.createdAt) !== null && Math.abs(timestamp(entry.createdAt) - timestamp(change.createdAt)) <= 5000)
       .map(entry => ({ entry, distance: Math.abs(timestamp(entry.createdAt) - timestamp(change.createdAt)) }))
       .sort((a, b) => a.distance - b.distance);
@@ -118,7 +127,8 @@ function mailHistoryEntry(entry) {
     MAIL_PREPARATION_FAILED: 'No se pudieron preparar los documentos del correo.',
   }[entry.errorCode];
   const attachments = entry.attachments?.length ? `<div><dt>Adjuntos adicionales</dt><dd>${entry.attachments.map(item => `${esc(item.name)} (${esc(formatMailAttachmentSize(item.size))})`).join('<br>')}</dd></div>` : '';
-  return `<li class="record-history-mail" data-history-id="${esc(entry.id)}"><strong>${esc(entry.sender || 'Cuenta autorizada')}</strong><span class="record-history-action">${esc(label)} · ${esc(dateTime(entry.createdAt))}</span><dl class="record-history-mail-fields"><div><dt>Para</dt><dd>${esc(entry.to || 'No disponible')}</dd></div>${entry.cc ? `<div><dt>CC</dt><dd>${esc(entry.cc)}</dd></div>` : ''}<div><dt>Asunto</dt><dd>${esc(entry.subject || 'Sin asunto')}</dd></div>${attachments}${entry.status !== 'sent' || entry.partial ? `<div><dt>Estado</dt><dd>${esc(entry.partial ? 'El servidor aceptó solo algunos destinatarios. Revisa tu correo antes de repetir el envío.' : preparationError || status.description)}</dd></div>` : ''}${entry.partial ? `<div><dt>Aceptados</dt><dd>${esc(entry.accepted || 'Por confirmar')}</dd></div><div><dt>Rechazados</dt><dd>${esc(entry.rejected || 'Por confirmar')}</dd></div>` : ''}</dl>${stateChange ? `<small data-history-audit-id="${esc(String(stateChange.historyId ?? ''))}">Estado del documento actualizado · ${esc(stateChange.changedFields.map(historyFieldLabel).join(', '))} · versión ${esc(String(stateChange.workspaceVersion ?? '—'))}</small>` : ''}</li>`;
+  const includedQuotes = entry.relatedDocuments?.length ? `<div><dt>Presupuestos incluidos</dt><dd>${[entry.documentNumber, ...entry.relatedDocuments.map(value => value.number)].filter(Boolean).map(esc).join(', ')}</dd></div>` : '';
+  return `<li class="record-history-mail" data-history-id="${esc(entry.id)}"><strong>${esc(entry.sender || 'Cuenta autorizada')}</strong><span class="record-history-action">${esc(label)} · ${esc(dateTime(entry.createdAt))}</span><dl class="record-history-mail-fields"><div><dt>Para</dt><dd>${esc(entry.to || 'No disponible')}</dd></div>${entry.cc ? `<div><dt>CC</dt><dd>${esc(entry.cc)}</dd></div>` : ''}<div><dt>Asunto</dt><dd>${esc(entry.subject || 'Sin asunto')}</dd></div>${includedQuotes}${attachments}${entry.status !== 'sent' || entry.partial ? `<div><dt>Estado</dt><dd>${esc(entry.partial ? 'El servidor aceptó solo algunos destinatarios. Revisa tu correo antes de repetir el envío.' : preparationError || status.description)}</dd></div>` : ''}${entry.partial ? `<div><dt>Aceptados</dt><dd>${esc(entry.accepted || 'Por confirmar')}</dd></div><div><dt>Rechazados</dt><dd>${esc(entry.rejected || 'Por confirmar')}</dd></div>` : ''}</dl>${stateChange ? `<small data-history-audit-id="${esc(String(stateChange.historyId ?? ''))}">Estado del documento actualizado · ${esc(stateChange.changedFields.map(historyFieldLabel).join(', '))} · versión ${esc(String(stateChange.workspaceVersion ?? '—'))}</small>` : ''}</li>`;
 }
 
 export function renderUnifiedHistory(entries, jobs) {

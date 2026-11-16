@@ -202,6 +202,47 @@ test('invoice mail history projects attachment metadata without raw content and 
   assert.match(html, /espacio reservado/);assert.ok(!html.includes('<img bad>'));assert.ok(!html.includes('PRIVATE_'));
 });
 
+test('a shared quote mail retains only public references and displays both PDF numbers safely', () => {
+  const job = mailJob({ documentNumber: 'PR-2026-001', relatedDocumentIds: ['quote-2', 'quote-2', '', null],
+    relatedDocuments: [{ id: 'quote-2', number: 'PR-2026-002 <img onerror=x>', kind: 'quote', notes: 'PRIVATE_NOTES', document: { private: 'PRIVATE_SNAPSHOT' } },
+      { id: 'unselected', number: 'PRIVATE_UNSELECTED', kind: 'quote' }, { id: 'quote-2', number: 'PRIVATE_INVOICE', kind: 'invoice' }],
+    relatedSnapshots: [{ password: 'PRIVATE_SECRET' }] });
+  const before = JSON.stringify(job), [entry] = mergeRecordHistory([], [job]);
+  assert.equal(JSON.stringify(job), before);
+  assert.deepEqual(entry.relatedDocumentIds, ['quote-2']);
+  assert.deepEqual(entry.relatedDocuments, [{ id: 'quote-2', number: 'PR-2026-002 <img onerror=x>', kind: 'quote' }]);
+  assert.ok(!JSON.stringify(entry).includes('PRIVATE_'));
+  const html = renderUnifiedHistory([], [job]);
+  assert.match(html, /Presupuestos incluidos/);
+  assert.match(html, /PR-2026-001, PR-2026-002 &lt;img onerror=x&gt;/);
+  assert.ok(!html.includes('<img') && !html.includes('PRIVATE_'));
+  assert.ok(!renderUnifiedHistory([], [mailJob()]).includes('Presupuestos incluidos'), 'A single-document legacy mail has no redundant grouping');
+});
+
+test('the secondary quote status audit pairs with its shared send under the same exact guards as the primary quote', () => {
+  const audit = change({ id: 98, entityId: 'quote-2', event: 'email_sent', changedFields: ['status'], createdAt: '2026-10-16T10:00:02Z' });
+  const job = mailJob({ relatedDocumentIds: ['quote-2'], relatedDocuments: [{ id: 'quote-2', number: 'PR-2026-002', kind: 'quote' }] });
+  const [entry] = mergeRecordHistory([audit], [job]);
+  assert.equal(entry.kind, 'mail');
+  assert.equal(entry.stateChange.historyId, 98);
+  assert.match(renderUnifiedHistory([audit], [job]), /data-history-audit-id="98"/);
+  for (const override of [{ errorCode: 'SMTP_PARTIAL' }, { status: 'uncertain' }, { sender: 'other@example.test' },
+    { sentAt: '2026-10-16T10:00:08Z' }, { relatedDocumentIds: [] }]) {
+    assert.equal(mergeRecordHistory([audit], [{ ...job, ...override }]).length, 2);
+  }
+  assert.equal(mergeRecordHistory([audit], [job, { ...job, id: 'ambiguous' }]).length, 3);
+  assert.equal(mergeRecordHistory([{ ...audit, changedFields: ['status', 'notes'] }], [job]).length, 2);
+});
+
+test('related history references reject invalid IDs and remain bounded to four additional quotes', () => {
+  const job = mailJob({ relatedDocumentIds: [null, '', 'x\u0000', 'x'.repeat(161), 'a', 'b', 'c', 'd', 'e'],
+    relatedDocuments: ['a', 'b', 'c', 'd', 'e'].map(id => ({ id, number: id.repeat(200), kind: 'quote' })) });
+  const [entry] = mergeRecordHistory([], [job]);
+  assert.deepEqual(entry.relatedDocumentIds, ['a', 'b', 'c', 'd']);
+  assert.equal(entry.relatedDocuments.length, 4);
+  assert.ok(entry.relatedDocuments.every(value => value.number.length === 100));
+});
+
 function unifiedHistoryFixture({ includeMail = true } = {}) {
   const requests = [], content = { innerHTML: '' }, refresh = { disabled: false, onclick: null };
   const details = { isConnected: true, open: true, dataset: { entityType: 'document', entityId: 'quote-1', ...(includeMail ? { includeMail: 'true' } : {}) },

@@ -11,6 +11,7 @@ const messages = {
   INVALID_DOCUMENT: 'Prepara el documento antes de enviarlo por correo.',
   DOCUMENT_NOT_SENDABLE: 'Este documento no está preparado para enviarse.',
   INVALID_ATTACHMENT: 'Revisa los adjuntos: se admiten documentos PDF e imágenes JPG o PNG.',
+  INVALID_RELATED_DOCUMENTS: 'Selecciona hasta cuatro presupuestos adicionales distintos del mismo cliente.',
   ATTACHMENTS_NOT_ALLOWED: 'Los documentos adicionales están disponibles en los correos de facturas.',
   ATTACHMENT_LIMIT: 'Puedes añadir hasta 5 archivos, de 5 MB cada uno y 10 MB en total.',
   MAIL_STORAGE_LIMIT: 'Hay demasiadas copias pendientes en Supabase. Revisa los envíos pendientes antes de enviar otro correo.',
