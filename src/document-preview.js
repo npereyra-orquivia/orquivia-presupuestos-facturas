@@ -34,7 +34,7 @@ export function renderDocumentPreview(d = {}, { company = {}, client = {}, logoU
       <tbody>${items.map(item => `<tr><td class="paper-concept"><strong>${esc(item.description || 'Tu concepto')}</strong>${item.detail ? `<p>${esc(item.detail)}</p>` : ''}</td><td class="paper-quantity" data-column="Cant."><span>${esc(formatNumber(item.quantity || 0))}</span></td><td class="paper-price" data-column="Precio"><span>${money(item.price || 0)}</span></td><td class="paper-line-total" data-column="Subtotal"><span>${money(totals({ items: [item] }).subtotal)}</span></td></tr>`).join('')}</tbody>
     </table>
     ${invoice && d.po ? `<p class="paper-note">PO: ${esc(d.po)}</p>` : ''}
-    ${d.notes ? `<p class="paper-note">${esc(d.notes)}</p>` : ''}
+    ${d.notes ? `<p class="paper-note${invoice ? '' : ' paper-quote-note'}">${esc(d.notes)}</p>` : ''}
     <div class="paper-closing">
     <div class="paper-totals">
       ${amounts.discountAmount ? `<div><span>Subtotal</span><span>${money(amounts.subtotal)}</span></div><div><span>Descuento ${esc(d.discount || 0)} %</span><span>−${money(amounts.discountAmount)}</span></div>` : ''}

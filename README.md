@@ -2,7 +2,7 @@
 
 Portal en español para **GitHub Pages + Supabase**. Nicole y Liliana trabajan con los mismos clientes, presupuestos, facturas, cobros y gastos, cada una con su cuenta. Nicole administra la empresa y el saldo inicial; Liliana puede editar documentos, registrar cobros y gestionar gastos y justificantes. La página pública contiene la interfaz y la pantalla de acceso; los datos y los archivos privados de la empresa se cargan desde Supabase después de verificar la cuenta y el segundo factor.
 
-La versión es **1.7.1**, con la referencia estable anterior **1.4.1** conservada. La migración 016 evita reintentos del servicio al comunicar conflictos entre ediciones; conserva los bloqueos, permisos y datos. Incluye envío de presupuestos y facturas desde el correo de cada usuaria, firma personal, destinatarios en copia e historial combinado de cambios y envíos. La ampliación añade herramientas operativas y comprobaciones, sin cambiar los documentos ni importar datos. Consulta [el despliegue y el respaldo de la 1.0](EMAIL-V1.1.md) y [la referencia de operación](docs/OPERATIONS.md).
+La versión es **1.7.2**, con la referencia estable anterior **1.4.1** conservada. La migración 016 evita reintentos del servicio al comunicar conflictos entre ediciones; conserva los bloqueos, permisos y datos. Incluye envío de presupuestos y facturas desde el correo de cada usuaria, firma personal, destinatarios en copia e historial combinado de cambios y envíos. La ampliación añade herramientas operativas y comprobaciones, sin cambiar los documentos ni importar datos. Consulta [el despliegue y el respaldo de la 1.0](EMAIL-V1.1.md) y [la referencia de operación](docs/OPERATIONS.md).
 
 ## Seguridad, copias y operación
 

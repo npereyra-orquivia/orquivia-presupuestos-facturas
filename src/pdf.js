@@ -145,7 +145,10 @@ export function createPDF(document, company, client, { logoData, demo = false } 
     }
   }
   if (document.po) flowLines(wrapped(`PO / Orden de pedido: ${document.po}`, width, 9));
-  if (document.notes) flowLines(wrapped(document.notes, width, 9), { color: muted });
+  if (document.notes) {
+    const noteStyle = document.kind === 'quote' ? { size: 8, step: 3.7, gap: 5 } : { size: 9, step: 4.5, gap: 8 };
+    flowLines(wrapped(document.notes, width, noteStyle.size), { ...noteStyle, color: muted });
+  }
   // A long legal notice belongs to the flowing body: placing it after the
   // closing block could otherwise create another page after the final amount.
   if (privacyLines.length && !privacyInFooter) flowLines(privacyLines, { size: 7, color: muted, step: 3.1, gap: 0 });

@@ -134,3 +134,69 @@ test('long legal and payment text remains complete before a final closing block 
     assert.ok(item.transform[5] >= 0 && item.transform[5] <= page.height, `Text must stay inside the page: ${item.str}`);
   }
 });
+
+const compactNoteIssuer = {
+  ...company, taxId: 'B00000000', email: 'empresa@example.test',
+  address: 'Calle de prueba 123, planta segunda, puerta cuatro, 08000 Ciudad, Provincia',
+  iban: 'ES00 0000 0000 0000 0000 0000', bic: 'TESTESMMXXX',
+  privacyText: [
+    'PRIVACIDAD 1: conservación conforme a la finalidad declarada.',
+    'PRIVACIDAD 2: acceso restringido al personal autorizado.',
+    'PRIVACIDAD 3: ejercicio de derechos mediante contacto con la empresa.',
+    'PRIVACIDAD 4: información de ejemplo para las pruebas.',
+  ].join('\n'),
+};
+const compactNoteClient = {
+  name: 'Cliente de prueba', taxId: 'B11111111', email: 'cliente@example.test',
+  address: 'Calle del cliente 456, planta primera, puerta segunda, 08000 Ciudad, Provincia',
+};
+
+test('a three-item quote retains structured conditions on one page above its anchored closing block', async () => {
+  const scope = 'Incluye retirada del sellado existente, visita de medición y desplazamientos, suministro del material de revestimiento de 9 mm, corte y adaptación de las piezas, colocación y unión de juntas no visibles. La superficie se comprobará antes de colocar el material y se coordinará el acceso a las tres unidades con la persona responsable del centro. Se incluyen los medios auxiliares necesarios para una instalación correcta.';
+  const notes = ['ALTERNATIVA CON EJECUCIÓN PRIORITARIA', scope,
+    'La fecha prioritaria requiere aceptación antes del plazo indicado.',
+    'El importe es orientativo según plano, con ajuste aprobado tras la medición definitiva.',
+    'La opción es excluyente respecto a la alternativa ordinaria. FINNOTAS.',
+  ].join('\n');
+  const doc = document({ notes, items: [
+    { description: 'Servicio principal: preparación y colocación de material en dos accesos', quantity: 1, price: 1110 },
+    { description: 'Servicio de revestimiento en una apertura', quantity: 1, price: 2220 },
+    { description: 'Servicio de revestimiento en otra apertura', quantity: 1, price: 3330 },
+  ] });
+  const original = structuredClone(doc);
+  const { pages, text } = await readPDF(doc, compactNoteIssuer, compactNoteClient);
+  assert.equal(pages.length, 1, 'A moderate structured note must not strand the closing block on another sheet');
+  assert.ok(text.includes(plain(notes)), 'Every condition and paragraph must remain present');
+  const page = pages[0], lastNote = page.items.find(item => item.str.includes('FINNOTAS'));
+  const total = page.items.find(item => plain(item.str) === '6.660,00 €');
+  const payment = page.items.find(item => item.str === 'Método de pago');
+  const privacy = page.items.find(item => item.str.includes('PRIVACIDAD 4'));
+  assert.ok(lastNote && total && payment && privacy);
+  assert.ok(Math.abs(lastNote.transform[0] - 8) < 0.01, 'Quote conditions use a readable eight-point font');
+  assert.ok(lastNote.transform[5] - total.transform[5] > 35, 'The complete note remains separated from the total');
+  assert.ok(payment.transform[5] < page.height / 4 && payment.transform[5] > privacy.transform[5], 'Payment stays at the bottom above the privacy footer');
+  assert.match(text, /TESTESMMXXX/);
+  assert.deepEqual(doc, original, 'Layout changes never rewrite notes or financial values');
+});
+
+test('quote note compaction leaves invoice note typography unchanged', async () => {
+  for (const [kind, expectedSize] of [['quote', 8], ['invoice', 9]]) {
+    const { pages } = await readPDF(document({ kind, notes: 'TIPOGRAFIADEPRUEBA' }));
+    const note = pages.flatMap(page => page.items).find(item => item.str === 'TIPOGRAFIADEPRUEBA');
+    assert.ok(note);
+    assert.ok(Math.abs(note.transform[0] - expectedSize) < 0.01);
+  }
+});
+
+test('genuinely long quote notes paginate completely without hiding their end or payment information', async () => {
+  const notes = Array.from({ length: 160 }, (_, index) => `CONDICION${index + 1}: revisar y confirmar los detalles de ejecución del servicio.`).join('\n');
+  const { pages, text } = await readPDF(document({ notes }), compactNoteIssuer, compactNoteClient);
+  assert.ok(pages.length > 1);
+  assert.match(text, /CONDICION1:/);
+  assert.match(text, /CONDICION160:/);
+  assert.ok(pages.at(-1).items.some(item => item.str === 'IVA no incluido'));
+  assert.ok(pages.slice(0, -1).every(page => !page.items.some(item => item.str === 'Método de pago' || item.str === 'IVA no incluido')));
+  for (const page of pages) for (const item of page.items) {
+    assert.ok(item.transform[5] >= 0 && item.transform[5] <= page.height, `Text stays on-page: ${item.str}`);
+  }
+});
