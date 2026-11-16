@@ -7,6 +7,9 @@ const legacyDirectory = 'pruebas-v1-1';
 // This address identifies the application, never a release. Versions live in Git tags.
 const appPath = '/orquivia-presupuestos-facturas/';
 const publicNames = new Set(['index.html', 'manifest.webmanifest', 'service-worker.js']);
+// These public information pages first appeared in 1.6. Validate them when
+// inspecting a previous build, but never restore them over the current pages.
+const previousPublicPages = new Set(['copias/index.html', 'copias/privacidad.html', 'copias/styles.css']);
 const publicAsset = name => /^orquivia-[A-Za-z0-9-]+\.(?:png|svg)$/.test(name);
 const inside = (parent, child) => {
   const relative = path.relative(parent, child);
@@ -114,18 +117,22 @@ async function buildDirectory(value, label) {
   return root;
 }
 
-async function legacyFiles(root) {
+async function legacyFiles(root, { allowPreviousPublicPages = false } = {}) {
   const files = [];
   async function walk(directory, prefix = '') {
     for (const entry of await fs.readdir(directory, { withFileTypes: true })) {
       const relative = prefix ? `${prefix}/${entry.name}` : entry.name;
       const stat = await fs.lstat(path.join(directory, entry.name));
       if (stat.isSymbolicLink()) throw new Error('El build legado contiene un enlace simbólico.');
-      if (!prefix && !['assets', 'pdfjs'].includes(entry.name) && !publicNames.has(entry.name) && !publicAsset(entry.name)) {
+      const previousPagesDirectory = allowPreviousPublicPages && relative === 'copias' && stat.isDirectory();
+      if (!prefix && !previousPagesDirectory && !['assets', 'pdfjs'].includes(entry.name) && !publicNames.has(entry.name) && !publicAsset(entry.name)) {
         throw new Error(`Archivo inesperado en el build legado: ${entry.name}`);
       }
+      if (prefix === 'copias' && (!allowPreviousPublicPages || !previousPublicPages.has(relative) || !stat.isFile())) {
+        throw new Error(`Archivo inesperado en el build legado: ${relative}`);
+      }
       if (stat.isDirectory()) {
-        if (!prefix && !['assets', 'pdfjs'].includes(entry.name)) throw new Error('Directorio inesperado en el build legado.');
+        if (!prefix && !previousPagesDirectory && !['assets', 'pdfjs'].includes(entry.name)) throw new Error('Directorio inesperado en el build legado.');
         await walk(path.join(directory, entry.name), relative);
       } else if (stat.isFile()) {
         if (/(?:^|\/)(?:\.|private|credentials)|\.(?:pdf|docx?|xlsx?|rar|zip)$/i.test(relative)) throw new Error('El build legado contiene archivos ajenos a los recursos públicos.');
@@ -148,7 +155,7 @@ export async function prepareRelease({ dist = 'dist', legacyDist, previousDists 
   for (const value of previousDists) {
     const previous = await buildDirectory(value, '--previous-dist');
     if (inside(root, previous) || inside(previous, root)) throw new Error('Las versiones anteriores deben estar fuera de dist.');
-    compatible.push({ root: previous, files: (await legacyFiles(previous)).filter(file => /^(?:assets|pdfjs)\//.test(file)) });
+    compatible.push({ root: previous, files: (await legacyFiles(previous, { allowPreviousPublicPages: true })).filter(file => /^(?:assets|pdfjs)\//.test(file)) });
   }
   const files = await legacyFiles(legacy);
   const manifest = JSON.parse(await fs.readFile(path.join(root, 'manifest.webmanifest'), 'utf8'));

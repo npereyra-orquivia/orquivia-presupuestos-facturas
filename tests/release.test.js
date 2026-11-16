@@ -146,3 +146,36 @@ test('previous public assets survive a release without replacing the current ent
   await assert.rejects(prepareRelease({ dist: f.root, legacyDist: f.legacy, previousDists: [f.legacy] }), /cambiaría un archivo actual/);
   assert.equal(await fs.readFile(path.join(f.root, 'assets', 'operational.js'), 'utf8'), "export const build = 'operational';");
 });
+
+test('previous 1.6 public copy information pages are validated but never replace current pages', async t => {
+  const f = await fixture(t), previous = path.join(f.temporary, 'previous-1.6');
+  await fs.cp(f.legacy, previous, { recursive: true });
+  for (const directory of [previous, f.root]) await fs.mkdir(path.join(directory, 'copias'));
+  for (const name of ['index.html', 'privacidad.html', 'styles.css']) {
+    await fs.writeFile(path.join(previous, 'copias', name), `previous public ${name}`);
+    await fs.writeFile(path.join(f.root, 'copias', name), `current public ${name}`);
+  }
+  await prepareRelease({ dist: f.root, legacyDist: f.legacy, previousDists: [previous] });
+  for (const name of ['index.html', 'privacidad.html', 'styles.css']) {
+    assert.equal(await fs.readFile(path.join(f.root, 'copias', name), 'utf8'), `current public ${name}`);
+  }
+  assert.deepEqual(await fs.readFile(path.join(f.root, 'assets', 'legacy.js')), await fs.readFile(path.join(previous, 'assets', 'legacy.js')));
+  await fs.rm(path.join(f.root, 'copias', 'privacidad.html'));
+  await prepareRelease({ dist: f.root, legacyDist: f.legacy, previousDists: [previous] });
+  await assert.rejects(fs.stat(path.join(f.root, 'copias', 'privacidad.html')), { code: 'ENOENT' });
+});
+
+test('recognizing previous copy information pages does not allow private files or arbitrary public-looking paths', async t => {
+  const f = await fixture(t);
+  for (const name of ['copias/secret.json', 'copias/secret.html', 'copias/private.pdf', 'copias/.env', 'copias/nested/index.html', 'other/index.html']) {
+    const previous = path.join(f.temporary, `previous-${name.replace(/[^a-z0-9]/gi, '-')}`);
+    await fs.cp(f.legacy, previous, { recursive: true });
+    await fs.mkdir(path.dirname(path.join(previous, name)), { recursive: true });
+    await fs.writeFile(path.join(previous, name), 'must not publish');
+    await assert.rejects(prepareRelease({ dist: f.root, legacyDist: f.legacy, previousDists: [previous] }), /inesperado|ajenos/);
+    await assert.rejects(fs.stat(f.target), { code: 'ENOENT' });
+  }
+  await fs.mkdir(path.join(f.legacy, 'copias'));
+  await fs.writeFile(path.join(f.legacy, 'copias', 'index.html'), 'not part of the legacy application');
+  await assert.rejects(prepareRelease({ dist: f.root, legacyDist: f.legacy }), /inesperado/);
+});

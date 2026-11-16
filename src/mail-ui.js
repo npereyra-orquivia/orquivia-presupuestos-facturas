@@ -126,7 +126,7 @@ export function renderMailComposer({ document, client, profile, history = [], pr
     ${extraAttachments(document, value, job)}
     ${!p.connected && !job ? '<p class="note-banner">Conecta primero tu correo en Mi espacio.</p><button type="button" class="button secondary" data-configure-mail>Configurar mi correo</button>' : ''}
     <div class="mail-job-status" role="status" aria-live="polite" data-mail-feedback>${esc(error || (job ? jobDescription(job) : 'Revisa los destinatarios, el mensaje completo con tu firma y el PDF antes de enviar.'))}</div>
-    <div class="mail-actions">${!job ? `<button type="button" class="button primary" data-send-mail ${!p.connected ? 'disabled' : ''}>Enviar correo con el PDF</button>` : ''}${allowsNewMail(job) ? '<button type="button" class="button secondary" data-new-mail>Preparar otro envío</button>' : ''}<button class="button secondary" type="button" data-close>${['sent', 'archive_pending'].includes(job?.status) ? 'Cerrar' : 'Cancelar'}</button></div>
+    <div class="mail-actions">${!job ? `<button type="button" class="button primary" data-send-mail ${!p.connected ? 'disabled' : ''}>${value.relatedDocumentIds?.length ? `Enviar correo con ${value.relatedDocumentIds.length + 1} PDF` : 'Enviar correo con el PDF'}</button>` : ''}${allowsNewMail(job) ? '<button type="button" class="button secondary" data-new-mail>Preparar otro envío</button>' : ''}<button class="button secondary" type="button" data-close>${['sent', 'archive_pending'].includes(job?.status) ? 'Cerrar' : 'Cancelar'}</button></div>
     </form>${historySection(document, history)}</section><aside class="mail-document-preview"><h3>PDF que se adjuntará</h3>${preview}<div data-related-mail-previews>${relatedPreviews}</div></aside></div>`;
 }
 
@@ -212,6 +212,7 @@ function bindMailSurface(root, ctx) {
       try { relatedIds = validateRelatedQuotes(selected, ctx.document, ctx.relatedQuotes); }
       catch (error) { input.checked = !input.checked; feedback(error.message); return; }
       rememberDraft();
+      if (send) send.textContent = relatedIds.length ? `Enviar correo con ${relatedIds.length + 1} PDF` : 'Enviar correo con el PDF';
       const previews = root.querySelector('[data-related-mail-previews]');
       if (previews) previews.innerHTML = ctx.relatedPreview?.(relatedIds) || '';
       feedback(`${relatedIds.length + 1} PDF preparados para un único correo.`);
