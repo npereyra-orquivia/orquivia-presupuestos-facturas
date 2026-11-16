@@ -49,6 +49,7 @@
 .paper.doc-preview .paper-grand-total>span:only-child{margin-left:auto}
 .paper.doc-preview .paper-vat-note{font-size:var(--document-small);color:#58676e;text-align:right;margin-top:3px}
 .paper.doc-preview .paper-note{font-size:var(--document-font)}
+.paper.doc-preview .paper-note.paper-quote-note{font-size:var(--document-small);line-height:1.45}
 .paper.doc-preview .paper-valid,.paper.doc-preview .paper-footer{font-size:var(--document-small)}
 .paper.doc-preview .paper-footer{grid-template-columns:minmax(0,1fr) minmax(0,1.2fr)}
 .paper.doc-preview .paper-footer strong{font-size:var(--document-small)}
