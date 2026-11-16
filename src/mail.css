@@ -42,3 +42,8 @@
 .mail-related-choice{display:flex;align-items:center;gap:12px;padding:12px 0;border-top:1px solid var(--line,#dce4dc);cursor:pointer}
 .mail-related-choice input{width:18px;height:18px;flex:0 0 18px;accent-color:#204e40}.mail-related-choice span{flex:1;min-width:0}.mail-related-choice small{display:block;font-weight:400;margin-top:3px;overflow-wrap:anywhere}.mail-related-choice b{font-size:13px;white-space:nowrap}
 .mail-related-preview{margin-top:20px}.mail-related-preview summary{padding:12px;border:1px solid var(--line,#dce4dc);border-radius:8px;cursor:pointer;font-weight:600}
+
+.mail-draft-status{margin:12px 0;font-size:13px;line-height:1.5;color:var(--muted,#667b70);overflow-wrap:anywhere}
+.mail-draft-attachments-hint{margin:12px 0}
+
+.mail-related-unavailable{margin:12px 0}.mail-related-unavailable p{margin:0 0 10px}

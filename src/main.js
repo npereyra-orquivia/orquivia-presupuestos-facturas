@@ -68,7 +68,7 @@ let workspaceConflict=null;
 let operationsEvidence=null,operationsEvidenceReceivedAt=null,operationsEvidenceLoading=false,operationsEvidenceError='',operationsEvidenceRequestedAt=null,operationsEvidenceTimer=null;
 let config={url:import.meta.env.VITE_SUPABASE_URL||'',anonKey:import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY||''};
 const mailFeature=mailEnabled?createMailFeature({getUser:()=>user,getMode:()=>mode,getBackend:()=>backend,getDocuments:()=>state.documents,scope:operationScope,
-  root:modalRoot,logoUrl:documentLogo,openModal,closeModal,header:modalHeader,cleanup:registerModalCleanup,
+  root:modalRoot,logoUrl:documentLogo,openModal,closeModal,setCloseHandler:handler=>{modalCancel=handler},header:modalHeader,cleanup:registerModalCleanup,
   preview:documentPreview,clientFor:d=>clientFor(d),documentFor:id=>state.documents.find(d=>d.id===id),isBusy:()=>busy,isConflict:()=>Boolean(workspaceConflict),
   setBusy:value=>busy=value,toast,navigate:navTo,adopt:result=>{state=validateState(result.state);render();},
 }):null;

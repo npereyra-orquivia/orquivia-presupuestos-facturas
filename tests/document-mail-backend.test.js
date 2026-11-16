@@ -83,3 +83,18 @@ test('modern and legacy database profile conflicts keep a readable Edge error an
     assert.deepEqual(calls.map(call=>call.name),['orquivia_mail_profile','orquivia_mail_save_profile']);
   }
 });
+
+test('personal draft API preserves CAS and authenticated context without touching financial workspace state',async()=>{
+  const calls=[];const draft={to:'client@example.test',cc:'',subject:'Edited subject',message:'Unfinished text',relatedDocumentIds:['second-quote'],idempotencyKey:'10000000-0000-4000-8000-000000000001'};
+  const mail=createDocumentMailBackend({client:{functions:{invoke:async(_name,args)=>{calls.push(args.body);return {data:args.body.action==='composer'?{profile:{connected:true},history:[],draft,draftVersion:7,draftUpdatedAt:'2026-01-02T10:00:00Z'}:{draft,version:7,updatedAt:'2026-01-02T10:00:00Z'},error:null};}}},requireUser:async()=>({id:'owner'}),getWorkspace:()=>({organizationId:'org'}),getVersion:()=>null,enqueue:()=>{throw Error('Drafts do not enqueue financial saves');},adoptWorkspace:()=>{throw Error('Drafts do not alter the workspace');}});
+  assert.equal((await mail.composer('quote')).draftVersion,7);
+  assert.deepEqual((await mail.readDraft('quote')).draft,draft);
+  assert.equal((await mail.saveDraft('quote',draft,6)).version,7);
+  assert.deepEqual(calls.map(v=>v.action),['composer','draft-read','draft-save']);
+  assert.deepEqual(calls[2],{documentId:'quote',draft,expectedDraftVersion:6,action:'draft-save',expectedUserId:'owner',organizationId:'org'});
+});
+
+test('draft conflicts retain a clear safe message and never expose server details',async()=>{
+  const mail=createDocumentMailBackend({client:{functions:{invoke:async()=>({data:{error:'DRAFT_CONFLICT'},error:null})}},requireUser:async()=>({id:'owner'}),getWorkspace:()=>({organizationId:'org'}),getVersion:()=>1,enqueue:fn=>fn(),adoptWorkspace:()=>{throw Error('No workspace adoption');}});
+  await assert.rejects(mail.saveDraft('quote',{},1),error=>error.code==='DRAFT_CONFLICT'&&/Otra pestaña/.test(error.message));
+});

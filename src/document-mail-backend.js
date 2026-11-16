@@ -12,6 +12,8 @@ const messages = {
   DOCUMENT_NOT_SENDABLE: 'Este documento no está preparado para enviarse.',
   INVALID_ATTACHMENT: 'Revisa los adjuntos: se admiten documentos PDF e imágenes JPG o PNG.',
   INVALID_RELATED_DOCUMENTS: 'Selecciona hasta cuatro presupuestos adicionales distintos del mismo cliente.',
+  INVALID_DRAFT: 'Revisa los campos y los presupuestos seleccionados antes de guardar el borrador.',
+  DRAFT_CONFLICT: 'Otra pestaña ha guardado este borrador. Conserva tu texto o carga el borrador guardado antes de continuar.',
   ATTACHMENTS_NOT_ALLOWED: 'Los documentos adicionales están disponibles en los correos de facturas.',
   ATTACHMENT_LIMIT: 'Puedes añadir hasta 5 archivos, de 5 MB cada uno y 10 MB en total.',
   MAIL_STORAGE_LIMIT: 'Hay demasiadas copias pendientes en Supabase. Revisa los envíos pendientes antes de enviar otro correo.',
@@ -48,8 +50,11 @@ export function createDocumentMailBackend({ client, requireUser, getWorkspace, g
     disconnect: fields => request('disconnect', fields),
     async composer(documentId) {
       const result = await request('composer', { documentId });
-      return { profile: result?.profile, history: Array.isArray(result?.history) ? result.history : [] };
+      return { profile: result?.profile, history: Array.isArray(result?.history) ? result.history : [],
+        ...(Object.hasOwn(result || {}, 'draftVersion') ? { draft: result.draft || null, draftVersion: result.draftVersion, draftUpdatedAt: result.draftUpdatedAt || null } : {}) };
     },
+    readDraft: documentId => request('draft-read', { documentId }),
+    saveDraft: (documentId, draft, expectedDraftVersion) => request('draft-save', { documentId, draft, expectedDraftVersion }),
     async history(documentId) {
       const result = await request('history', { documentId });
       return Array.isArray(result) ? result : result?.history || [];

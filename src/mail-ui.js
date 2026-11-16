@@ -1,7 +1,7 @@
 import { escapeHTML as esc } from './domain.js';
 import { MAIL_PROVIDERS, defaultMailDraft, defaultMailProfile, mailAttachmentName, mailStatus, mailRecipientSuggestions, renderMailSignature, validateMailDraft, validateMailSignature } from './mail-domain.js';
 import { MAIL_ATTACHMENT_LIMITS, MAIL_ATTACHMENT_ACCEPT, readMailAttachments, encodeMailAttachments, formatMailAttachmentSize } from './mail-attachments.js';
-import { renderRelatedQuotes, validateRelatedQuotes } from './mail-related-quotes.js';
+import { renderRelatedQuotes, validateRelatedQuotes, unavailableRelatedQuoteIds } from './mail-related-quotes.js';
 
 function relatedHistory(job) {
   const values = Array.isArray(job.relatedDocuments) ? job.relatedDocuments.filter(value => typeof value?.number === 'string').slice(0, 4) : [];
@@ -17,11 +17,11 @@ function extraAttachmentRows(attachments, readonly = false) {
   return attachments.length ? attachments.map((item, index) => `<li><div><strong>${esc(item.name)}</strong><small>${esc(formatMailAttachmentSize(item.bytes?.byteLength || item.size || 0))}</small></div>${readonly ? '' : `<button type="button" class="text-button" data-remove-mail-attachment="${index}" aria-label="Quitar adjunto ${esc(item.name)}">Quitar</button>`}</li>`).join('') : '<li class="mail-extra-empty">No has añadido documentos adicionales.</li>';
 }
 
-function extraAttachments(document, draft, job) {
+function extraAttachments(document, draft, job, draftPersistence = false) {
   if (document?.kind !== 'invoice') return '';
   const files = job ? (Array.isArray(job.attachments) ? job.attachments : []) : (Array.isArray(draft.attachments) ? draft.attachments : []);
   const bytes = files.reduce((sum, file) => sum + (file.bytes?.byteLength || file.size || 0), 0);
-  return `<section class="mail-extra-attachments" data-mail-extra-attachments aria-label="Adjuntos adicionales de la factura"><div class="mail-extra-heading"><h3>Adjuntos adicionales (opcional)</h3>${job ? '' : '<button type="button" class="button secondary" data-add-mail-attachments>Añadir documentos</button>'}</div>${job ? '' : `<input data-mail-attachments-input type="file" accept="${esc(MAIL_ATTACHMENT_ACCEPT)}" multiple hidden aria-label="Seleccionar adjuntos adicionales"><p class="field-hint">PDF, JPG o PNG. Hasta ${MAIL_ATTACHMENT_LIMITS.count} archivos, ${formatMailAttachmentSize(MAIL_ATTACHMENT_LIMITS.eachBytes)} por archivo y ${formatMailAttachmentSize(MAIL_ATTACHMENT_LIMITS.totalBytes)} en total. La factura se adjunta automáticamente aparte.</p>`}<ul data-mail-extra-list>${extraAttachmentRows(files, Boolean(job))}</ul><p class="mail-extra-total" data-mail-extra-total>${files.length} de ${MAIL_ATTACHMENT_LIMITS.count} archivos · ${formatMailAttachmentSize(bytes)} de ${formatMailAttachmentSize(MAIL_ATTACHMENT_LIMITS.totalBytes)}</p><p class="field-hint">Para otro envío, vuelve a seleccionar los documentos que quieras incluir.</p></section>`;
+  return `<section class="mail-extra-attachments" data-mail-extra-attachments aria-label="Adjuntos adicionales de la factura"><div class="mail-extra-heading"><h3>Adjuntos adicionales (opcional)</h3>${job ? '' : '<button type="button" class="button secondary" data-add-mail-attachments>Añadir documentos</button>'}</div>${job ? '' : `<input data-mail-attachments-input type="file" accept="${esc(MAIL_ATTACHMENT_ACCEPT)}" multiple hidden aria-label="Seleccionar adjuntos adicionales"><p class="field-hint">PDF, JPG o PNG. Hasta ${MAIL_ATTACHMENT_LIMITS.count} archivos, ${formatMailAttachmentSize(MAIL_ATTACHMENT_LIMITS.eachBytes)} por archivo y ${formatMailAttachmentSize(MAIL_ATTACHMENT_LIMITS.totalBytes)} en total. La factura se adjunta automáticamente aparte.</p>`}<ul data-mail-extra-list>${extraAttachmentRows(files, Boolean(job))}</ul><p class="mail-extra-total" data-mail-extra-total>${files.length} de ${MAIL_ATTACHMENT_LIMITS.count} archivos · ${formatMailAttachmentSize(bytes)} de ${formatMailAttachmentSize(MAIL_ATTACHMENT_LIMITS.totalBytes)}</p><p class="field-hint">${draftPersistence && !job ? 'El borrador guarda el texto; estos archivos deben volver a seleccionarse al reabrir.' : 'Para otro envío, vuelve a seleccionar los documentos que quieras incluir.'}</p></section>`;
 }
 
 export function renderMailSettings({ profile, user, mode, error = '', loading = false, logoUrl = '' }) {
@@ -109,7 +109,7 @@ function messagePreview(draft, profile, logoUrl) {
   return `<div class="mail-message-headers"><div><strong>Para</strong><span>${esc(recipientText(draft.to))}</span></div>${recipientText(draft.cc) ? `<div><strong>CC</strong><span>${esc(recipientText(draft.cc))}</span></div>` : ''}<div><strong>Asunto</strong><span>${esc(draft.subject || '')}</span></div></div><div class="mail-message-body">${esc(draft.message || '').replaceAll('\r\n', '\n').replaceAll('\n', '<br>')}</div><div class="mail-signature-preview">${renderMailSignature(profile.signature, { email: profile.email, logoUrl })}</div>`;
 }
 
-export function renderMailComposer({ document, client, profile, history = [], preview = '', relatedQuotes = [], relatedPreviews = '', draft, job, error = '', logoUrl = '' }) {
+export function renderMailComposer({ document, client, profile, history = [], preview = '', relatedQuotes = [], relatedPreviews = '', draft, job, error = '', logoUrl = '', draftPersistence = false }) {
   const value = draft || defaultMailDraft(document, client), p = profile || defaultMailProfile();
   const suggestions = mailRecipientSuggestions(history);
   const readonly = job ? 'readonly' : '';
@@ -123,10 +123,12 @@ export function renderMailComposer({ document, client, profile, history = [], pr
     <section class="mail-message-preview" aria-label="Vista previa del correo"><h3>Así llegará tu mensaje</h3><div data-mail-message-preview>${messagePreview(value, p, logoUrl)}</div></section>
     <div class="mail-attachment">PDF adjunto · <strong>${esc(mailAttachmentName(document))}</strong></div>
     ${!job ? renderRelatedQuotes(document, relatedQuotes, value.relatedDocumentIds || []) : ''}
-    ${extraAttachments(document, value, job)}
+    ${!job && draftPersistence && document?.kind === 'quote' ? '<p class="field-hint mail-draft-attachments-hint">Los presupuestos seleccionados se conservan. Sus PDF se generan con los datos actuales al enviar.</p>' : ''}
+    ${extraAttachments(document, value, job, draftPersistence)}
     ${!p.connected && !job ? '<p class="note-banner">Conecta primero tu correo en Mi espacio.</p><button type="button" class="button secondary" data-configure-mail>Configurar mi correo</button>' : ''}
     <div class="mail-job-status" role="status" aria-live="polite" data-mail-feedback>${esc(error || (job ? jobDescription(job) : 'Revisa los destinatarios, el mensaje completo con tu firma y el PDF antes de enviar.'))}</div>
-    <div class="mail-actions">${!job ? `<button type="button" class="button primary" data-send-mail ${!p.connected ? 'disabled' : ''}>${value.relatedDocumentIds?.length ? `Enviar correo con ${value.relatedDocumentIds.length + 1} PDF` : 'Enviar correo con el PDF'}</button>` : ''}${allowsNewMail(job) ? '<button type="button" class="button secondary" data-new-mail>Preparar otro envío</button>' : ''}<button class="button secondary" type="button" data-close>${['sent', 'archive_pending'].includes(job?.status) ? 'Cerrar' : 'Cancelar'}</button></div>
+    ${draftPersistence && !job ? '<p class="mail-draft-status" role="status" aria-live="polite" data-mail-draft-status>Los cambios se guardan en tu cuenta.</p>' : ''}
+    <div class="mail-actions">${draftPersistence && !job ? '<button type="button" class="button secondary" data-save-mail-draft>Guardar borrador</button><button type="button" class="button secondary" data-reload-mail-draft hidden>Descartar mis cambios y cargar guardado</button>' : ''}${!job ? `<button type="button" class="button primary" data-send-mail ${!p.connected ? 'disabled' : ''}>${value.relatedDocumentIds?.length ? `Enviar correo con ${value.relatedDocumentIds.length + 1} PDF` : 'Enviar correo con el PDF'}</button>` : ''}${allowsNewMail(job) ? '<button type="button" class="button secondary" data-new-mail>Preparar otro envío</button>' : ''}<button class="button secondary" type="button" data-close>${draftPersistence || ['sent', 'archive_pending'].includes(job?.status) ? 'Cerrar' : 'Cancelar'}</button></div>
     </form>${historySection(document, history)}</section><aside class="mail-document-preview"><h3>PDF que se adjuntará</h3>${preview}<div data-related-mail-previews>${relatedPreviews}</div></aside></div>`;
 }
 
@@ -156,6 +158,7 @@ function bindMailSurface(root, ctx) {
   const isActive = () => active && (!ctx.isCurrent || ctx.isCurrent());
   const token = ctx.draft?.idempotencyKey || (form && !readonly ? crypto.randomUUID() : undefined);
   const feedback = message => { const target = root.querySelector('[data-mail-feedback]'); if (isActive() && target) target.textContent = message; };
+  const draftFeedback = message => { const target = root.querySelector('[data-mail-draft-status]'); if (isActive() && target) target.textContent = message; };
   const draft = () => ({ ...ctx.draft, to: form.elements.to.value, cc: form.elements.cc.value,
     subject: form.elements.subject.value, message: form.elements.message.value, ...(fileInput ? { attachments } : {}), ...(ctx.document?.kind === 'quote' ? { relatedDocumentIds: relatedIds } : {}), idempotencyKey: token });
   const rememberDraft = () => {
@@ -169,12 +172,12 @@ function bindMailSurface(root, ctx) {
     for (const { control } of controls) control.disabled = true;
     return () => { if (active) for (const { control, disabled } of controls) control.disabled = disabled; };
   };
-  async function run(action) {
+  async function run(action, { onError = feedback } = {}) {
     if (!isActive() || pending) return;
     pending = true;
     const unlock = lockControls();
     try { await action(); }
-    catch (error) { feedback(error?.message || 'No se pudo actualizar el estado. Vuelve a intentarlo.'); }
+    catch (error) { onError(error?.message || 'No se pudo actualizar el estado. Vuelve a intentarlo.'); }
     finally { pending = false; unlock(); }
   }
   function drawAttachments() {
@@ -208,6 +211,11 @@ function bindMailSurface(root, ctx) {
   root.querySelectorAll('[data-related-quote]').forEach(input => {
     input.onchange = () => {
       if (!isActive() || pending || readonly || attempted) return;
+      if (unavailableRelatedQuoteIds(ctx.document, ctx.relatedQuotes, relatedIds).length) {
+        input.checked = relatedIds.includes(input.value);
+        feedback('Quita primero los presupuestos no disponibles con el botón indicado.');
+        return;
+      }
       const selected = [...root.querySelectorAll('[data-related-quote]')].filter(value => value.checked).map(value => value.value);
       try { relatedIds = validateRelatedQuotes(selected, ctx.document, ctx.relatedQuotes); }
       catch (error) { input.checked = !input.checked; feedback(error.message); return; }
@@ -218,6 +226,23 @@ function bindMailSurface(root, ctx) {
       feedback(`${relatedIds.length + 1} PDF preparados para un único correo.`);
     };
   });
+  const removeUnavailable = root.querySelector('[data-remove-unavailable-quotes]');
+  if (form && removeUnavailable && !readonly && ctx.document?.kind === 'quote') removeUnavailable.onclick = () => {
+    if (!isActive() || pending || attempted) return;
+    const unavailable = new Set(unavailableRelatedQuoteIds(ctx.document, ctx.relatedQuotes, relatedIds));
+    if (!unavailable.size) return;
+    const retained = relatedIds.filter(id => !unavailable.has(id));
+    try { relatedIds = validateRelatedQuotes(retained, ctx.document, ctx.relatedQuotes); }
+    catch (error) { feedback(error.message); return; }
+    root.querySelectorAll('[data-related-quote]').forEach(input => { input.checked = relatedIds.includes(input.value); });
+    rememberDraft();
+    if (send) send.textContent = relatedIds.length ? `Enviar correo con ${relatedIds.length + 1} PDF` : 'Enviar correo con el PDF';
+    const previews = root.querySelector('[data-related-mail-previews]');
+    if (previews) previews.innerHTML = ctx.relatedPreview?.(relatedIds) || '';
+    const warning = root.querySelector('[data-unavailable-quotes]');
+    if (warning) warning.hidden = true;
+    feedback(`Presupuestos no disponibles quitados. ${relatedIds.length + 1} PDF preparados para un único correo.`);
+  };
   if (form) {
     form.addEventListener('keydown', enter);
     form.onsubmit = event => event.preventDefault();
@@ -235,6 +260,9 @@ function bindMailSurface(root, ctx) {
     try { encoded = encodeMailAttachments(attachments); selectedIds = validateRelatedQuotes(relatedIds, ctx.document, ctx.relatedQuotes); }
     catch (error) { return feedback(error.message); }
     await run(async () => {
+      try { await ctx.beforeSend?.(value); }
+      catch (error) { feedback(error?.message || 'No se pudo guardar el borrador. Vuelve a intentarlo.'); return; }
+      if (!isActive()) return;
       attempted = true;
       for (const input of form.querySelectorAll('input,textarea')) input.readOnly = true;
       send.remove();
@@ -242,6 +270,19 @@ function bindMailSurface(root, ctx) {
       try { const result = await ctx.send({ ...validated.value, ...(selectedIds.length ? { relatedDocumentIds: selectedIds } : {}), ...(fileInput ? { attachments: encoded } : {}), idempotencyKey: token }); if (isActive()) await ctx.onResult?.(result); }
       catch (error) { feedback(`${error?.message || 'No hay una confirmación definitiva del envío.'} Actualiza el estado y comprueba tu correo antes de volver a enviar.`); }
     });
+  };
+  const saveDraft = root.querySelector('[data-save-mail-draft]');
+  if (form && saveDraft && !readonly && ctx.saveDraft) saveDraft.onclick = () => {
+    if (!isActive() || pending || attempted) return;
+    return run(async () => {
+      rememberDraft();
+      await ctx.saveDraft(ctx.draft);
+    }, { onError: draftFeedback });
+  };
+  const reloadDraft = root.querySelector('[data-reload-mail-draft]');
+  if (form && reloadDraft && !readonly && ctx.reloadDraft) reloadDraft.onclick = () => {
+    if (!isActive() || pending || attempted) return;
+    return run(async () => { await ctx.reloadDraft(); }, { onError: draftFeedback });
   };
   const configure = root.querySelector('[data-configure-mail]');
   if (configure) configure.onclick = () => { if (active && !pending) ctx.configure?.(); };
