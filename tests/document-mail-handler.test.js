@@ -39,15 +39,16 @@ test('composer starts the independent public profile and history reads in parall
   const history=[{id,status:'sent',to:['client@example.test'],cc:[]}];
   const handler=createDocumentMailHandler({db:{rpc:async(name,p)=>{
     calls.push({name,p});await gate;
-    return {data:name.endsWith('_profile')?publicProfile:{history},error:null};
+    return {data:name.endsWith('_profile')?publicProfile:name.endsWith('_draft_read')?{draft:null,version:0,updatedAt:null}:{history},error:null};
   }},auth:{getUser:async()=>({data:{user:{id:user,email:publicProfile.email}}})},mail:{},renderDocumentPdf:()=>{throw Error('read cannot render or send');}});
   const pending=handler(request('composer',{documentId:'quote'}));await new Promise(resolve=>setImmediate(resolve));
   const started=calls.map(call=>call.name);release();
   const response=await pending,result=await response.json();
-  assert.equal(response.status,200);assert.deepEqual(started,['orquivia_mail_profile','orquivia_mail_history']);
+  assert.equal(response.status,200);assert.deepEqual(started,['orquivia_mail_profile','orquivia_mail_history','orquivia_mail_draft_read']);
   assert.deepEqual(calls,[{name:'orquivia_mail_profile',p:{p_user:user,p_org:org,p_secrets:false}},
-    {name:'orquivia_mail_history',p:{p_user:user,p_org:org,p_document:'quote'}}]);
-  assert.deepEqual(result,{profile:publicProfile,history});assert.equal(result.profile.password,undefined);assert.equal(result.profile.sentFolder,undefined);
+    {name:'orquivia_mail_history',p:{p_user:user,p_org:org,p_document:'quote'}},
+    {name:'orquivia_mail_draft_read',p:{p_user:user,p_org:org,p_document:'quote'}}]);
+  assert.deepEqual(result,{profile:publicProfile,history,draft:null,draftVersion:0,draftUpdatedAt:null});assert.equal(result.profile.password,undefined);assert.equal(result.profile.sentFolder,undefined);
 });
 
 test('history performs only its membership-checked history RPC and malformed composer documents perform no RPC',async()=>{
@@ -62,7 +63,7 @@ test('history performs only its membership-checked history RPC and malformed com
 });
 
 test('composer fails closed if either independent membership or MFA check denies access',async()=>{
-  for(const [denied,errorCode] of [['orquivia_mail_profile','MEMBERSHIP_REQUIRED'],['orquivia_mail_history','MFA_REQUIRED']]) {
+  for(const [denied,errorCode] of [['orquivia_mail_profile','MEMBERSHIP_REQUIRED'],['orquivia_mail_history','MFA_REQUIRED'],['orquivia_mail_draft_read','MEMBERSHIP_REQUIRED']]) {
     const handler=createDocumentMailHandler({db:{rpc:async name=>name===denied?{data:null,error:{message:errorCode}}:
       {data:name.endsWith('_profile')?{email:'sender@example.test',signature}:{history:[{id:'private-job'}]},error:null}},
       auth:{getUser:async()=>({data:{user:{id:user,email:'sender@example.test'}}})},mail:{}});

@@ -4,6 +4,7 @@ import { createMailContextCache, mergeMailJob } from './mail-context-cache.js';
 import { resolveMailComposeEntry } from './mail-compose-entry.js';
 import { normalizeOrquivia } from './brand.js';
 import { relatedQuoteOptions, renderRelatedQuotePreviews } from './mail-related-quotes.js';
+import { createMailDraftStore } from './mail-draft-store.js';
 
 export function createMailFeature(ctx) {
   let profile = null, identity = null, cleanup = null, mountRequest = 0, composerRequest = 0;
@@ -14,7 +15,8 @@ export function createMailFeature(ctx) {
       const isCurrent = ctx.scope();
       const result = ctx.getMode() === 'cloud' ? await ctx.getBackend().mail.composer(documentId) : { profile: current(), history: [] };
       if (!isCurrent()) throw new Error('La sesión cambió. Vuelve a entrar.');
-      return { profile: normalizeMailProfile(result.profile, ctx.getUser() || {}), history: Array.isArray(result.history) ? result.history : [] };
+      return { profile: normalizeMailProfile(result.profile, ctx.getUser() || {}), history: Array.isArray(result.history) ? result.history : [],
+        draft: result.draft || null, draftVersion: result.draftVersion || 0, draftUpdatedAt: result.draftUpdatedAt || null };
     },
   });
   function reset() {
@@ -71,15 +73,54 @@ export function createMailFeature(ctx) {
     ctx.openModal(ctx.header(`Enviar ${kind}`) + renderMailLoading());
     const modal = ctx.root.querySelector('.modal');
     const valid = () => request === composerRequest && isCurrent() && modal.isConnected;
-    let data, draft, job, dispose;
+    let data, draft, job, dispose, draftStore, closing = false;
     const documentNow = () => ctx.documentFor(document.id) || document;
     const remember = () => contexts.remember(document.id, data);
     const chooseJob = () => data.history.find(entry => entry.id === draft?.idempotencyKey);
-    const bindClose = () => modal.querySelectorAll('[data-close]').forEach(button => { button.onclick = () => ctx.closeModal(); });
+    function renderDraftState(value = draftStore?.getState()) {
+      if (!valid() || !value) return;
+      const status = modal.querySelector('[data-mail-draft-status]');
+      if (status) {
+        const time = value.updatedAt ? new Date(value.updatedAt).toLocaleTimeString('es-ES', { timeZone: 'Europe/Madrid', hour: '2-digit', minute: '2-digit' }) : '';
+        status.textContent = value.status === 'saved' ? `Borrador guardado en tu cuenta${time ? ' · ' + time : ''}.`
+          : value.status === 'saving' ? 'Guardando borrador…'
+            : value.status === 'dirty' ? 'Cambios pendientes de guardar…'
+              : value.error?.message || 'No se ha podido guardar. Conserva esta ventana y vuelve a intentarlo.';
+        status.classList.toggle('is-error', ['error', 'conflict'].includes(value.status));
+      }
+      const reload = modal.querySelector('[data-reload-mail-draft]');
+      if (reload) reload.hidden = value.status !== 'conflict';
+      if (value.status === 'saved') {
+        data = { ...data, draft: value.draft, draftVersion: value.version, draftUpdatedAt: value.updatedAt }; remember();
+      }
+    }
+    async function saveDraft(value = draft) {
+      if (!valid()) throw new Error('Vuelve a abrir el borrador antes de guardarlo.');
+      if (!draftStore) return;
+      draftStore.set(value);
+      await draftStore.saveNow();
+    }
+    async function requestClose() {
+      if (!valid() || ctx.isBusy() || closing) return false;
+      closing = true; ctx.setBusy(true);
+      try {
+        if (draftStore) await draftStore.saveNow();
+        if (!valid()) return false;
+        ctx.closeModal(true); return true;
+      } catch (error) {
+        if (valid()) { renderDraftState(); ctx.toast(error.message || 'Guarda el borrador antes de cerrar.', true); }
+        return false;
+      } finally {
+        closing = false;
+        if (isCurrent()) ctx.setBusy(false);
+        if (valid()) ctx.setCloseHandler?.(requestClose);
+      }
+    }
+    const bindClose = () => modal.querySelectorAll('[data-close]').forEach(button => { button.onclick = () => requestClose(); });
     function newMail() {
       if (!valid() || ctx.isBusy() || ctx.isConflict()) return;
       draft = { ...draft, subject: normalizeOrquivia(draft.subject), message: normalizeOrquivia(draft.message), attachments: [], idempotencyKey: crypto.randomUUID() };
-      drafts.set(document.id, draft); job = null; draw();
+      drafts.set(document.id, draft); draftStore?.set(draft); job = null; draw();
     }
     async function reloadHistory() {
       if (!valid() || ctx.isBusy()) return;
@@ -120,23 +161,29 @@ export function createMailFeature(ctx) {
       const relatedPreview = ids => renderRelatedQuotePreviews(relatedQuotes.filter(value => ids.includes(value.id)), ctx.preview);
       modal.innerHTML = ctx.header(title, document.number) + (job
         ? renderMailResult({ job, document: documentNow(), history: data.history })
-        : renderMailComposer({ document: documentNow(), client: ctx.clientFor(documentNow()), profile: data.profile, history: data.history, preview: ctx.preview(documentNow()), relatedQuotes, relatedPreviews: relatedPreview(draft.relatedDocumentIds || []), draft, logoUrl: ctx.logoUrl }));
+        : renderMailComposer({ document: documentNow(), client: ctx.clientFor(documentNow()), profile: data.profile, history: data.history, preview: ctx.preview(documentNow()), relatedQuotes, relatedPreviews: relatedPreview(draft.relatedDocumentIds || []), draft, draftPersistence: cloud, logoUrl: ctx.logoUrl }));
       bindClose();
       const bindings = {
         draft, document: documentNow(), relatedQuotes, relatedPreview, profile: data.profile, logoUrl: ctx.logoUrl, send, onResult, retryArchive, reloadHistory, onNewMail: newMail, isCurrent: valid,
-        onDraftChange: value => { if (valid()) { draft = value; drafts.set(document.id, value); } },
-        configure: () => { ctx.closeModal(true); ctx.navigate('personal'); },
+        ...(cloud ? { saveDraft, beforeSend: saveDraft, reloadDraft: () => { drafts.delete(document.id); contexts.clear(); return openComposer(documentNow()); } } : {}),
+        onClose: requestClose,
+        onDraftChange: value => { if (valid()) { draft = value; drafts.set(document.id, value); draftStore?.set(value); } },
+        configure: async () => { if (await requestClose()) ctx.navigate('personal'); },
       };
       dispose = job ? bindMailResult(modal, bindings) : bindMailComposer(modal, bindings);
+      renderDraftState();
       modal.scrollTop = 0;
       modal.querySelector(job ? '[data-new-mail], [data-close]' : 'input[name="to"]')?.focus({ preventScroll: true });
     }
-    ctx.cleanup(() => dispose?.());
+    const lifecycle = ctx.lifecycleTarget || (typeof window !== 'undefined' ? window : null);
+    const beforeUnload = event => { const value = draftStore?.getState(); if (valid() && value && (value.dirty || ['saving', 'error', 'conflict'].includes(value.status))) { event.preventDefault(); event.returnValue = ''; } };
+    ctx.cleanup(() => { dispose?.(); draftStore?.dispose(); lifecycle?.removeEventListener('beforeunload', beforeUnload); });
     try {
-      data = await contexts.get(document.id);
+      data = await contexts.get(document.id, { force: cloud });
       if (!valid()) return;
       profile = data.profile;
-      const saved = drafts.get(document.id);
+      const memory = drafts.get(document.id);
+      const saved = cloud ? (data.draft ? { ...data.draft, ...(memory?.idempotencyKey === data.draft.idempotencyKey && memory.attachments ? { attachments: memory.attachments } : {}) } : memory) : memory;
       const latest = documentNow(), client = ctx.clientFor(latest);
       ({ draft, job } = resolveMailComposeEntry({ savedDraft: saved, history: data.history,
         defaultDraft: defaultMailDraft(latest, client),
@@ -146,6 +193,13 @@ export function createMailFeature(ctx) {
         if (previous) draft.relatedDocumentIds = [...new Set([previous.documentId, ...previous.relatedDocumentIds])].filter(id => id && id !== latest.id);
       }
       drafts.set(document.id, draft);
+      if (cloud) {
+        draftStore = createMailDraftStore({ initialDraft: data.draft || draft, version: data.draftVersion, updatedAt: data.draftUpdatedAt,
+          save: (value, version) => backend.mail.saveDraft(document.id, value, version), isCurrent: valid, onState: renderDraftState });
+        draftStore.set(draft);
+        lifecycle?.addEventListener('beforeunload', beforeUnload);
+        ctx.setCloseHandler?.(requestClose);
+      }
       draw();
     } catch (error) {
       if (!valid()) return;

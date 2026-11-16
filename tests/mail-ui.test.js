@@ -109,3 +109,24 @@ test('a rejected attachment batch retains the previous files and displays the re
   assert.equal(f.saved.length, 0);assert.equal(f.sent.length, 0);assert.equal(f.send.disabled, false);
   f.dispose();
 });
+
+
+test('persistent draft controls are explicit, accessible and limited to editable composers', () => {
+  const enabled = renderMailComposer({ document, profile, draft, draftPersistence: true });
+  assert.match(enabled, /type="button"[^>]*data-save-mail-draft>Guardar borrador/);
+  assert.match(enabled, /role="status"[^>]*data-mail-draft-status>Los cambios se guardan en tu cuenta/);
+  assert.match(enabled, /data-close>Cerrar/);
+  assert.match(enabled, /data-reload-mail-draft hidden>Descartar mis cambios y cargar guardado/);
+  assert.match(enabled, /Los presupuestos seleccionados se conservan/);
+  assert.match(enabled, /Sus PDF se generan con los datos actuales al enviar/);
+  assert.ok(!renderMailComposer({ document, profile, draft }).includes('data-save-mail-draft'));
+  for (const status of ['sent', 'sending', 'uncertain']) {
+    const readonly = renderMailComposer({ document, profile, draft, draftPersistence: true, job: { status } });
+    assert.ok(!readonly.includes('data-save-mail-draft'));
+    assert.ok(!readonly.includes('data-mail-draft-status'));
+    assert.ok(!readonly.includes('data-reload-mail-draft'));
+  }
+  const invoice = renderMailComposer({ document: { ...document, kind: 'invoice' }, profile, draft, draftPersistence: true });
+  assert.match(invoice, /El borrador guarda el texto; estos archivos deben volver a seleccionarse al reabrir/);
+  assert.ok(!invoice.includes('Los presupuestos seleccionados se conservan'));
+});

@@ -15,10 +15,16 @@ export function validateRelatedQuotes(ids = [], document, options = []) {
   return [...ids].sort();
 }
 
+export function unavailableRelatedQuoteIds(document, options = [], ids = []) {
+  const allowed = new Set(relatedQuoteOptions(document, options).map(value => value.id));
+  return Array.isArray(ids) ? ids.filter(id => !allowed.has(id)) : [];
+}
+
 export function renderRelatedQuotes(document, options = [], ids = []) {
   if (document?.kind !== 'quote') return '';
   const available = relatedQuoteOptions(document, options);
-  return `<section class="mail-related-quotes" aria-label="Presupuestos del mismo correo"><h3>Presupuestos del mismo correo</h3><p>El presupuesto ${esc(document.number)} se adjunta automáticamente. Puedes incluir hasta cuatro más del mismo cliente.</p>${available.map(value => `<label class="mail-related-choice"><input type="checkbox" data-related-quote value="${esc(value.id)}" ${ids.includes(value.id) ? 'checked' : ''}><span><strong>${esc(value.number)}</strong>${value.title ? `<small>${esc(value.title)}</small>` : ''}</span><b>${esc(money(documentAmounts(value).total))}</b></label>`).join('') || '<p class="field-hint">No hay otros presupuestos preparados o enviados para este cliente.</p>'}<p class="field-hint">Cada PDF conserva su número. Un único envío quedará registrado en el historial de todos los presupuestos incluidos.</p></section>`;
+  const unavailable = unavailableRelatedQuoteIds(document, options, ids);
+  return `<section class="mail-related-quotes" aria-label="Presupuestos del mismo correo"><h3>Presupuestos del mismo correo</h3><p>El presupuesto ${esc(document.number)} se adjunta automáticamente. Puedes incluir hasta cuatro más del mismo cliente.</p>${available.map(value => `<label class="mail-related-choice"><input type="checkbox" data-related-quote value="${esc(value.id)}" ${ids.includes(value.id) ? 'checked' : ''}><span><strong>${esc(value.number)}</strong>${value.title ? `<small>${esc(value.title)}</small>` : ''}</span><b>${esc(money(documentAmounts(value).total))}</b></label>`).join('') || '<p class="field-hint">No hay otros presupuestos preparados o enviados para este cliente.</p>'}${unavailable.length ? '<div class="note-banner mail-related-unavailable" data-unavailable-quotes><p role="alert">Hay presupuestos seleccionados que ya no están disponibles para este envío.</p><button type="button" class="button secondary" data-remove-unavailable-quotes>Quitar presupuestos no disponibles</button></div>' : ''}<p class="field-hint">Cada PDF conserva su número. Un único envío quedará registrado en el historial de todos los presupuestos incluidos.</p></section>`;
 }
 
 export function renderRelatedQuotePreviews(documents, preview) {

@@ -11,6 +11,16 @@ function relatedQuoteIds(value, primary) {
   if (!Array.isArray(value) || value.length > 4 || value.some(id => typeof id !== 'string' || !id.trim() || id.length > 100 || id !== id.trim() || /[\x00-\x1f\x7f]/.test(id) || id === primary) || new Set(value).size !== value.length) throw fail('INVALID_RELATED_DOCUMENTS');
   return [...value].sort();
 }
+function persistedMailDraft(value, primary) {
+  const allowed = new Set(['to','cc','subject','message','relatedDocumentIds','idempotencyKey']);
+  if (!value || typeof value !== 'object' || Array.isArray(value) || Object.keys(value).some(key => !allowed.has(key))) throw fail('INVALID_DRAFT');
+  for (const [key, limit] of [['to',5200],['cc',5200],['subject',200],['message',20000]]) {
+    if (typeof value[key] !== 'string' || value[key].length > limit || (key === 'message' ? /[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/ : /[\x00-\x1f\x7f]/).test(value[key])) throw fail('INVALID_DRAFT');
+  }
+  if (!uuid(value.idempotencyKey)) throw fail('INVALID_DRAFT');
+  return { to: value.to, cc: value.cc, subject: value.subject, message: value.message,
+    relatedDocumentIds: relatedQuoteIds(value.relatedDocumentIds, primary), idempotencyKey: value.idempotencyKey };
+}
 async function bodyJSON(request) {
   if (Number(request.headers.get('content-length')) > MAIL_ATTACHMENT_LIMITS.bodyBytes) throw fail('ATTACHMENT_LIMIT');
   const reader = request.body?.getReader(); if (!reader) throw fail('INVALID_MESSAGE');
@@ -27,7 +37,7 @@ export function createDocumentMailHandler({ db, auth, mail, renderDocumentPdf, l
   async function rpc(name, parameters) {
     const { data, error } = await db.rpc(`orquivia_mail_${name}`, parameters);
     if (error) {
-      const known = ['MEMBERSHIP_REQUIRED','MFA_REQUIRED','PROFILE_CONFLICT','VERSION_CONFLICT','DOCUMENT_NOT_SENDABLE','MAIL_OUTCOME_UNCERTAIN','RATE_LIMITED','INVALID_MAIL_JOB','IDEMPOTENCY_CONFLICT','INVALID_ATTACHMENT','INVALID_RELATED_DOCUMENTS','ATTACHMENTS_NOT_ALLOWED','ATTACHMENT_LIMIT','MAIL_STORAGE_LIMIT','MAIL_MESSAGE_TOO_LARGE'];
+      const known = ['MEMBERSHIP_REQUIRED','MFA_REQUIRED','PROFILE_CONFLICT','VERSION_CONFLICT','DRAFT_CONFLICT','INVALID_DRAFT','INVALID_DOCUMENT','DOCUMENT_NOT_SENDABLE','MAIL_OUTCOME_UNCERTAIN','RATE_LIMITED','INVALID_MAIL_JOB','IDEMPOTENCY_CONFLICT','INVALID_ATTACHMENT','INVALID_RELATED_DOCUMENTS','ATTACHMENTS_NOT_ALLOWED','ATTACHMENT_LIMIT','MAIL_STORAGE_LIMIT','MAIL_MESSAGE_TOO_LARGE'];
       throw fail(known.find(code => error.message?.includes(code)) || 'MAIL_DATABASE_ERROR');
     }
     return data;
@@ -54,17 +64,27 @@ export function createDocumentMailHandler({ db, auth, mail, renderDocumentPdf, l
       if (body.expectedUserId !== user.id || !uuid(body.organizationId)) throw fail('AUTH_CHANGED');
       const parameters = { p_user: user.id, p_org: body.organizationId };
       const publicProfile = value => ({ ...value, signature: Object.keys(value.signature || {}).length ? value.signature : defaultMailSignature(user) });
+      if (['draft-read','draft-save'].includes(body.action)) {
+        if (typeof body.documentId !== 'string' || !body.documentId || body.documentId.length > 100 || /[\x00-\x1f\x7f]/.test(body.documentId)) throw fail('INVALID_DOCUMENT');
+        const draftParameters = { ...parameters, p_document: body.documentId };
+        if (body.action === 'draft-read') return response(await rpc('draft_read', draftParameters));
+        if (!Number.isSafeInteger(body.expectedDraftVersion) || body.expectedDraftVersion < 0) throw fail('INVALID_DRAFT');
+        return response(await rpc('draft_save', { ...draftParameters, p_expected_version: body.expectedDraftVersion,
+          p_draft: persistedMailDraft(body.draft, body.documentId) }));
+      }
       if (['history', 'composer'].includes(body.action)) {
         if (typeof body.documentId !== 'string' || body.documentId.length > 100) throw fail('INVALID_DOCUMENT');
         const historyParameters = { ...parameters, p_document: body.documentId };
         // Each RPC independently verifies active membership and MFA. Neither
         // read requests a credential, and they do not depend on each other.
         if (body.action === 'history') return response(await rpc('history', historyParameters));
-        const [profile, history] = await Promise.all([
+        const [profile, history, savedDraft] = await Promise.all([
           rpc('profile', { ...parameters, p_secrets: false }),
           rpc('history', historyParameters),
+          rpc('draft_read', historyParameters),
         ]);
-        return response({ profile: publicProfile(profile), history: Array.isArray(history) ? history : history?.history || [] });
+        return response({ profile: publicProfile(profile), history: Array.isArray(history) ? history : history?.history || [],
+          draft: savedDraft?.draft || null, draftVersion: savedDraft?.version || 0, draftUpdatedAt: savedDraft?.updatedAt || null });
       }
       const profile = await rpc('profile', { ...parameters, p_secrets: false });
       if (body.action === 'profile') return response(publicProfile(profile));
