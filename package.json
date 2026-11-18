@@ -11,6 +11,7 @@
     "build:production": "node scripts/assert-production-config.mjs && vite build && node scripts/check-public-build.mjs",
     "build:staging": "node scripts/staging-config.mjs && vite build --mode staging && node scripts/check-public-build.mjs",
     "test:database": "node scripts/verify-postgres.mjs",
+    "audit:security": "node scripts/audit-dependencies.mjs",
     "monitor": "node scripts/operations/monitor.mjs",
     "backup": "node scripts/backup/cli.mjs"
   },
