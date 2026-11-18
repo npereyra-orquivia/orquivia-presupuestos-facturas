@@ -1,6 +1,7 @@
 import { jsPDF } from 'jspdf';
 import { totals, documentAmounts, money, formatNumber } from './domain.js';
 import { normalizeOrquivia } from './brand.js';
+import { documentPaymentTerms, documentPaymentTermsLabel } from './payment-terms.js';
 
 const clean = value => String(value ?? '').replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, '').replace(/[\u2010-\u2015\u2212]/g, '-');
 const date = value => value ? String(value).split('-').reverse().join('/') : '';
@@ -8,6 +9,10 @@ const ink = [23, 37, 49], muted = [130, 145, 153], pale = [236, 242, 242];
 
 /** Vector A4 output. All user text wraps and flows before the reserved footer. */
 export function createPDF(document, company, client, { logoData, demo = false } = {}) {
+  const paymentTerms = documentPaymentTerms(document, company);
+  const paymentTermText = typeof document.paymentTermsText === 'string' || paymentTerms === 0 || document.kind !== 'invoice'
+    ? documentPaymentTermsLabel(document, company)
+    : document.dueDate ? `Hasta ${date(document.dueDate)}` : 'Pendiente de confirmar';
   company = document.companySnapshot || company || {};
   company = { ...company, name: normalizeOrquivia(company.name), legalName: normalizeOrquivia(company.legalName) };
   client = document.clientSnapshot || client || {};
@@ -167,7 +172,7 @@ export function createPDF(document, company, client, { logoData, demo = false } 
     : (document.dueDate ? `Este presupuesto es válido hasta: ${date(document.dueDate)}` : 'Validez pendiente de confirmar');
   const validityLines = wrapped(validity, width, 8);
   const paymentColumns = [
-    { title: 'Plazo de pago', x: left + 2, width: 33, lines: wrapped(document.kind === 'invoice' ? (document.dueDate ? `Hasta ${date(document.dueDate)}` : 'Pendiente de confirmar') : `${company.paymentTerms ?? 30} días desde la factura`, 33, 8) },
+    { title: 'Plazo de pago', x: left + 2, width: 33, lines: wrapped(paymentTermText, 33, 8) },
     { title: 'Método de pago', x: 63, width: 43, lines: wrapped(document.paymentMethod || 'Transferencia bancaria', 43, 8) },
     { title: 'Cuenta bancaria', x: 111, width: 73, lines: [...wrapped(company.iban || 'IBAN por completar', 73, 8), ...(company.bic ? wrapped(`BIC: ${company.bic}`, 73, 8) : [])] },
   ];

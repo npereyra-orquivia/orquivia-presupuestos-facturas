@@ -142,11 +142,72 @@ test('invoice conversion copies a quote without mutating it and adds 30 calendar
   assert.equal(converted.number, 'F-2026-005');
   assert.equal(converted.date, '2026-12-15');
   assert.equal(converted.dueDate, '2027-01-14');
+  assert.equal(converted.paymentTerms, 30);
   assert.equal(converted.quoteId, quote.id);
   assert.equal(converted.notes, quote.notes);
   converted.items[0].description = 'Modificado';
   assert.equal(quote.items[0].description, 'Servicio');
   assert.equal(quote.kind, 'quote');
+});
+
+test('invoice conversion freezes document days, including immediate payment', () => {
+  const quote = invoice({ id: 'quote-1', kind: 'quote', paymentTerms: 0,
+    companySnapshot: { paymentTerms: 15 } });
+  const snapshot = structuredClone(quote);
+  const converted = createInvoiceFromQuote(quote, [], '2026-12-15', { paymentTerms: 60 });
+  assert.equal(converted.paymentTerms, 0);
+  assert.equal(converted.dueDate, '2026-12-15');
+  assert.equal(Object.hasOwn(converted, 'paymentTermsText'), false);
+  assert.deepEqual(quote, snapshot);
+  const deferred = createInvoiceFromQuote({ ...quote, paymentTerms: 45 }, [], '2026-12-15');
+  assert.equal(deferred.paymentTerms, 45);
+  assert.equal(deferred.dueDate, '2027-01-29');
+});
+
+test('invoice conversion preserves custom payment conditions without inventing a due date', () => {
+  const quote = invoice({ id: 'quote-1', kind: 'quote', paymentTerms: 15,
+    paymentTermsText: '  50 % al aceptar y 50 % al entregar  ',
+    companySnapshot: { paymentTerms: 30 } });
+  const snapshot = structuredClone(quote);
+  const converted = createInvoiceFromQuote(quote, [], '2026-12-15', { paymentTerms: 60 });
+  assert.equal(converted.paymentTermsText, '50 % al aceptar y 50 % al entregar');
+  assert.equal(Object.hasOwn(converted, 'paymentTerms'), false);
+  assert.equal(converted.dueDate, '');
+  assert.equal(converted.status, 'draft');
+  assert.deepEqual(quote, snapshot);
+});
+
+test('invoice conversion uses the quote snapshot before current company defaults', () => {
+  const quote = invoice({ id: 'quote-1', kind: 'quote', companySnapshot: { paymentTerms: 15 } });
+  const frozen = createInvoiceFromQuote(quote, [], '2026-12-15', { paymentTerms: 60 });
+  assert.equal(frozen.paymentTerms, 15);
+  assert.equal(frozen.dueDate, '2026-12-30');
+  const global = createInvoiceFromQuote({ ...quote, companySnapshot: {} }, [], '2026-12-15', { paymentTerms: 60 });
+  assert.equal(global.paymentTerms, 60);
+  assert.equal(global.dueDate, '2027-02-13');
+  const immediate = createInvoiceFromQuote({ ...quote, companySnapshot: { paymentTerms: 0 } }, [], '2026-12-15', { paymentTerms: 60 });
+  assert.equal(immediate.paymentTerms, 0);
+  assert.equal(immediate.dueDate, '2026-12-15');
+});
+
+test('document and workspace validation accept optional payment terms and reject malformed values', () => {
+  for (const fields of [{}, { paymentTerms: 0 }, { paymentTerms: 365 },
+    { paymentTermsText: 'Pago al entregar' }, { paymentTermsText: '  Pago al entregar  ' },
+    { paymentTermsText: 'x'.repeat(500) }, { paymentTerms: 15, paymentTermsText: 'Condición acordada' }]) {
+    const doc = invoice(fields);
+    assert.deepEqual(validateDocument(doc), []);
+    assert.deepEqual(validateWorkspace(workspace({ documents: [doc] }), '2026-10-14'), []);
+  }
+  for (const paymentTerms of [-1, 366, 1.5, '30', null, true, NaN, Infinity]) {
+    const doc = invoice({ paymentTerms });
+    assert.ok(validateDocument(doc).some(error => error.includes('plazo de pago')), String(paymentTerms));
+    assert.ok(validateWorkspace(workspace({ documents: [doc] }), '2026-10-14').some(error => error.includes('plazo de pago')), String(paymentTerms));
+  }
+  for (const paymentTermsText of ['', '  \n\t ', 'x'.repeat(501), `${' '.repeat(500)}x`, null, 30, {}, []]) {
+    const doc = invoice({ paymentTermsText });
+    assert.ok(validateDocument(doc).some(error => error.includes('condiciones de pago')), String(paymentTermsText));
+    assert.ok(validateWorkspace(workspace({ documents: [doc] }), '2026-10-14').some(error => error.includes('condiciones de pago')), String(paymentTermsText));
+  }
 });
 
 test('validation rejects invalid calendar dates, rates and malformed line items', () => {

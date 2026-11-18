@@ -58,6 +58,50 @@ test('invoice PDF continues to disclose VAT and the full payable total', async (
   assert.doesNotMatch(text, /IVA no incluido/);
 });
 
+test('a quote can specify immediate payment without rewriting the company default or financial values', async () => {
+  const doc = document({ paymentTerms: 0 });
+  const original = structuredClone({ doc, company });
+  const { text } = await readPDF(doc);
+  assert.match(text, /Plazo de pago.*Pago inmediato/);
+  assert.doesNotMatch(text, /30 días desde la factura/);
+  assert.match(text, /6\.000,00 €/);
+  assert.match(text, /IVA no incluido/);
+  assert.deepEqual({ doc, company }, original);
+});
+
+test('quote PDF payment terms follow the document then frozen snapshot then company and legacy defaults', async () => {
+  const cases = [
+    [document({ paymentTerms: 7, companySnapshot: { ...company, paymentTerms: 15 } }), company, '7 días desde la factura'],
+    [document({ companySnapshot: { ...company, paymentTerms: 0 } }), company, 'Pago inmediato'],
+    [document({ companySnapshot: { ...company, paymentTerms: 15 } }), company, '15 días desde la factura'],
+    [document({ companySnapshot: { name: 'Orquivia' } }), { ...company, paymentTerms: 15 }, '15 días desde la factura'],
+    [document(), {}, '30 días desde la factura'],
+  ];
+  for (const [doc, issuer, label] of cases) {
+    const { text } = await readPDF(doc, issuer);
+    assert.ok(text.includes(label), label);
+  }
+});
+
+test('immediate invoice payment retains its due date and standard invoice terms retain the dated label', async () => {
+  const immediate = await readPDF(document({ kind: 'invoice', status: 'issued', paymentTerms: 0, dueDate: '2026-10-15' }));
+  assert.match(immediate.text, /Plazo de pago.*Pago inmediato/);
+  assert.match(immediate.text, /Vencimiento de pago: 15\/10\/2026/);
+  assert.doesNotMatch(immediate.text, /Hasta 15\/10\/2026|30 días desde la factura/);
+  const legacy = await readPDF(document({ kind: 'invoice', status: 'issued' }));
+  assert.match(legacy.text, /Hasta 15\/11\/2026/);
+  assert.match(legacy.text, /Vencimiento de pago: 15\/11\/2026/);
+});
+
+test('custom payment conditions appear in both quote and invoice PDFs ahead of numeric terms', async () => {
+  for (const kind of ['quote', 'invoice']) {
+    const { text, pages } = await readPDF(document({ kind, paymentTerms: 0, paymentTermsText: '50 % al aceptar y 50 % al finalizar.' }));
+    assert.match(text, /50 % al aceptar y 50 % al finalizar\./);
+    assert.doesNotMatch(text, /Pago inmediato|30 días desde la factura|Hasta 15\/11\/2026/);
+    assert.equal(pages.length, 1);
+  }
+});
+
 test('large prices stay complete, distinct and inside the page, with quantity centered below its heading', async () => {
   const { pages, text } = await readPDF(document({
     items: [{ description: 'Servicio con un concepto que debe adaptarse al ancho disponible', quantity: 2, price: 9_876_543_210.98 }],

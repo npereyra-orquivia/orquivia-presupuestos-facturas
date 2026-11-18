@@ -16,7 +16,7 @@ const fields = {
   cashAmount: 'Importe pagado', cashMovements: 'Pagos del gasto', documentId: 'Factura vinculada', amount: 'Importe',
   openingBalance: 'Saldo inicial', openingBalanceDate: 'Día de inicio', legalName: 'Razón social', iban: 'Cuenta bancaria',
   model: 'Modelo tributario', year: 'Ejercicio fiscal', quarter: 'Trimestre fiscal', linkedExpenseId: 'Pago incluido en gasto del gestor', missingReceiptReason: 'Motivo de falta de justificante',
-  paymentTerms: 'Plazo de pago', other: 'Otros datos del registro', sourceMetadata: 'Datos del archivo de origen',
+  paymentTerms: 'Plazo de pago', paymentTermsText: 'Condiciones de pago', other: 'Otros datos del registro', sourceMetadata: 'Datos del archivo de origen',
   originalNumber: 'Número original', importWarnings: 'Advertencias de importación', reviewRequired: 'Revisión del documento', id: 'Identificador',
 };
 export function historyFieldLabel(name) { return fields[name] || 'Otros datos del registro'; }

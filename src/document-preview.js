@@ -1,6 +1,7 @@
 import './document-preview.css';
 import { money, formatNumber, escapeHTML as esc, documentAmounts, totals } from './domain.js';
 import { normalizeOrquivia } from './brand.js';
+import { documentPaymentTerms, documentPaymentTermsLabel } from './payment-terms.js';
 
 const dateFormatter = new Intl.DateTimeFormat('es-ES', {
   day: '2-digit', month: 'short', year: 'numeric', timeZone: 'UTC',
@@ -16,6 +17,10 @@ function displayDate(value) {
 export function renderDocumentPreview(d = {}, { company = {}, client = {}, logoUrl = '', demo = false } = {}) {
   const invoice = d.kind === 'invoice';
   const amounts = documentAmounts(d);
+  const paymentTerms = documentPaymentTerms(d, company);
+  const paymentTermText = typeof d.paymentTermsText === 'string' || paymentTerms === 0 || !invoice
+    ? documentPaymentTermsLabel(d, company)
+    : d.dueDate ? `Hasta ${displayDate(d.dueDate)}` : 'Pendiente de confirmar';
   const items = Array.isArray(d.items) ? d.items : [];
   return `<article class="paper doc-preview" aria-label="Vista previa del ${invoice ? 'documento de factura' : 'presupuesto'}">
     <header class="paper-header">
@@ -44,7 +49,7 @@ export function renderDocumentPreview(d = {}, { company = {}, client = {}, logoU
       ${invoice ? '' : '<p class="paper-vat-note">IVA no incluido</p>'}
     </div>
     <p class="paper-valid">${invoice ? 'Vencimiento de pago' : 'Válido hasta'}: ${esc(displayDate(d.dueDate))}</p>
-    <footer class="paper-footer"><div><strong>Método de pago</strong><span>${esc(d.paymentMethod || 'Transferencia bancaria')}</span></div><div><strong>Cuenta bancaria</strong><span>${esc(company.iban || 'IBAN por completar')}</span></div></footer>
+    <footer class="paper-footer"><div><strong>Plazo de pago</strong><span>${esc(paymentTermText)}</span></div><div><strong>Método de pago</strong><span>${esc(d.paymentMethod || 'Transferencia bancaria')}</span></div><div><strong>Cuenta bancaria</strong><span>${esc(company.iban || 'IBAN por completar')}</span></div></footer>
     </div>
     ${demo ? '<div class="paper-demo">DOCUMENTO DE PRUEBA</div>' : ''}
   </article>`;

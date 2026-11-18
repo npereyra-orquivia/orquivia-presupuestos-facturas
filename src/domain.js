@@ -1,4 +1,5 @@
 import { isMailAddress } from './mail-address.js';
+import { documentPaymentTerms } from './payment-terms.js';
 
 const EUR = new Intl.NumberFormat('es-ES', { style: 'currency', currency: 'EUR', useGrouping: false });
 const QUOTE_STATUSES = new Set(['draft', 'ready', 'sent', 'accepted', 'rejected']);
@@ -250,7 +251,7 @@ function uuid() {
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
 }
 
-export function createInvoiceFromQuote(quote, documents = [], today = todayISO()) {
+export function createInvoiceFromQuote(quote, documents = [], today = todayISO(), company = {}) {
   if (!quote || (quote.kind !== 'quote' && quote.kind !== 'budget')) {
     throw new Error('Selecciona un presupuesto para crear la factura.');
   }
@@ -259,10 +260,19 @@ export function createInvoiceFromQuote(quote, documents = [], today = todayISO()
     ? structuredClone(quote) : JSON.parse(JSON.stringify(quote));
   // A quote's delivery record is not evidence that its new invoice was sent.
   delete copy.deliveryStatus;
+  const customTerms = typeof quote.paymentTermsText === 'string' ? quote.paymentTermsText.trim() : '';
+  const paymentTerms = documentPaymentTerms(quote, company);
+  if (customTerms) {
+    copy.paymentTermsText = customTerms;
+    delete copy.paymentTerms;
+  } else {
+    copy.paymentTerms = paymentTerms;
+    delete copy.paymentTermsText;
+  }
   return {
     ...copy, id: uuid(), kind: 'invoice', status: 'draft',
     number: nextNumber('invoice', documents, Number(today.slice(0, 4))),
-    date: today, dueDate: addDays(today, 30), quoteId: quote.id,
+    date: today, dueDate: customTerms ? '' : addDays(today, paymentTerms), quoteId: quote.id,
   };
 }
 
@@ -278,6 +288,8 @@ export function validateDocument(doc) {
   const errors = [];
   if (doc.billingEmail !== undefined && doc.billingEmail !== '' && (doc.kind !== 'invoice' || !isMailAddress(doc.billingEmail))) errors.push('Indica un único correo de facturación válido para la factura.');
   if (doc.deliveryStatus !== undefined && (doc.kind !== 'invoice' || doc.status === 'draft' || !INVOICE_DELIVERY_STATUSES.has(doc.deliveryStatus))) errors.push('El estado de envío de la factura no es válido.');
+  if (doc.paymentTerms !== undefined && (!Number.isInteger(doc.paymentTerms) || doc.paymentTerms < 0 || doc.paymentTerms > 365)) errors.push('El plazo de pago debe ser un número entero entre 0 y 365 días.');
+  if (doc.paymentTermsText !== undefined && (typeof doc.paymentTermsText !== 'string' || !doc.paymentTermsText.trim() || doc.paymentTermsText.length > 500)) errors.push('Las condiciones de pago deben ser un texto no vacío de hasta 500 caracteres.');
   if (!String(doc.clientId ?? '').trim()) errors.push('Selecciona un cliente.');
   if (doc.status !== 'draft' && !String(doc.number ?? '').trim()) errors.push('Indica el número del documento.');
   const dateIsValid = validDate(doc.date);
