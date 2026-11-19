@@ -263,7 +263,7 @@ test('versioned cloud writes are serialized and a conflict blocks further saving
       if (p_expected_version !== cloudVersion) return json({ code: 'PT409', message: 'VERSION_CONFLICT', details: null, hint: null }, 409);
       stored = p_state;
       cloudVersion++;
-      return json({ version: cloudVersion, updated_at: '2026-10-13T10:00:00Z' });
+      return json({ state: stored, version: cloudVersion, updated_at: '2026-10-13T10:00:00Z' });
     }
     throw new Error(`Unexpected mocked request ${url}`);
   };
@@ -296,6 +296,82 @@ test('versioned cloud writes are serialized and a conflict blocks further saving
   }
 });
 
+test('saveState adopts the canonical server snapshot without rewriting the submitted state', async () => {
+  const originalFetch = globalThis.fetch;
+  const user = { id: 'b1000000-0000-4000-8000-000000000013', aud: 'authenticated', email: 'owner@example.test' };
+  const access = { organization_id: 'a2000000-0000-4000-8000-000000000001', organization_name: 'Orquivia', role: 'admin', require_mfa: false };
+  const submitted = { ...empty(), clients: [{ id: 'client-1', name: 'Nombre actualizado' }], documents: [{
+    id: 'invoice-1', kind: 'invoice', status: 'issued', number: 'F-2026-001', clientId: 'client-1', date: '2026-10-27',
+    clientSnapshot: { name: 'Nombre actualizado' }, items: [{ description: 'Servicio', quantity: 1, price: 100 }],
+    vat: 21, discount: 0, withholding: 0,
+  }] };
+  const retainedInput = structuredClone(submitted);
+  const canonical = structuredClone(submitted);
+  canonical.documents[0].clientSnapshot = { name: 'Nombre facturado original' };
+  const requests = [];
+  const json = body => new Response(JSON.stringify(body), { headers: { 'Content-Type': 'application/json' } });
+  globalThis.fetch = async (input, init = {}) => {
+    const url = String(input);
+    if (url.includes('/auth/v1/token')) return json({ access_token: token('authenticated', { sub: user.id }), refresh_token: 'test-refresh', token_type: 'bearer', expires_in: 3600, user });
+    if (url.includes('/auth/v1/user')) return json(user);
+    if (url.includes('/rest/v1/rpc/refresh_orquivia_access')) return json(access);
+    if (url.includes('/rest/v1/rpc/load_orquivia_workspace')) return json({ ...access, state: empty(), version: 1 });
+    if (url.includes('/rest/v1/rpc/save_orquivia_team_state')) {
+      requests.push(JSON.parse(init.body));
+      return json({ state: canonical, version: 2, updated_at: '2026-11-19T10:00:00Z' });
+    }
+    throw Error(`Unexpected canonical state request ${url}`);
+  };
+  let backend;
+  try {
+    backend = createBackend({ url: 'https://example.supabase.co', anonKey: 'sb_publishable_test' });
+    await backend.signIn(user.email, 'fictional-password');
+    await backend.loadState();
+    const saved = await backend.saveState(submitted);
+    assert.deepEqual(requests.map(request => request.p_state), [submitted]);
+    assert.deepEqual(saved, { state: canonical, version: 2, updatedAt: '2026-11-19T10:00:00Z' });
+    assert.notDeepEqual(saved.state, submitted, 'The persisted fiscal snapshot must come from the server response');
+    assert.deepEqual(submitted, retainedInput, 'Adopting the canonical response must not mutate the local input');
+  } finally { backend?.dispose(); globalThis.fetch = originalFetch; }
+});
+
+test('missing or invalid canonical save responses are rejected before advancing the CAS version', async () => {
+  const originalFetch = globalThis.fetch;
+  const user = { id: 'b1000000-0000-4000-8000-000000000014', aud: 'authenticated', email: 'owner@example.test' };
+  const access = { organization_id: 'a2000000-0000-4000-8000-000000000001', organization_name: 'Orquivia', role: 'admin', require_mfa: false };
+  const invalidResponses = [{ version: 40 }, { state: null, version: 41 },
+    { state: { ...empty(), company: { name: 'Orquivia', emailNotifications: 'false' } }, version: 42 }];
+  const attemptedVersions = [];
+  const json = body => new Response(JSON.stringify(body), { headers: { 'Content-Type': 'application/json' } });
+  let responses = 0;
+  globalThis.fetch = async (input, init = {}) => {
+    const url = String(input);
+    if (url.includes('/auth/v1/token')) return json({ access_token: token('authenticated', { sub: user.id }), refresh_token: 'test-refresh', token_type: 'bearer', expires_in: 3600, user });
+    if (url.includes('/auth/v1/user')) return json(user);
+    if (url.includes('/rest/v1/rpc/refresh_orquivia_access')) return json(access);
+    if (url.includes('/rest/v1/rpc/load_orquivia_workspace')) return json({ ...access, state: empty(), version: 1 });
+    if (url.includes('/rest/v1/rpc/save_orquivia_team_state')) {
+      const request = JSON.parse(init.body);
+      attemptedVersions.push(request.p_expected_version);
+      const index = responses++;
+      return json(index < invalidResponses.length ? invalidResponses[index] : { state: request.p_state, version: index - invalidResponses.length + 2 });
+    }
+    throw Error(`Unexpected invalid canonical state request ${url}`);
+  };
+  let backend;
+  try {
+    backend = createBackend({ url: 'https://example.supabase.co', anonKey: 'sb_publishable_test' });
+    await backend.signIn(user.email, 'fictional-password');
+    await backend.loadState();
+    for (const response of invalidResponses) {
+      await assert.rejects(backend.saveState(empty()), { code: 'INVALID_STATE' }, `Reject response ${JSON.stringify(response)}`);
+    }
+    assert.equal((await backend.saveState(empty())).version, 2);
+    assert.equal((await backend.saveState(empty())).version, 3);
+    assert.deepEqual(attemptedVersions, [1, 1, 1, 1, 2], 'Rejected canonical states cannot replace the last validated CAS version');
+  } finally { backend?.dispose(); globalThis.fetch = originalFetch; }
+});
+
 test('modern HTTP 409 and legacy serialization HTTP 500 conflicts retain the invoice draft and block stale retries', async () => {
   const originalFetch = globalThis.fetch;
   const user = { id: 'b1000000-0000-4000-8000-000000000012', aud: 'authenticated', email: 'owner@example.test' };
@@ -324,7 +400,7 @@ test('modern HTTP 409 and legacy serialization HTTP 500 conflicts retain the inv
           }
           assert.equal(request.p_expected_version, cloudVersion, 'Only an explicit reload can adopt the current server version');
           stored = request.p_state; cloudVersion++;
-          return json({ version: cloudVersion });
+          return json({ state: stored, version: cloudVersion });
         }
         throw Error(`Unexpected conflict fixture request ${url}`);
       };
@@ -371,7 +447,7 @@ test('access refresh checks server MFA and membership and invalidates the loaded
   const access = { organization_id: org, organization_name: 'Orquivia', role: 'editor', require_mfa: false };
   const json = (body, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
   let denied = null, refreshes = 0, saves = 0;
-  globalThis.fetch = async (input) => {
+  globalThis.fetch = async (input, init = {}) => {
     const url = String(input);
     if (url.includes('/auth/v1/token')) return json({ access_token: token('authenticated', { sub: user.id }), refresh_token: 'test-refresh', token_type: 'bearer', expires_in: 3600, user });
     if (url.includes('/auth/v1/user')) return json(user);
@@ -381,7 +457,7 @@ test('access refresh checks server MFA and membership and invalidates the loaded
       return json(access);
     }
     if (url.includes('/rest/v1/rpc/load_orquivia_workspace')) return json({ ...access, state: empty(), version: 1 });
-    if (url.includes('/rest/v1/rpc/save_orquivia_team_state')) { saves++; return json({ version: 2 }); }
+    if (url.includes('/rest/v1/rpc/save_orquivia_team_state')) { saves++; return json({ state: JSON.parse(init.body).p_state, version: 2 }); }
     throw new Error(`Unexpected access request ${url}`);
   };
   let backend;
@@ -749,7 +825,7 @@ test('late errors from a prior login cannot clear the new login workspace or inv
           const request = JSON.parse(init.body);
           assert.equal(request.p_expected_version, cloudVersion, 'The current login CAS version must survive old errors');
           cloudVersion++;
-          return json({ version: cloudVersion });
+          return json({ state: request.p_state, version: cloudVersion });
         }
         throw new Error(`Unexpected late error request ${url}`);
       };
@@ -805,8 +881,9 @@ test('cold restored sessions can load directly and a late account verification c
         if (url.includes('/rest/v1/rpc/load_orquivia_workspace')) return json({ ...access, state: empty(), version: 7 });
         if (url.includes('/rest/v1/rpc/refresh_orquivia_access')) return json(access);
         if (url.includes('/rest/v1/rpc/save_orquivia_team_state')) {
-          assert.equal(JSON.parse(init.body).p_expected_version, 7);
-          return json({ version: 8 });
+          const request = JSON.parse(init.body);
+          assert.equal(request.p_expected_version, 7);
+          return json({ state: request.p_state, version: 8 });
         }
         throw new Error(`Unexpected restored session request ${url}`);
       };

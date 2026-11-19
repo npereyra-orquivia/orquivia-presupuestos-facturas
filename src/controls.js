@@ -1,3 +1,5 @@
+import { icon } from './icons.js';
+
 /** Styled form controls; native fields remain the source of truth for FormData. */
 let nextControlId = 0;
 let openControl = null;
@@ -120,7 +122,7 @@ function popupController(wrapper, popup, trigger, render) {
   return controller;
 }
 
-function enhanceSelect(source, onCreateClient) {
+function enhanceSelect(source, { onCreateClient, onEditClient }) {
   const signals = new AbortController();
   const original = { hidden: source.hidden, ariaHidden: source.getAttribute('aria-hidden'), tabIndex: source.getAttribute('tabindex') };
   const { caption, text: label } = labelFor(source);
@@ -160,6 +162,14 @@ function enhanceSelect(source, onCreateClient) {
   resultCount.setAttribute('role', 'status');
   resultCount.setAttribute('aria-live', 'polite');
   popup.append(list, resultCount);
+  const editClient = client && typeof onEditClient === 'function' ? button('oc-create oc-edit-client', 'Editar cliente seleccionado') : null;
+  if (editClient) {
+    const editIcon = create('span', 'oc-create-plus');
+    editIcon.innerHTML = icon('edit');
+    editIcon.setAttribute('aria-hidden', 'true');
+    editClient.prepend(editIcon);
+    popup.append(editClient);
+  }
   const createClient = client && typeof onCreateClient === 'function' ? button('oc-create', 'Crear cliente') : null;
   if (createClient) {
     const plus = create('span', 'oc-create-plus', '+');
@@ -176,11 +186,21 @@ function enhanceSelect(source, onCreateClient) {
 
   let optionButtons = [], activeIndex = -1;
   const enabled = () => !source.matches(':disabled');
+  const hasSelectedClient = () => Boolean(source.value && source.selectedOptions[0]);
   const update = () => {
     value.textContent = source.selectedOptions[0]?.label || (client ? 'Selecciona un cliente' : 'Selecciona una opción');
     trigger.disabled = !enabled();
     trigger.setAttribute('aria-required', String(source.required));
     if (!enabled()) controller.close();
+    if (editClient) {
+      editClient.hidden = !hasSelectedClient();
+      editClient.classList.toggle('is-standalone', !enabled());
+      // A fiscal lock prevents changing the document's client, but its global
+      // contact details can still be edited without opening the selector.
+      if (!enabled()) wrapper.append(editClient);
+      else if (createClient) popup.insertBefore(editClient, createClient);
+      else popup.append(editClient);
+    }
   };
   const setActive = index => {
     if (!optionButtons.length) { activeIndex = -1; trigger.removeAttribute('aria-activedescendant'); search?.removeAttribute('aria-activedescendant'); return; }
@@ -248,6 +268,7 @@ function enhanceSelect(source, onCreateClient) {
   caption?.addEventListener('click', event => {
     event.preventDefault();
     if (enabled()) trigger.focus();
+    else if (editClient && !editClient.hidden) editClient.focus();
   }, { signal: signals.signal });
   const keydown = event => {
     if (!enabled()) return;
@@ -275,6 +296,12 @@ function enhanceSelect(source, onCreateClient) {
     if (!enabled()) return;
     controller.close();
     onCreateClient(source);
+  }, { signal: signals.signal });
+  editClient?.addEventListener('click', event => {
+    event.preventDefault();
+    if (!hasSelectedClient()) return;
+    controller.close();
+    onEditClient(source);
   }, { signal: signals.signal });
   source.addEventListener('change', () => { update(); if (controller.isOpen) renderOptions(); }, { signal: signals.signal });
   source.addEventListener('invalid', event => { event.preventDefault(); trigger.setAttribute('aria-invalid', 'true'); open(); trigger.focus(); }, { signal: signals.signal });
@@ -476,12 +503,13 @@ function enhanceDate(source) {
 
 /**
  * Call after setting disabled/readOnly attributes. Dispose before replacing the
- * surrounding form or modal. onCreateClient receives the original client select.
+ * surrounding form or modal. Client callbacks receive the original client select.
+ * onEditClient remains available when selecting a different client is disabled.
  */
-export function enhanceControls(root, { onCreateClient } = {}) {
+export function enhanceControls(root, { onCreateClient, onEditClient } = {}) {
   const disposers = [];
   root.querySelectorAll('select:not([multiple]):not([data-native-control]):not([data-oc-enhanced])').forEach(source => {
-    disposers.push(enhanceSelect(source, onCreateClient));
+    disposers.push(enhanceSelect(source, { onCreateClient, onEditClient }));
   });
   root.querySelectorAll('input[type="date"]:not([data-native-control]):not([data-oc-enhanced])').forEach(source => {
     disposers.push(enhanceDate(source));

@@ -260,6 +260,8 @@ export function createInvoiceFromQuote(quote, documents = [], today = todayISO()
     ? structuredClone(quote) : JSON.parse(JSON.stringify(quote));
   // A quote's delivery record is not evidence that its new invoice was sent.
   delete copy.deliveryStatus;
+  // Its draft invoice resolves the current client until it is issued.
+  delete copy.clientSnapshot;
   const customTerms = typeof quote.paymentTermsText === 'string' ? quote.paymentTermsText.trim() : '';
   const paymentTerms = documentPaymentTerms(quote, company);
   if (customTerms) {
