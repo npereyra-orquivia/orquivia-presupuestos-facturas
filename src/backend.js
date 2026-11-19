@@ -318,7 +318,7 @@ export function createBackend({ url, anonKey }) {
       version = null;
       return backendError('Otra sesión ha actualizado los datos. Exporta tus cambios y recarga antes de continuar.', 'VERSION_CONFLICT', error);
     }
-    const known = ['MEMBERSHIP_REQUIRED', 'MFA_REQUIRED', 'AUTH_CHANGED', 'ADMIN_REQUIRED', 'ISSUE_REQUIRED', 'ISSUED_DOCUMENT_IMMUTABLE', 'ISSUED_DOCUMENT_DELETE_DENIED', 'INVALID_RECEIPT_REFERENCE', 'INVALID_HISTORY_RECORD', 'INVALID_STATE'];
+    const known = ['MEMBERSHIP_REQUIRED', 'MFA_REQUIRED', 'AUTH_CHANGED', 'ADMIN_REQUIRED', 'ISSUE_REQUIRED', 'ISSUED_DOCUMENT_IMMUTABLE', 'ISSUED_DOCUMENT_DELETE_DENIED', 'DOCUMENT_CLIENT_LOCKED', 'INVALID_RECEIPT_REFERENCE', 'INVALID_HISTORY_RECORD', 'INVALID_STATE'];
     const code = known.find((name) => error?.message?.includes(name));
     if (code === 'MFA_REQUIRED' || code === 'MEMBERSHIP_REQUIRED') denyWorkspaceAccess(code);
     const messages = {
@@ -326,6 +326,7 @@ export function createBackend({ url, anonKey }) {
       AUTH_CHANGED: 'La sesión cambió. Vuelve a abrir la empresa antes de continuar.',
       ADMIN_REQUIRED: 'Solo la administradora puede modificar los datos de empresa.',
       ISSUE_REQUIRED: 'Emite el borrador para que el servidor asigne su número.',
+      DOCUMENT_CLIENT_LOCKED: 'Este presupuesto ya tiene historial de envío o aceptación y conserva los datos originales del cliente.',
       ISSUED_DOCUMENT_IMMUTABLE: 'Los datos fiscales de un documento emitido no se pueden modificar.',
       ISSUED_DOCUMENT_DELETE_DENIED: 'Conserva el documento emitido para mantener su historial.',
       INVALID_RECEIPT_REFERENCE: 'Un justificante no está guardado en la empresa o no coincide con el archivo subido.',
@@ -576,8 +577,9 @@ export function createBackend({ url, anonKey }) {
         if (error) {
           throw rpcError(error, 'No se pudo guardar en Supabase. Tus cambios siguen en esta sesión.');
         }
+        const savedState = validateCloudState(data.state);
         version = Number(data.version);
-        return { version, updatedAt: data.updated_at };
+        return { state: savedState, version, updatedAt: data.updated_at };
       });
     },
     issueDocument(documentId) {
