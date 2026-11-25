@@ -6,6 +6,7 @@ dist/
 !.env.staging.example
 tmp/
 output/
+design-qa.md
 private/
 supabase/.verification/
 *.credentials.json
