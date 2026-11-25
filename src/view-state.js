@@ -1,7 +1,7 @@
 // Navigation contains only allowlisted sections and filters. Search terms stay in
 // this tab's sessionStorage and are scoped to an authenticated account.
 const ROUTES = Object.freeze({
-  dashboard: 'resumen', quotes: 'presupuestos', invoices: 'facturas', expenses: 'gastos',
+  dashboard: 'resumen', quotes: 'presupuestos', invoices: 'facturas', expenses: 'gastos', forecast: 'prevision', scenarios: 'escenarios',
   reports: 'informes', statements: 'estados-financieros', clients: 'clientes', reminders: 'recordatorios', settings: 'configuracion', personal: 'mi-espacio',
 });
 const DOCUMENT_FILTERS = Object.freeze({

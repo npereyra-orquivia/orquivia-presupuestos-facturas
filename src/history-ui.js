@@ -18,6 +18,16 @@ const fields = {
   model: 'Modelo tributario', year: 'Ejercicio fiscal', quarter: 'Trimestre fiscal', linkedExpenseId: 'Pago incluido en gasto del gestor', missingReceiptReason: 'Motivo de falta de justificante',
   paymentTerms: 'Plazo de pago', paymentTermsText: 'Condiciones de pago', other: 'Otros datos del registro', sourceMetadata: 'Datos del archivo de origen',
   originalNumber: 'Número original', importWarnings: 'Advertencias de importación', reviewRequired: 'Revisión del documento', id: 'Identificador',
+  asOf: 'Día de referencia', horizon: 'Fin de la previsión', taxYear: 'Año de la simulación', corporateTaxRate: 'Tipo de Sociedades',
+  corporateTaxConfirmed: 'Tipo de Sociedades confirmado', legalReservePending: 'Reserva legal pendiente', minimumCash: 'Colchón de caja',
+  cashBalanceOverride: 'Saldo de caja de referencia', profitOverride: 'Beneficio de referencia', pendingCosts: 'Tratamiento de gastos pendientes',
+  people: 'Personas y reparto', collectionDates: 'Fechas previstas de cobro', label: 'Concepto previsto', amountGross: 'Importe previsto',
+  vatDeductible: 'IVA deducible previsto', treatment: 'Efecto de la previsión', recurrence: 'Frecuencia', startDate: 'Primer vencimiento',
+  endDate: 'Último vencimiento', active: 'Previsión activa', linkedRecordIds: 'Registros ya contabilizados', dividendDate: 'Fecha prevista de dividendos',
+  personId: 'Persona', workGross: 'Retribución bruta', dividendGross: 'Dividendo bruto', taxProfileKnown: 'Datos fiscales confirmados',
+  externalSalary: 'Sueldo de otro empleador', employeeSS: 'Seguridad Social personal', retaAnnual: 'Cuota RETA anual',
+  otherGeneralIncome: 'Otras rentas generales', employmentExpense: 'Gasto general de trabajo', otherSavings: 'Otras rentas del ahorro',
+  sharePercent: 'Participación social', isShareholder: 'Socia legal', employerContributionRate: 'Cotización empresarial', retaPeriod: 'Período de cuota RETA', retaYear: 'Año de control RETA',
 };
 export function historyFieldLabel(name) { return fields[name] || 'Otros datos del registro'; }
 export function captureOperationScope({ getMode, getIdentity, getBackend, getGeneration }) {
@@ -40,7 +50,7 @@ const dateTime = value => {
   const date = new Date(value);
   return Number.isFinite(date.getTime()) ? date.toLocaleString('es-ES', { timeZone: 'Europe/Madrid', dateStyle: 'medium', timeStyle: 'short' }) : 'Fecha no disponible';
 };
-const recordType = { document: 'Documento', expense: 'Gasto', client: 'Cliente', payment: 'Cobro', company: 'Empresa', tax: 'Declaración' };
+const recordType = { document: 'Documento', expense: 'Gasto', client: 'Cliente', payment: 'Cobro', company: 'Empresa', tax: 'Declaración', planning: 'Previsión / escenario' };
 function historyAction(entry) {
   const action = { created: 'creado', updated: 'actualizado', deleted: 'eliminado' }[entry.action] || 'actualizado';
   if (entry.entityType === 'payment') return { created: 'Cobro registrado', updated: 'Cobro actualizado', deleted: 'Cobro eliminado' }[entry.action] || 'Cobro actualizado';
@@ -192,7 +202,7 @@ export function compareWorkspaceEdits(base, draft, current, { documentId } = {})
     const remoteFields = current ? changedRecordFields(before, latest) : [];
     const overlappingFields = localFields.filter(key => remoteFields.includes(key) && !equal(proposed?.[key], latest?.[key]));
     rows.push({ entityType, entityId: id, before, proposed, latest, localFields, remoteFields, overlappingFields,
-      label: proposed?.number || proposed?.description || proposed?.name || proposed?.title || before?.number || before?.description || recordType[entityType] });
+      label: proposed?.number || proposed?.description || proposed?.name || proposed?.label || proposed?.title || before?.number || before?.description || before?.label || (entityType === 'planning' && id === 'settings' ? 'Ajustes y perfiles fiscales' : recordType[entityType]) });
   }
   for (const [entityType, key] of Object.entries(collections)) {
     const originals = new Map((base[key] || []).map(record => [record.id, record]));
@@ -201,6 +211,13 @@ export function compareWorkspaceEdits(base, draft, current, { documentId } = {})
     for (const id of new Set([...originals.keys(), ...proposed.keys()])) add(entityType, id, originals.get(id), proposed.get(id), latest.get(id));
   }
   add('company', 'company', base.company, draft.company, current?.company);
+  add('planning', 'settings', base.planning?.settings, draft.planning?.settings, current?.planning?.settings);
+  for (const key of ['items','scenarios']) {
+    const originals = new Map((base.planning?.[key] || []).map(record => [record.id,record]));
+    const proposed = new Map((draft.planning?.[key] || []).map(record => [record.id,record]));
+    const latest = new Map((current?.planning?.[key] || []).map(record => [record.id,record]));
+    for (const id of new Set([...originals.keys(),...proposed.keys()])) add('planning',`${key === 'items' ? 'forecast' : 'scenario'}:${id}`,originals.get(id),proposed.get(id),latest.get(id));
+  }
   return rows;
 }
 function comparisonValue(value, key, record, entityType) {
@@ -211,9 +228,11 @@ function comparisonValue(value, key, record, entityType) {
   if (!Object.hasOwn(fields, key)) return 'Modificado';
   let text;
   if (key === 'items' && Array.isArray(value)) text = value.map(item => `${item.description || 'Concepto'} · ${item.quantity} × ${money(item.price)}${item.detail ? '\n' + item.detail : ''}`).join('\n\n');
+  else if (entityType === 'planning' && key === 'people' && Array.isArray(value)) text = value.map(person => `${person.name || person.personId || person.id}: `+Object.entries(person).filter(([name]) => !['id','name','personId'].includes(name) && Object.hasOwn(fields,name)).map(([name,item])=>`${historyFieldLabel(name)}: ${typeof item === 'boolean' ? item ? 'Sí' : 'No' : item}`).join(' · ')).join('\n');
+  else if (entityType === 'planning' && key === 'collectionDates' && typeof value === 'object') text = Object.entries(value).map(([id,date])=>`${id}: ${date}`).join('\n') || 'Sin fechas modificadas';
   else if (key === 'attachments' && Array.isArray(value)) text = value.map(file => `${file.name || 'Justificante'}${file.size ? ' · ' + Math.ceil(file.size / 1024) + ' KB' : ''}`).join('\n') || 'Sin justificantes';
   else if (key === 'cashMovements' && Array.isArray(value)) text = value.map(payment => `${payment.date || 'Sin fecha'} · ${money(payment.amount)}`).join('\n') || 'Sin pagos';
-  else if (['total', 'base', 'vatAmount', 'vatDeductibleAmount', 'additionalAmount', 'cashAmount', 'amount', 'openingBalance'].includes(key) && typeof value === 'number') text = money(value);
+  else if (['total', 'base', 'vatAmount', 'vatDeductibleAmount', 'additionalAmount', 'cashAmount', 'amount', 'openingBalance','legalReservePending','minimumCash','cashBalanceOverride','profitOverride','amountGross','workGross','dividendGross'].includes(key) && typeof value === 'number') text = money(value);
   else if (key === 'vatDocumentStatus') text = { 'included-unitemized': 'IVA incluido, sin desglose', 'not-stated': 'Justificante sin datos de IVA' }[value] || 'Por revisar';
   else if (key === 'paymentStatus') text = { paid: 'Pagado', pending: 'Pendiente', 'no-payment': 'Sin ingreso', unconfirmed: 'Pago por confirmar', included: 'Incluido en pago al gestor' }[value] || String(value);
   else if (key === 'status') text = { draft: 'Borrador', issued: 'Emitida', ready: 'Preparado', sent: 'Enviado', accepted: 'Aceptado', rejected: 'Rechazado' }[value] || String(value);

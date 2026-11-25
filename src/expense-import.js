@@ -1,6 +1,7 @@
 import JSZip from 'jszip';
 import { validateReceiptFile, validateCloudState } from './backend.js';
 import { validateWorkspace, todayISO, escapeHTML as esc, money } from './domain.js';
+import { validatePlanningState } from './planning-state.js';
 
 const MAX_PACK_BYTES=150*1024*1024, MAX_TOTAL_BYTES=100*1024*1024, MAX_EXPENSES=500;
 const UUID=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
@@ -29,6 +30,7 @@ export async function prepareExpenseImport(pack,state,organizationId){
   const manifestFile=zip.file('manifest.json');if(!manifestFile)throw new Error('Falta manifest.json en el paquete revisado.');
   const manifest=JSON.parse(new TextDecoder('utf-8',{fatal:true}).decode(await boundedBytes(manifestFile,1024*1024)));
   if(manifest?.format!=='orquivia-expenses-v1'||!Array.isArray(manifest.expenses)||!manifest.expenses.length||manifest.expenses.length>MAX_EXPENSES)throw new Error('El paquete de gastos no tiene un formato válido.');
+  const planning=Object.hasOwn(manifest,'planning')?validatePlanningState(manifest.planning):null;
   const usedFiles=new Set(['manifest.json']),ids=new Set(),keys=new Set(),existingIds=new Set((state.expenses||[]).map(e=>e.id)),existingKeys=new Set((state.expenses||[]).map(signature).filter(Boolean));
   const incoming=[],skipped=[],allExpenses=[],fileCache=new Map();let totalBytes=0;
   for(const row of manifest.expenses){
@@ -63,8 +65,8 @@ export async function prepareExpenseImport(pack,state,organizationId){
   // All rows, including duplicates, are validated before the first remote upload.
   const errors=[...validateWorkspace({...structuredClone(state),expenses:allExpenses},todayISO()),...validateWorkspace({...structuredClone(state),expenses:[...(state.expenses||[]),...incoming.map(row=>row.expense)]},todayISO())];
   if(errors.length)throw new Error(`Revisa el paquete: ${errors.slice(0,3).join(' ')}`);
-  validateCloudState({...structuredClone(state),expenses:[...(state.expenses||[]),...incoming.map(row=>row.expense)]});
-  return {incoming,skipped,totalBytes};
+  validateCloudState({...structuredClone(state),...(planning?{planning}:{}),expenses:[...(state.expenses||[]),...incoming.map(row=>row.expense)]});
+  return {incoming,skipped,totalBytes,planning};
 }
 
 export async function executeExpenseImport(prepared,{backend,commit,getState,onProgress,checkAccess=()=>{}}){
@@ -80,6 +82,7 @@ export async function executeExpenseImport(prepared,{backend,commit,getState,onP
       const existing=state.expenses||[],ids=new Set(existing.map(e=>e.id)),keys=new Set(existing.map(signature).filter(Boolean));
       if(rows.some(e=>ids.has(e.id)||signature(e)&&keys.has(signature(e))))throw new Error('Algún gasto ya se ha importado desde otra sesión. Recarga y vuelve a revisar el paquete.');
       state.expenses=[...existing,...rows];
+      if(prepared.planning)state.planning=validatePlanningState(prepared.planning);
     });
     if(!saved)throw new Error('La importación no se ha guardado. Los registros anteriores se conservan.');
     return {count:rows.length,attachments:uploaded.length};
@@ -102,6 +105,7 @@ export function expenseImportModal(ctx){
       prepared=await prepareExpenseImport(input.files[0],ctx.getState(),organizationId);
       const sum=prepared.incoming.reduce((v,row)=>v+row.expense.total,0),reviews=prepared.incoming.filter(row=>row.expense.reviewNeeded||row.expense.vatReviewNeeded).length;
       preview.innerHTML=`<div class="import-summary"><div><strong>${prepared.incoming.length}</strong><span>Gastos nuevos</span></div><div><strong>${money(sum)}</strong><span>Total de documentos</span></div><div><strong>${prepared.skipped.length}</strong><span>Duplicados omitidos</span></div><div><strong>${reviews}</strong><span>Para revisar</span></div></div><div class="import-list">${prepared.incoming.map(({expense:e})=>`<p><strong>${esc(e.description)}</strong> · ${money(e.total)}<small>${esc(e.date)} · ${esc(e.supplier||'Proveedor sin indicar')} · ${e.paymentStatus==='paid'?'Pago documentado':'Pago por confirmar'}${e.vatReviewNeeded?' · IVA por revisar':''}${!e.attachments?.length&&e.missingReceiptReason?' · Justificante pendiente':''}</small></p>`).join('')}</div>`;
+      if(prepared.planning){const plan=document.createElement('p');plan.className='import-warnings';plan.textContent='El paquete incluye la previsión y escenarios, con los datos fiscales personales indicados. Se guardarán en el espacio compartido de la empresa y sustituirán la planificación anterior. Revisa los importes antes de importar.';preview.prepend(plan);}
       status.textContent=prepared.incoming.length?'Paquete comprobado. Los registros y los adjuntos disponibles se guardarán en el espacio privado de la empresa.':'Todos los gastos del paquete ya están registrados.';button.disabled=!prepared.incoming.length;
     }catch(error){prepared=null;status.textContent=error.message;ctx.toast(error.message,true)}finally{input.disabled=false;ctx.setBusy(false)}
   };
