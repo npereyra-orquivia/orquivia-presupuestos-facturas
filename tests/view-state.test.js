@@ -6,6 +6,13 @@ import { sessionShouldLock } from '../src/security.js';
 import { renderAccess } from '../src/auth-ui.js';
 
 const today = '2026-10-14', options = { today };
+test('planning pages survive refresh without putting fiscal amounts in the URL',()=>{
+  for(const [page,hash] of [['forecast','#prevision'],['scenarios','#escenarios']]){
+    const view={...defaultViewState(today),page};
+    assert.equal(viewRouteHash(view,options),hash);
+    assert.equal(applyViewRoute(defaultViewState(today),parseViewRoute({hash}),options).page,page);
+  }
+});
 const nicole = 'f85f320a-8b56-4e22-a929-900055a613f7', liliana = 'b5e82a35-b946-4d29-8f53-945eac02cccf';
 function storage() {
   const rows = new Map();

@@ -1,5 +1,6 @@
 import { isMailAddress } from './mail-address.js';
 import { documentPaymentTerms } from './payment-terms.js';
+import { planningValidationErrors } from './planning-state.js';
 
 const EUR = new Intl.NumberFormat('es-ES', { style: 'currency', currency: 'EUR', useGrouping: false });
 const QUOTE_STATUSES = new Set(['draft', 'ready', 'sent', 'accepted', 'rejected']);
@@ -357,6 +358,7 @@ export function validateWorkspace(workspace, today = todayISO()) {
     ancestors.delete(value);
   };
   visitJSON(workspace, 'workspace');
+  if (Object.hasOwn(workspace, 'planning')) errors.push(...planningValidationErrors(workspace.planning));
   const requireString = (value, path, required = false) => {
     if (value === undefined && !required) return;
     if (typeof value !== 'string' || (required && !value.trim())) error(path, required ? 'indica un texto no vacío.' : 'debe ser un texto.');

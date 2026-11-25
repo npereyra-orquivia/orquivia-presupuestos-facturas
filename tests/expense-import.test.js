@@ -2,11 +2,26 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import JSZip from 'jszip';
 import {prepareExpenseImport,executeExpenseImport} from '../src/expense-import.js';
+import {defaultPlanning} from '../src/planning.js';
 
 const org='00000000-0000-4000-8000-000000000001',id='00000000-0000-4000-8000-000000000002';
 const state=()=>({company:{name:'Orquivia'},clients:[],documents:[],payments:[],expenses:[]});
 const receiptBytes=new TextEncoder().encode('%PDF-1.7\nTest original receipt');
 const hash=async bytes=>Buffer.from(await crypto.subtle.digest('SHA-256',bytes)).toString('hex');
+test('a reviewed setup package validates and saves its plan atomically with the expenses',async()=>{
+  const planning=defaultPlanning({today:'2026-11-25'});planning.settings.people[0].name='Responsable';
+  const prepared=await prepareExpenseImport(await pendingPack(m=>m.planning=planning),state(),org);
+  const current=state();
+  await executeExpenseImport(prepared,{backend:{},commit:async change=>{change(current);return true;}});
+  assert.equal(current.expenses.length,1);assert.deepEqual(current.planning,planning);
+  await assert.rejects(prepareExpenseImport(await pendingPack(m=>{m.planning=planning;m.planning.settings.people[0].taxProfileKnown='yes';}),state(),org),/previsión/);
+});
+test('ordinary expense imports preserve the previously saved plans',async()=>{
+  const current=state();current.planning=defaultPlanning({today:'2026-11-25'});
+  const before=structuredClone(current.planning),prepared=await prepareExpenseImport(await pendingPack(),current,org);
+  await executeExpenseImport(prepared,{backend:{},commit:async change=>{change(current);return true;}});
+  assert.deepEqual(current.planning,before);
+});
 async function pack(change=()=>{},extra={}){
   const manifest={format:'orquivia-expenses-v1',expenses:[{expense:{id,supplier:'Proveedor',description:'Gasto original',date:'2026-03-01',base:100,vatAmount:21,total:121,paymentStatus:'paid',paidDate:'2026-03-02',vatDeductibleAmount:0,reviewNeeded:false},receipts:[{name:'Original.pdf',path:'files/original.pdf',sha256:await hash(receiptBytes)}]}]};
   change(manifest);const zip=new JSZip();zip.file('manifest.json',JSON.stringify(manifest));zip.file('files/original.pdf',receiptBytes);for(const [name,bytes] of Object.entries(extra))zip.file(name,bytes);return new File([await zip.generateAsync({type:'uint8array'})],'Reviewed.zip');

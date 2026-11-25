@@ -17,7 +17,7 @@ export const RECEIPT_FILE_TYPES = Object.freeze({
   rtf: 'application/rtf',
 });
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
-const HISTORY_ENTITY_TYPES = new Set(['document', 'expense', 'tax', 'client', 'payment', 'company']);
+const HISTORY_ENTITY_TYPES = new Set(['document', 'expense', 'tax', 'client', 'payment', 'company', 'planning']);
 
 /** Files are private originals; active web formats and extension disguises are rejected. */
 export async function validateReceiptFile(file) {
@@ -318,13 +318,14 @@ export function createBackend({ url, anonKey }) {
       version = null;
       return backendError('Otra sesión ha actualizado los datos. Exporta tus cambios y recarga antes de continuar.', 'VERSION_CONFLICT', error);
     }
-    const known = ['MEMBERSHIP_REQUIRED', 'MFA_REQUIRED', 'AUTH_CHANGED', 'ADMIN_REQUIRED', 'ISSUE_REQUIRED', 'ISSUED_DOCUMENT_IMMUTABLE', 'ISSUED_DOCUMENT_DELETE_DENIED', 'DOCUMENT_CLIENT_LOCKED', 'INVALID_RECEIPT_REFERENCE', 'INVALID_HISTORY_RECORD', 'INVALID_STATE'];
+    const known = ['MEMBERSHIP_REQUIRED', 'MFA_REQUIRED', 'AUTH_CHANGED', 'ADMIN_REQUIRED', 'WRITE_ACCESS_REQUIRED', 'ISSUE_REQUIRED', 'ISSUED_DOCUMENT_IMMUTABLE', 'ISSUED_DOCUMENT_DELETE_DENIED', 'DOCUMENT_CLIENT_LOCKED', 'INVALID_RECEIPT_REFERENCE', 'INVALID_HISTORY_RECORD', 'INVALID_STATE'];
     const code = known.find((name) => error?.message?.includes(name));
     if (code === 'MFA_REQUIRED' || code === 'MEMBERSHIP_REQUIRED') denyWorkspaceAccess(code);
     const messages = {
       MEMBERSHIP_REQUIRED: 'Esta cuenta no está autorizada en la empresa.', MFA_REQUIRED: 'Completa la verificación en dos pasos.',
       AUTH_CHANGED: 'La sesión cambió. Vuelve a abrir la empresa antes de continuar.',
       ADMIN_REQUIRED: 'Solo la administradora puede modificar los datos de empresa.',
+      WRITE_ACCESS_REQUIRED: 'Esta cuenta solo puede consultar los datos; no tiene permiso para guardar cambios.',
       ISSUE_REQUIRED: 'Emite el borrador para que el servidor asigne su número.',
       DOCUMENT_CLIENT_LOCKED: 'Este presupuesto ya tiene historial de envío o aceptación y conserva los datos originales del cliente.',
       ISSUED_DOCUMENT_IMMUTABLE: 'Los datos fiscales de un documento emitido no se pueden modificar.',
