@@ -1,6 +1,6 @@
 {
   "name": "orquivia-presupuestos",
-  "version": "1.10.0",
+  "version": "1.11.0",
   "private": true,
   "type": "module",
   "scripts": {
@@ -17,6 +17,7 @@
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.0.0",
+    "chart.js": "4.6.2",
     "jspdf": "^4.2.1",
     "jszip": "^3.10.1",
     "pdfjs-dist": "^6.4.299"

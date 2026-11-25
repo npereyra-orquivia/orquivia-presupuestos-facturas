@@ -106,6 +106,7 @@ export function prepareRestore(input, { today = todayISO(), maxBytes = MAX_BACKU
   return { company: state.company, clients: state.clients, documents: state.documents, payments: state.payments,
     ...(Object.hasOwn(state, 'expenses') ? { expenses: state.expenses } : {}),
     ...(Object.hasOwn(state, 'planning') ? { planning: state.planning } : {}),
+    ...(Object.hasOwn(state, 'planningExtensions') ? { planningExtensions: state.planningExtensions } : {}),
     ...(Object.hasOwn(state, 'taxRecords') ? { taxRecords: state.taxRecords } : {}) };
 }
 

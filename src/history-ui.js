@@ -28,6 +28,8 @@ const fields = {
   externalSalary: 'Sueldo de otro empleador', employeeSS: 'Seguridad Social personal', retaAnnual: 'Cuota RETA anual',
   otherGeneralIncome: 'Otras rentas generales', employmentExpense: 'Gasto general de trabajo', otherSavings: 'Otras rentas del ahorro',
   sharePercent: 'Participación social', isShareholder: 'Socia legal', employerContributionRate: 'Cotización empresarial', retaPeriod: 'Período de cuota RETA', retaYear: 'Año de control RETA',
+  operations: 'Operaciones simuladas', scenarioId: 'Escenario vinculado', taxRegion: 'Territorio fiscal', deductible: 'Gasto deducible',
+  employeeSSRate: 'Cotización de la persona', employerSSRate: 'Cotización empresarial de la operación', withholdingRate: 'Retención prevista', taxTreatmentConfirmed: 'Tratamiento fiscal confirmado',
 };
 export function historyFieldLabel(name) { return fields[name] || 'Otros datos del registro'; }
 export function captureOperationScope({ getMode, getIdentity, getBackend, getGeneration }) {
@@ -196,13 +198,13 @@ export function changedRecordFields(before, after) {
 const collections = { document: 'documents', expense: 'expenses', client: 'clients', payment: 'payments', tax: 'taxRecords' };
 export function compareWorkspaceEdits(base, draft, current, { documentId } = {}) {
   const rows = [];
-  function add(entityType, id, before, proposed, latest) {
+  function add(entityType, id, before, proposed, latest, explicitLabel) {
     const localFields = changedRecordFields(before, proposed);
     if (!localFields.length && !(entityType === 'document' && id === documentId)) return;
     const remoteFields = current ? changedRecordFields(before, latest) : [];
     const overlappingFields = localFields.filter(key => remoteFields.includes(key) && !equal(proposed?.[key], latest?.[key]));
     rows.push({ entityType, entityId: id, before, proposed, latest, localFields, remoteFields, overlappingFields,
-      label: proposed?.number || proposed?.description || proposed?.name || proposed?.label || proposed?.title || before?.number || before?.description || before?.label || (entityType === 'planning' && id === 'settings' ? 'Ajustes y perfiles fiscales' : recordType[entityType]) });
+      label: explicitLabel || proposed?.number || proposed?.description || proposed?.name || proposed?.label || proposed?.title || before?.number || before?.description || before?.label || (entityType === 'planning' && id === 'settings' ? 'Ajustes y perfiles fiscales' : recordType[entityType]) });
   }
   for (const [entityType, key] of Object.entries(collections)) {
     const originals = new Map((base[key] || []).map(record => [record.id, record]));
@@ -218,6 +220,16 @@ export function compareWorkspaceEdits(base, draft, current, { documentId } = {})
     const latest = new Map((current?.planning?.[key] || []).map(record => [record.id,record]));
     for (const id of new Set([...originals.keys(),...proposed.keys()])) add('planning',`${key === 'items' ? 'forecast' : 'scenario'}:${id}`,originals.get(id),proposed.get(id),latest.get(id));
   }
+  for (const [key,identity,prefix] of [['scenarios','scenarioId','distribution'],['people','personId','tax-profile']]) {
+    const originals=new Map((base.planningExtensions?.[key]||[]).map(record=>[record[identity],record]));
+    const proposed=new Map((draft.planningExtensions?.[key]||[]).map(record=>[record[identity],record]));
+    const latest=new Map((current?.planningExtensions?.[key]||[]).map(record=>[record[identity],record]));
+    for(const id of new Set([...originals.keys(),...proposed.keys()])) {
+      const source=key==='scenarios'?[...(draft.planning?.scenarios||[]),...(base.planning?.scenarios||[])]:[...(draft.planning?.settings.people||[]),...(base.planning?.settings.people||[])];
+      const name=source.find(record=>record.id===id)?.name||(key==='scenarios'?'Escenario':'Persona');
+      add('planning',`${prefix}:${id}`,originals.get(id),proposed.get(id),latest.get(id),`${key==='scenarios'?'Operaciones':'Perfil fiscal'} · ${name}`);
+    }
+  }
   return rows;
 }
 function comparisonValue(value, key, record, entityType) {
@@ -230,6 +242,7 @@ function comparisonValue(value, key, record, entityType) {
   if (key === 'items' && Array.isArray(value)) text = value.map(item => `${item.description || 'Concepto'} · ${item.quantity} × ${money(item.price)}${item.detail ? '\n' + item.detail : ''}`).join('\n\n');
   else if (entityType === 'planning' && key === 'people' && Array.isArray(value)) text = value.map(person => `${person.name || person.personId || person.id}: `+Object.entries(person).filter(([name]) => !['id','name','personId'].includes(name) && Object.hasOwn(fields,name)).map(([name,item])=>`${historyFieldLabel(name)}: ${typeof item === 'boolean' ? item ? 'Sí' : 'No' : item}`).join(' · ')).join('\n');
   else if (entityType === 'planning' && key === 'collectionDates' && typeof value === 'object') text = Object.entries(value).map(([id,date])=>`${id}: ${date}`).join('\n') || 'Sin fechas modificadas';
+  else if (entityType === 'planning' && key === 'operations' && Array.isArray(value)) text=value.map(op=>`${op.label||'Operación'}: `+Object.entries(op).filter(([name])=>!['id','label'].includes(name)&&Object.hasOwn(fields,name)).map(([name,item])=>`${historyFieldLabel(name)}: ${item===null?'Sin indicar':typeof item==='boolean'?item?'Sí':'No':name==='amount'&&typeof item==='number'?money(item):typeof item==='object'?'Datos modificados':item}`).join(' · ')).join('\n\n')||'Sin operaciones';
   else if (key === 'attachments' && Array.isArray(value)) text = value.map(file => `${file.name || 'Justificante'}${file.size ? ' · ' + Math.ceil(file.size / 1024) + ' KB' : ''}`).join('\n') || 'Sin justificantes';
   else if (key === 'cashMovements' && Array.isArray(value)) text = value.map(payment => `${payment.date || 'Sin fecha'} · ${money(payment.amount)}`).join('\n') || 'Sin pagos';
   else if (['total', 'base', 'vatAmount', 'vatDeductibleAmount', 'additionalAmount', 'cashAmount', 'amount', 'openingBalance','legalReservePending','minimumCash','cashBalanceOverride','profitOverride','amountGross','workGross','dividendGross'].includes(key) && typeof value === 'number') text = money(value);
@@ -237,7 +250,8 @@ function comparisonValue(value, key, record, entityType) {
   else if (key === 'paymentStatus') text = { paid: 'Pagado', pending: 'Pendiente', 'no-payment': 'Sin ingreso', unconfirmed: 'Pago por confirmar', included: 'Incluido en pago al gestor' }[value] || String(value);
   else if (key === 'status') text = { draft: 'Borrador', issued: 'Emitida', ready: 'Preparado', sent: 'Enviado', accepted: 'Aceptado', rejected: 'Rechazado' }[value] || String(value);
   else if (key === 'deliveryStatus') text = { ready: 'Preparada', sent: 'Enviada' }[value] || String(value);
-  else if (key === 'kind') text = { quote: 'Presupuesto', invoice: 'Factura', credit: 'Abono / devolución' }[value] || String(value);
+  else if (key === 'kind') text = { quote: 'Presupuesto', invoice: 'Factura', credit: 'Abono / devolución', salary: 'Sueldo', administrator: 'Administración', professional: 'Honorarios', dividend: 'Dividendo', expense: 'Gasto simulado', 'legacy-work': 'Retribución anterior' }[value] || String(value);
+  else if (key === 'taxRegion') text = { catalonia: 'Cataluña', other: 'Otro territorio' }[value] || String(value);
   else if (typeof value === 'object') text = Object.entries(value).filter(([name]) => Object.hasOwn(fields, name)).map(([name, item]) => `${historyFieldLabel(name)}: ${typeof item === 'object' ? 'Datos del registro' : item ?? 'Vacío'}`).join('\n') || 'Datos del registro';
   else text = String(value);
   return esc(text.length > 1800 ? text.slice(0, 1800) + '…' : text);
