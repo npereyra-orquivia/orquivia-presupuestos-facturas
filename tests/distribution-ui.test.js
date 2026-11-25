@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { distributionPage, distributionAccessibleTable, distributionChartConfig } from '../src/distribution-ui.js';
+import { distributionPage, distributionAccessibleTable, distributionChartConfig, distributionChartBounds, distributionAxisLabel } from '../src/distribution-ui.js';
 import { defaultPlanning, planningProjection } from '../src/planning.js';
 import { newDistributionOperation, aggregateDistributionPeople, simulateDistribution } from '../src/distribution.js';
 
@@ -94,4 +94,17 @@ test('the default page does not claim an over-budget distribution when cash is s
   assert(!html.includes('El reparto supera el presupuesto disponible'));
   const ids=[...html.matchAll(/\bid="([^"]+)"/g)].map(match=>match[1]);
   assert.equal(new Set(ids).size,ids.length);
+});
+
+test('comparison axes use a shared round scale and fixed label space',()=>{
+  const bounds=distributionChartBounds([{net:15300,tax:2700,known:true},{net:4200,tax:1800,known:true},{net:2430,tax:570,known:true}]);
+  assert.deepEqual(bounds,{max:20000,min:-5000,step:5000});
+  const left=distributionChartConfig({bars:[{label:'Empresa'}]},bounds);
+  const right=distributionChartConfig({bars:[{label:'Empresa'},{label:'Retribución de administradora · Persona de prueba'}]},bounds);
+  const a={height:0},b={height:0};left.options.scales.x.afterFit(a);right.options.scales.x.afterFit(b);
+  assert.equal(a.height,b.height);assert.equal(a.height,52);
+  assert.equal(left.options.scales.y.min,right.options.scales.y.min);
+  assert.equal(left.options.scales.y.max,right.options.scales.y.max);
+  assert.deepEqual(distributionAxisLabel({kind:'administrator',label:'Retribución de administradora · Persona'}),['Administradora','Persona']);
+  assert(distributionAxisLabel({label:'Una descripción de la operación suficientemente larga para necesitar recorte'}).every(line=>line.length<=19));
 });

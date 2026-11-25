@@ -6,3 +6,7 @@
 @media(prefers-reduced-motion:reduce){.distribution-page *{scroll-behavior:auto!important}}
 
 .dist-chart-legend i.is-loss{background:#bb7d87}
+.distribution-page .dist-graph-column{justify-content:flex-start;align-self:start}.distribution-page .dist-editor-layout{align-items:start}
+.distribution-page .dist-graph-column{width:100%;max-width:100%}
+@media(max-width:850px){.distribution-page .dist-panel.is-base .dist-chart-box,.distribution-page .dist-panel.is-base .dist-chart-box canvas{height:350px;max-height:350px}}
+@media(max-width:550px){.distribution-page .dist-panel.is-base .dist-chart-box,.distribution-page .dist-panel.is-base .dist-chart-box canvas{height:325px;max-height:325px}}

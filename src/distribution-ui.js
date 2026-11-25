@@ -91,6 +91,22 @@ export function distributionPage(state,{today=todayISO(),session={draft:null,sel
   }catch(error){return `<div class="distribution-page"><h1>Distribución del beneficio</h1><div class="dist-info is-error">${esc(error.message)}</div></div>`;}
 }
 
+export function distributionChartBounds(bars){
+  const positive=Math.max(1,...bars.map(bar=>bar.known===false?bar.positive??bar.unknownGross??bar.gross??0:bar.net||0));
+  const negative=Math.max(1,...bars.map(bar=>(bar.tax||0)+(bar.socialCosts||0)+(bar.loss||0)));
+  const raw=Math.max(positive,negative)/5,power=10**Math.floor(Math.log10(raw));
+  const step=([1,2,2.5,5,10].find(value=>value>=raw/power)||10)*power;
+  return {max:Math.ceil(positive*1.12/step)*step,min:-Math.ceil(Math.max(positive*.12,negative*1.15)/step)*step,step};
+}
+
+export function distributionAxisLabel(bar){
+  let text=String(bar.label||'');
+  const prefix=KINDS[bar.kind];
+  if(prefix&&text.startsWith(prefix+' · '))return [({administrator:'Administradora',professional:'Profesional'}[bar.kind]||prefix),text.slice(prefix.length+3).slice(0,19)];
+  const words=text.split(/\s+/),first=[];while(words.length&&(first.join(' ').length+words[0].length<19||!first.length))first.push(words.shift());
+  const rest=words.join(' ');return [first.join(' ').slice(0,19),rest.length>19?rest.slice(0,18)+'…':rest];
+}
+
 const valuePlugin={id:'orquiviaDistributionValues',afterDatasetsDraw(chart){
   const {ctx,chartArea,scales}=chart,bars=chart.$distributionBars||[];if(!chartArea||!scales.y)return;
   ctx.save();ctx.textAlign='center';ctx.font='600 13px "DM Sans", system-ui, sans-serif';
@@ -101,8 +117,8 @@ const valuePlugin={id:'orquiviaDistributionValues',afterDatasetsDraw(chart){
     if(bar.loss>0){const bottom=scales.y.getPixelForValue(-bar.loss);ctx.fillStyle='#a35e68';ctx.fillText('Pérdida '+shortMoney(bar.loss),point.x,Math.min(chartArea.bottom-6,bottom+15));return;}
     ctx.fillStyle='#29213d';ctx.fillText((bar.employerSS>0?'Coste SL ':'')+shortMoney(bar.employerSS>0?bar.companyCost:bar.gross||0),point.x,Math.max(chartArea.top+12,top-13));
     const positiveHeight=Math.abs(zero-top);
-    if(positiveHeight>42){ctx.fillStyle=bar.known===false?'#756a89':'#4f416e';ctx.font='500 13px "DM Sans", system-ui, sans-serif';ctx.fillText(bar.known===false?'Por confirmar':shortMoney(bar.net||0),point.x,top+positiveHeight/2+4);}
-    if(bar.known!==false&&bar.tax>0){const taxBottom=scales.y.getPixelForValue(-bar.tax),height=Math.abs(taxBottom-zero);if(height>28){ctx.fillStyle='#ffffff';ctx.fillText(shortMoney(bar.tax),point.x,zero+height/2+4);}}
+    if(positiveHeight>24){ctx.fillStyle=bar.known===false?'#756a89':'#4f416e';ctx.font='500 13px "DM Sans", system-ui, sans-serif';ctx.fillText(bar.known===false?'Por confirmar':shortMoney(bar.net||0),point.x,top+positiveHeight/2+4);}
+    if(bar.known!==false&&bar.tax>0){const taxBottom=scales.y.getPixelForValue(-bar.tax),height=Math.abs(taxBottom-zero);if(height>22){ctx.fillStyle='#ffffff';ctx.fillText(shortMoney(bar.tax),point.x,zero+height/2+4);}else{ctx.fillStyle='#51449a';const bottom=scales.y.getPixelForValue(-bar.tax-(bar.socialCosts||0));ctx.fillText(shortMoney(bar.tax),point.x,Math.min(chartArea.bottom-5,bottom+14));}}
     ctx.font='600 13px "DM Sans", system-ui, sans-serif';
   });ctx.restore();
 }};
@@ -115,7 +131,7 @@ export function distributionChartConfig(result,bounds){
     {label:'Cotizaciones',data:bars.map(bar=>bar.socialCosts?-bar.socialCosts:0),backgroundColor:'#8884aa',borderRadius:3,borderSkipped:false,stack:'distribution',maxBarThickness:115},
     {label:'Bruto pendiente de IRPF',data:bars.map(bar=>bar.known===false?bar.positive??bar.unknownGross??bar.gross??0:0),backgroundColor:'#d9d6e5',borderRadius:5,borderSkipped:false,stack:'distribution',maxBarThickness:115},
     {label:'Pérdida de la empresa',data:bars.map(bar=>bar.loss?-bar.loss:0),backgroundColor:'#bb7d87',borderRadius:4,borderSkipped:false,stack:'distribution',maxBarThickness:115},
-  ]},plugins:[valuePlugin],options:{responsive:true,maintainAspectRatio:false,animation:false,layout:{padding:{top:23,right:10,bottom:0,left:0}},interaction:{mode:'index',intersect:false},plugins:{legend:{display:false},tooltip:{filter:item=>item.raw!==0,callbacks:{title:items=>bars[items[0]?.dataIndex]?.label||'',label:item=>{const bar=bars[item.dataIndex];return `${item.dataset.label}: ${money(Math.abs(item.raw))}`;},afterBody:items=>{const bar=bars[items[0]?.dataIndex];return bar?[`Bruto / base: ${amount(bar.gross)}`,`Tipo efectivo: ${percent(bar.effectiveRate)}`,bar.kind==='company'?`Base de Sociedades: ${amount(bar.taxableBase)} · tipo ${percent(bar.statutoryRate)}`:'',bar.employerSS>0?`Cotización empresarial: ${amount(bar.employerSS)}`:'',bar.employeeSS>0?`Cotización personal: ${amount(bar.employeeSS)}`:'',bar.vat?`IVA separado de caja: ${amount(bar.vat)}`:'',bar.transferNet!==null&&bar.transferNet!==undefined?`Transferencia estimada: ${amount(bar.transferNet)}`:''].filter(Boolean):[];}}}},scales:{x:{stacked:true,grid:{display:false},border:{color:'#c5bfda'},ticks:{color:'#777086',font:{size:12},maxRotation:0,minRotation:0,callback(value){const text=String(this.getLabelForValue(value));if(text.length<21)return text;const middle=Math.max(text.lastIndexOf(' ',Math.floor(text.length/2)+5),text.indexOf(' '));return middle>0?[text.slice(0,middle),text.slice(middle+1)]:text;}}},y:{stacked:true,min:bounds.min,max:bounds.max,border:{display:false},grid:{color:context=>context.tick.value===0?'#b8b0cf':'#efedf5',lineWidth:context=>context.tick.value===0?1.3:1},ticks:{color:'#858093',font:{size:12},maxTicksLimit:7,callback:value=>shortMoney(value)}}}}};
+  ]},plugins:[valuePlugin],options:{responsive:true,maintainAspectRatio:false,animation:false,layout:{padding:{top:23,right:10,bottom:0,left:0}},interaction:{mode:'index',intersect:false},plugins:{legend:{display:false},tooltip:{filter:item=>item.raw!==0,callbacks:{title:items=>bars[items[0]?.dataIndex]?.label||'',label:item=>{const bar=bars[item.dataIndex];return `${item.dataset.label}: ${money(Math.abs(item.raw))}`;},afterBody:items=>{const bar=bars[items[0]?.dataIndex];return bar?[`Bruto / base: ${amount(bar.gross)}`,`Tipo efectivo: ${percent(bar.effectiveRate)}`,bar.kind==='company'?`Base de Sociedades: ${amount(bar.taxableBase)} · tipo ${percent(bar.statutoryRate)}`:'',bar.employerSS>0?`Cotización empresarial: ${amount(bar.employerSS)}`:'',bar.employeeSS>0?`Cotización personal: ${amount(bar.employeeSS)}`:'',bar.vat?`IVA separado de caja: ${amount(bar.vat)}`:'',bar.transferNet!==null&&bar.transferNet!==undefined?`Transferencia estimada: ${amount(bar.transferNet)}`:''].filter(Boolean):[];}}}},scales:{x:{stacked:true,afterFit:scale=>{scale.height=52;},grid:{display:false},border:{color:'#c5bfda'},ticks:{color:'#777086',font:{size:12},maxRotation:0,minRotation:0,callback(value){return distributionAxisLabel(bars[value]||{label:this.getLabelForValue(value)});}}},y:{stacked:true,min:bounds.min,max:bounds.max,border:{display:false},grid:{color:context=>context.tick.value===0?'#b8b0cf':'#efedf5',lineWidth:context=>context.tick.value===0?1.3:1},ticks:{color:'#858093',font:{size:12},maxTicksLimit:7,stepSize:bounds.step,callback:value=>shortMoney(value)}}}}};
 }
 
 export function bindDistribution(root,{getState,commit,toast,today=todayISO(),session={draft:null,selectedId:''}}){
@@ -135,11 +151,11 @@ export function bindDistribution(root,{getState,commit,toast,today=todayISO(),se
   const getReference=()=>{const saved=p.scenarios.find(row=>row.id===session.compareId);return {name:saved?.name||'No hacer nada',result:simulation(projection,saved?{...saved,operations:scenarioOperations(getState(),saved,p.settings)}:zeroScenario(p),p,ext)};};
   const enhanceNew=node=>{controlDisposers.push(enhanceControls(node));};
   const refreshCharts=()=>{
-    const reference=getReference(),current=getCurrent(),all=[...(reference.result.bars||[]),...(current.bars||[])],maxPositive=Math.max(1,...all.map(bar=>bar.known===false?bar.positive??bar.unknownGross??bar.gross??0:bar.net||0)),maxNegative=Math.max(1,...all.map(bar=>(bar.tax||0)+(bar.socialCosts||0)+(bar.loss||0)));
-    const bounds={max:maxPositive*1.17,min:-Math.max(maxPositive*.13,maxNegative*1.35)};
+    const reference=getReference(),current=getCurrent(),all=[...(reference.result.bars||[]),...(current.bars||[])];
+    const bounds=distributionChartBounds(all);
     const data=[reference.result,current];
     if(!charts.length){for(const [index,id] of ['distribution-base-chart','distribution-editable-chart'].entries()){const canvas=scope.querySelector('#'+id);if(canvas){try{const chart=new Chart(canvas,distributionChartConfig(data[index],bounds));chart.$distributionBars=data[index].bars||[];charts[index]=chart;chart.update('none');}catch(error){canvas.parentElement.innerHTML='<div class="dist-chart-empty">Las cifras están disponibles en el detalle accesible del gráfico.</div>';}}}}
-    else charts.forEach((chart,index)=>{if(!chart)return;const config=distributionChartConfig(data[index],bounds);chart.data=config.data;chart.options.scales.y.min=bounds.min;chart.options.scales.y.max=bounds.max;chart.$distributionBars=data[index].bars||[];chart.update('none');});
+    else charts.forEach((chart,index)=>{if(!chart)return;const config=distributionChartConfig(data[index],bounds);chart.data=config.data;chart.options.scales.x.ticks=config.options.scales.x.ticks;chart.options.plugins.tooltip=config.options.plugins.tooltip;chart.options.scales.y.min=bounds.min;chart.options.scales.y.max=bounds.max;chart.options.scales.y.ticks.stepSize=bounds.step;chart.$distributionBars=data[index].bars||[];chart.update('none');});
     const referenceTitle=scope.querySelector('.dist-panel.is-base h2');if(referenceTitle)referenceTitle.textContent=session.compareId?'Referencia: '+reference.name:'Escenario: No hacer nada';
     const referenceCopy=scope.querySelector('.dist-panel.is-base .dist-panel-heading p');if(referenceCopy)referenceCopy.textContent=session.compareId?'Comparas con este escenario guardado.':'Mantienes el beneficio en la empresa.';
     scope.querySelector('[data-dist-reference-table]').innerHTML=distributionAccessibleTable(reference.result.bars,'distribution-base-chart-data');
