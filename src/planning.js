@@ -94,9 +94,15 @@ function pendingAmount(report) {
 }
 function occurrenceLinked(occurrence, recordById) {
   return (occurrence.linkedRecordIds || []).some(id => {
-    const record = recordById.get(id); if (!record) return false;
+    const matches = (recordById.get(id) || []).filter(({ type }) => occurrence.kind === 'income'
+      ? ['invoice', 'quote'].includes(type) : ['expense', 'tax'].includes(type));
+    // IDs from different record collections are not interchangeable.
+    if (matches.length !== 1) return false;
+    const record = matches[0].record;
     if (occurrence.recurrence === 'once') return true;
-    const date = record.paidDate || record.date; if (!validDate(date)) return false;
+    // The document identifies its period; a late payment must not consume the
+    // following month's forecast. Its bank date is handled separately in cash.
+    const date = record.date; if (!validDate(date)) return false;
     if (occurrence.recurrence === 'yearly') return date.slice(0, 4) === occurrence.date.slice(0, 4);
     if (occurrence.recurrence === 'quarterly') return date.slice(0, 4) === occurrence.date.slice(0, 4) && Math.floor((Number(date.slice(5, 7)) - 1) / 3) === Math.floor((Number(occurrence.date.slice(5, 7)) - 1) / 3);
     return date.slice(0, 7) === occurrence.date.slice(0, 7);
@@ -168,7 +174,20 @@ export function planningProjection(state, input, { today = todayISO() } = {}) {
     if (record.paymentStatus === 'paid') for (const movement of taxCashMovements(record)) addFlow(`tax:${record.id}`, movement.date, `Modelo ${record.model || ''}`, -cents(movement.amount), 'recorded-tax');
     else if (record.paymentStatus === 'pending') addFlow(`tax:${record.id}`, record.date <= asOf ? addDays(asOf, 1) : record.date, `Modelo ${record.model || ''} pendiente`, -cents(record.amount), 'payable-tax');
   }
-  const recordById = new Map([...expenses, ...documents, ...taxRecords].map(r => [r.id, r]));
+  const recordById = new Map(), linkedRecords = [
+    ...expenses.filter(record => ['paid', 'pending'].includes(record.paymentStatus)).map(record => ({ type: 'expense', record })),
+    ...taxRecords.filter(record => ['paid', 'pending'].includes(record.paymentStatus) || record.paymentStatus === 'included'
+      && expenses.some(expense => expense.id === record.linkedExpenseId && ['paid', 'pending'].includes(expense.paymentStatus))).map(record => ({ type: 'tax', record })),
+    ...documents.filter(record => record.kind === 'invoice' && ISSUED.has(record.status)).map(record => ({ type: 'invoice', record })),
+    ...documents.filter(record => record.kind === 'quote' && record.status === 'accepted').map(record => ({ type: 'quote', record })),
+  ];
+  for (const entry of linkedRecords) {
+    const record = entry.type === 'quote' ? documents.find(doc => doc.kind === 'invoice' && ISSUED.has(doc.status) && doc.quoteId === entry.record.id)
+      || { ...entry.record, date: settings.collectionDates[entry.record.id] || entry.record.date }
+      : entry.type === 'tax' && entry.record.paymentStatus === 'included' ? expenses.find(expense => expense.id === entry.record.linkedExpenseId) : entry.record;
+    if (!recordById.has(entry.record.id)) recordById.set(entry.record.id, []);
+    recordById.get(entry.record.id).push({ type: entry.type, record });
+  }
   const occurrences = horizon > asOf ? expandForecast(planning.items, { from: addDays(asOf, 1), to: horizon }).filter(row => !occurrenceLinked(row, recordById)) : [];
   let forecastCashIn = ZERO, forecastCashOut = ZERO, forecastProfitCost = ZERO, forecastProfitIncome = ZERO, forecastInputVAT = ZERO, forecastOutputVAT = ZERO;
   for (const row of occurrences) {
@@ -216,6 +235,8 @@ export function planningProjection(state, input, { today = todayISO() } = {}) {
   return { settings, asOf, horizon, taxYear, baseProfit: euros(baseProfit), profitBeforeForecast: euros(currentProfit), cashNow, cashAtHorizon,
     forecastCashIn: euros(forecastCashIn), forecastCashOut: euros(forecastCashOut), forecastProfitCost: euros(forecastProfitCost), forecastProfitIncome: euros(forecastProfitIncome),
     pendingCosts: euros(pending), vatReserve: euros(vatReserve), receivables, occurrences, flows: flows.sort((a, b) => a.date.localeCompare(b.date)), monthly,
+    vatCalculation: { from: vatFrom, to: futureTo, outputVAT: euros(outputVAT), inputVAT: euros(inputVAT), priorVATCredit: euros(priorVATCredit),
+      settledVAT: euros(settledVAT), forecastOutputVAT: euros(forecastOutputVAT), forecastInputVAT: euros(forecastInputVAT) },
     corporateTaxExpectedMonth: `${taxYear + 1}-07`, warnings: [...new Set(warnings)], issues, source, sources: planningTaxRules.sources };
 }
 
